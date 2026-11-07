@@ -1,7 +1,7 @@
 ---
 title: "Reliable compact right-docked Reference Tabs"
 date: "2026-08-11"
-last_updated: 2026-09-10
+last_updated: 2026-11-07
 category: "ui-bugs"
 module: "reference_workspace"
 problem_type: "ui_bug"
@@ -64,7 +64,7 @@ Visual symptoms arose from a different boundary. Tab selectors, metadata, and ac
 
 ### Restore exact position first, then the immutable target
 
-`restoreReferenceLocation` tries `tab.settledLocation`. If the viewer rejects it, the coordinator applies `tab.originalTarget` using `reference-fit-width`. It resets manual-scroll intent around each programmatic application, checks operation currency after each await, and captures the resulting location only after successful application (`apps/web/src/review/navigation-coordinator.ts`).
+`restoreReferenceLocation` tries `tab.settledLocation`. If the viewer rejects it, the coordinator applies `tab.originalTarget` using `reference-fit-width`. It checks operation currency after each await and captures the resulting location only after successful application (`apps/web/src/review/navigation-coordinator.ts`).
 
 This fallback preserves the precise saved pan and zoom when possible without making them the only route to the document. The caller commits a successful switch only after receiving a settled location; otherwise it completes the failure path and reports unavailability (`apps/web/src/review/navigation-coordinator.ts`). The focused unit test forces saved-location rejection and checks canonical-target recovery (`apps/web/test/navigation-coordinator.test.ts`).
 
@@ -76,7 +76,9 @@ Allow the selector to shrink with `min-width: 0`, and retain hidden overflow, el
 
 ### Keep actions compact independently of content
 
-Current Reference actions use explicit 26 px width, height, minimums, and flex basis with rounded transparent surfaces. Coarse pointers receive 44 px geometry (`apps/web/src/app/neutral-chrome.css`). The older 31 px measurement is not current acceptance guidance.
+Current Reference actions use 26 px targets, with 44 px targets for coarse pointers (`apps/web/src/app/neutral-workspace-navigation.css:296`, `apps/web/src/app/neutral-workspace-interactions.css:228`).
+
+The conditional Return action in [PR #168](https://github.com/brad-ross/placekeeper/pull/168) adds a width constraint. An invisible flex item still takes up space, so opacity alone cannot keep a content-fitting tab steady when Return becomes available. Position Return outside the row's layout flow. On fine pointers the title yields one action width when hover or keyboard-visible focus reveals the button, and uses the full space when it is hidden. Coarse-pointer horizontal tabs reserve room for all three touch targets up to the available width (`apps/web/src/app/neutral-workspace-navigation.css:311`, `apps/web/src/app/neutral-workspace-interactions.css:374`).
 
 Search retains its separate anti-stretch rule: center the action group in the result grid and assign explicit compact height to direct, Copy Link, and overflow controls (`apps/web/src/app/review-layout-annotations.css`). Preserve this relationship when tokens or visual styling change. A taller card should not redefine action height.
 
@@ -89,6 +91,8 @@ The sizing fix uses the same separation. Segments own bounded content width, tex
 ## Prevention
 
 Keep one-click switching assertions and the rejected-location fallback unit test. Measure the rendered active orientation, including selector shrinkage and compact/touch actions, after rebuilding installed assets. Current production coverage measures 26 px actions and successful switching (`test/acceptance/production-flow.spec.ts`). Its two fixture tabs reach the 184 px cap (`test/acceptance/production-flow.spec.ts`); that does not establish a universal equal-width requirement for short titles. The browser regression separately requires full-rail vertical rows and short-title shrinking with the 112 px minimum in both horizontal layouts (`test/acceptance/workspace-row-interactions.spec.ts`). The earlier test mistakenly encoded shrinking for the vertical layout; measuring the rail relationship prevents that regression.
+
+For conditional actions, compare the same tab with and without the action in the DOM, then compare its geometry before and after reveal. The regression checks that the tab width stays steady in vertical and horizontal layouts while the title gets narrower on hover. A check that starts with the action already mounted would miss width added by mounting it (`test/acceptance/workspace-row-interactions.spec.ts:396`).
 
 When changing sizing, inspect late neutral overrides and verify both direct and overflow action presentations. When changing navigation, guard each awaited operation and preserve both exact viewport state and the canonical target. Review intentional screenshots only after behavioral and geometry evidence is coherent.
 

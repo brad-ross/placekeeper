@@ -1,7 +1,7 @@
 ---
 title: Return-to-origin navigation for stateful PDF Reference Tabs
 date: 2026-08-18
-last_updated: 2026-09-10
+last_updated: 2026-11-07
 category: architecture-patterns
 module: PDF reference navigation and viewer framing
 problem_type: architecture_pattern
@@ -9,10 +9,10 @@ component: frontend_stimulus
 severity: medium
 applies_when:
   - "A Reference Tab must retain an immutable semantic origin while its settled viewport changes through exploration"
-  - "A return control should appear only after manual scrolling moves the semantic target outside the usable PDF viewport"
+  - "A return control should appear when scrolling moves the semantic target outside the usable PDF viewport"
   - "Reference navigation must remain isolated from the Main Reading Thread and browser URL history"
   - "Asynchronous return work can be superseded by tab switches, document replacement, or newer navigation"
-  - "A compact icon-only viewer overlay must remain discoverable to assistive technology and pointer users"
+  - "A compact icon-only tab action must remain discoverable to assistive technology and pointer users"
 related_components:
   - "NavigationCoordinator"
   - "ReferenceWorkspace"
@@ -25,9 +25,9 @@ tags:
   - "pdf-navigation"
   - "navigation-coordinator"
   - "semantic-visibility"
-  - "manual-scroll-intent"
+  - "viewport-scroll"
   - "main-history-isolation"
-  - "accessible-overlays"
+  - "accessible-controls"
 ---
 
 # Return-to-origin navigation for stateful PDF Reference Tabs
@@ -36,9 +36,9 @@ tags:
 
 A Reference Tab has two legitimate meanings of “where it belongs.” Its origin is the semantic PDF target that created the tab, while its settled view is the latest physical location at which the viewer successfully landed. The model keeps these meanings separate as immutable `originalTarget` and mutable `settledLocation` (`apps/web/src/review/reference-navigation-state.ts`). Opening a tab initializes both; later refreshes replace only `settledLocation` (`apps/web/src/review/reference-navigation-state.ts`).
 
-That split supports a local return-to-origin affordance without introducing another navigation stack. The implementation merged in [PR #39](https://github.com/brad-ross/placekeeper/pull/39) on 2026-08-18. The durable lesson is broader: secondary-viewer recovery should restore a semantic destination through the application's navigation authority while keeping transient visibility, input intent, and focus state out of durable routing.
+That split supports a local return-to-origin affordance without introducing another navigation stack. The implementation merged in [PR #39](https://github.com/brad-ross/placekeeper/pull/39) on 2026-08-18. The durable lesson is broader: secondary-viewer recovery should restore a semantic destination through the application's navigation authority while keeping transient visibility and focus state out of durable routing.
 
-Cross-engine iteration showed that timing adjustments and synthetic viewport movement were not enough to prove user-caused scrolling. Native Reference scroll observation paired with real wheel input made the causal contract testable instead (session history).
+Before the fix in [PR #168](https://github.com/brad-ross/placekeeper/pull/168), a wheel scroll could expose Return to reference, yet a second scroll after returning could move the highlight fully out of view without exposing the action. The old observer required a preceding wheel, key, or classified pointer event. Extending the input window helped continued scrolling after a recognized gesture, but it could not account for viewport movement with no matching event.
 
 ## Guidance
 
@@ -66,13 +66,13 @@ Use three outcomes:
 
 The adapter resolves the author target before transforming its anchor into client space and applying the configured tolerance (`apps/web/src/pdf/viewer-navigation-adapter.ts`). An unmounted valid page is `outside`, not invalid, which is essential for virtualized PDFs.
 
-### Establish drift only from Reference-scoped manual intent
+### Observe the Reference viewport and guard known navigation
 
-A scroll notification does not prove the user scrolled. Opens, restores, zoom, layout reflow, and target application can all move the viewport. Arm a Reference-only observer from inputs capable of scrolling that portaled viewport, capture the baseline position, and consume the intent only when the Reference document emits its next scroll notification (`apps/web/src/pdf/reference-manual-scroll.ts`). Read the committed position on the next frame and publish only when it changed (`apps/web/src/pdf/reference-manual-scroll.ts`).
+The affordance answers a geometry question. Listen to the Reference viewport's own scroll event and coalesce checks to the next animation frame so virtualized pages can mount before measurement. Cancel queued work when the tab, document generation, or portal host changes. Keep the callback separate from Main's location stream to preserve URL and history ownership (`apps/web/src/pdf/ReferencePdfViewport.tsx:225`, `apps/web/src/pdf/ReferencePdfViewport.tsx:261`).
 
-Keep that observation channel separate from the generic viewer interaction stream. Generic `scroll` events refresh the Main location, while Reference manual scrolling calls the coordinator through a dedicated callback (`apps/web/src/app/ProductionReviewApp.tsx`). Forwarding Reference scrolling through the Main channel would violate URL and history ownership.
+Use the coordinator's existing navigation guards to ignore observations during an open, restore, switch, or adapter navigation. Pending return state is guarded separately. A layout-only refresh can recheck an established action. Scrolling can establish a new one (`apps/web/src/review/navigation-coordinator.ts:977`, `apps/web/src/review/navigation-coordinator.ts:2349`).
 
-Programmatic Reference movement clears manual intent before and after target application (`apps/web/src/review/navigation-coordinator.ts`). `clear()` must also invalidate callbacks already scheduled for a later frame; the observer uses a separate cancellation generation so disposed-viewer observations cannot publish into a replacement lifecycle (`apps/web/src/pdf/reference-manual-scroll.ts`).
+Prefer the bounds of the matching Destination Band. The last highlighted line can leave the viewport while the target's page is still visible. When band geometry is unavailable, ask the adapter for target visibility with the same Reference Fit Width policy used by return (`apps/web/src/review/navigation-coordinator.ts:2365`).
 
 ### Guard asynchronous completion and define focus outcomes
 
@@ -88,7 +88,7 @@ This partition prevents three forms of corruption:
 
 1. Exploration cannot overwrite the canonical destination because only `settledLocation` changes.
 2. Reference recovery cannot create a Main Meaningful Jump or mutate browser history because the coordinator commits only Reference state.
-3. Reflow and programmatic restoration cannot manufacture a return control because availability requires both scoped manual movement and semantic target visibility.
+3. Known navigation transactions are guarded while they move the viewport. Ordinary scrolling can update availability without having to classify the input that moved it.
 
 It also makes lifecycle behavior explicit. A tab can remain selected while its adapter changes, a document can be replaced while layout settles, and a deferred scroll observation can outlive the viewer that produced it. Each boundary needs its own cancellation evidence.
 
@@ -102,13 +102,9 @@ Use a physical scroll bookmark only when offsets themselves are the product cont
 
 ## Examples
 
-### Manual-drift sequence
+### Regression: scroll away twice
 
-1. Capture a scroll-capable input inside the Reference portal with the current Reference viewport position.
-2. Consume it only for a Reference-document scroll notification.
-3. On the next frame, require an actual position change and a still-current observation.
-4. Ask whether the immutable origin is `visible`, `outside`, or `unavailable`.
-5. Show the affordance only for `outside`; clear it whenever the origin becomes visible again (`apps/web/src/review/navigation-coordinator.ts`).
+Scroll until the last highlight line is fully outside the tray while its page remains visible. Hover the tab and activate Return to reference. Move the viewport again without sending a wheel, key, or pointer event and verify the action reappears. Scroll back to the original position and verify it clears. The acceptance fixture checks both the geometry and the action, so a passing wheel-only test cannot hide the missing second observation (`test/acceptance/legible-link-destinations.spec.ts:355`).
 
 ### Return transaction
 
@@ -117,7 +113,7 @@ Use a physical scroll bookmark only when offsets themselves are the product cont
 3. Settle layout and apply `originalTarget` with Reference Fit Width.
 4. Reject completion if the operation, document, tab, origin identity, or adapter changed.
 5. Capture the applied view and refresh only `settledLocation`.
-6. Clear the overlay, announce success, and focus the destination page.
+6. Clear the action, announce success, and focus the destination page.
 
 ## Related
 
