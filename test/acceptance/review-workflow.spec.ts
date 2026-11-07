@@ -999,12 +999,17 @@ test.describe('canonical review workflow', () => {
     await page.setViewportSize({ width: 1280, height: 800 });
     await installRuntimeClassicScrollport(page);
     await page.getByRole('button', { name: 'Open harness reference' }).press('Enter');
-    await page.getByRole('button', { name: 'Show References' }).click();
+    const showReferences = page.getByRole('button', { name: 'Show References', exact: true });
+    await showReferences.hover();
+    await expect(page.getByRole('tooltip')).toHaveText(/^Show References (?:⌃⌘R|Ctrl\+Alt\+R)$/u);
+    await expect(showReferences.locator('svg path[fill="currentColor"]')).toHaveCount(0);
+    await showReferences.click();
     await page.getByRole('button', { name: 'Show Workspace' }).click();
     const trayToggles = page.getByRole('group', { name: 'Workspace trays' }).getByRole('button');
     await expect(trayToggles).toHaveCount(2);
     await expect(trayToggles.nth(0)).toHaveAccessibleName('Hide References');
     await expect(trayToggles.nth(1)).toHaveAccessibleName('Hide Workspace');
+    await expect(trayToggles.locator('svg path[fill="currentColor"]')).toHaveCount(2);
     await trayToggles.nth(0).hover();
     await expect(page.getByRole('tooltip')).toHaveText('Hide References');
     await trayToggles.nth(1).hover();

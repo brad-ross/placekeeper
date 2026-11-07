@@ -2106,6 +2106,9 @@ export function ReviewShell(props: ReviewShellProps) {
         savePendingDestination={props.save.savePendingDestination ?? false}
         saveOptionsOpen={props.save.saveOptionsOpen ?? false}
         workspaceTrayToggles={workspaceTrayToggles}
+        showReferencesShortcut={!authoringActive && commandSurface.snapshot.commands.some(
+          ({ id, enabled }) => id === 'open-references' && enabled,
+        )}
         onSaveOptions={() => commandSurface.invoke('save-options')}
         saveOptionsAvailable={props.save.onSaveOptions !== undefined}
         {...(documentActionsPresentation === undefined ? {} : {

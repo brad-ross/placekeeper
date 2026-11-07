@@ -181,6 +181,7 @@ export interface ReviewChromeProps {
   readonly onSaveOptions?: () => void;
   readonly saveOptionsAvailable?: boolean;
   readonly workspaceTrayToggles?: readonly ReviewChromeTrayToggle[];
+  readonly showReferencesShortcut?: boolean;
 }
 
 export function ReviewChrome({
@@ -219,8 +220,12 @@ export function ReviewChrome({
   onSaveOptions = () => undefined,
   saveOptionsAvailable = true,
   workspaceTrayToggles = [],
+  showReferencesShortcut = false,
 }: ReviewChromeProps) {
   const hasWorkspaceTrayToggles = workspaceTrayToggles.length > 0;
+  const appleKeyboard = typeof navigator !== 'undefined' && /^(Mac|iPhone|iPad|iPod)/u.test(navigator.platform);
+  const referencesShortcutLabel = appleKeyboard ? '⌃⌘R' : 'Ctrl+Alt+R';
+  const referencesShortcutKeys = appleKeyboard ? 'Control+Meta+R' : 'Control+Alt+R';
   const [compactTouch, setCompactTouch] = useState(false);
   const compactHistoryFocusRef = useRef<TopBarMenuId | null>(null);
   const [presentation, setPresentation] = useState<ReviewChromePresentation>('navigationCompact');
@@ -1155,19 +1160,32 @@ export function ReviewChrome({
       inert={saveOptionsOpen}
       aria-hidden={saveOptionsOpen || undefined}
     >
-      {workspaceTrayToggles.map(({ surface, target, open, controls: trayControls, buttonRef, onToggle }) => (
-        <ReviewTooltipButton
+      {workspaceTrayToggles.map(({ surface, target, open, controls: trayControls, buttonRef, onToggle }) => {
+        const label = `${open ? 'Hide' : 'Show'} ${target}`;
+        const hint = showReferencesShortcut && target === 'References' && !open;
+        return <ReviewTooltipButton
           key={surface}
           ref={buttonRef}
-          label={`${open ? 'Hide' : 'Show'} ${target}`}
+          label={label}
+          tooltip={hint ? `${label} ${referencesShortcutLabel}` : label}
           type="button"
           className="review-chrome__icon-control review-chrome__tray-toggle"
           data-workspace-tray-toggle={surface}
           aria-expanded={open}
           aria-controls={trayControls}
+          aria-keyshortcuts={hint ? referencesShortcutKeys : undefined}
           onClick={onToggle}
-        ><ReviewIcon name={surface === 'right' ? 'panel-right' : 'panel-bottom'} /></ReviewTooltipButton>
-      ))}
+        >
+          <ReviewIcon name={surface === 'right' ? 'panel-right' : 'panel-bottom'}>
+            {open ? <path
+              d={surface === 'right' ? 'M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4Z' : 'M3 15h18v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z'}
+              fill="currentColor"
+              fillOpacity={0.5}
+              stroke="none"
+            /> : null}
+          </ReviewIcon>
+        </ReviewTooltipButton>;
+      })}
     </div> : null}
     <div
       ref={sizingRackRef}

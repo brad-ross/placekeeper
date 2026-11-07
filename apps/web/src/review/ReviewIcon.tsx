@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import {
   AlertCircle,
   ArrowLeft,
@@ -106,6 +107,7 @@ export interface ReviewIconProps {
   readonly size?: number;
   readonly strokeWidth?: number;
   readonly className?: string;
+  readonly children?: ReactNode;
 }
 
 export function ReviewIcon({
@@ -113,6 +115,7 @@ export function ReviewIcon({
   size = 16,
   strokeWidth = 2,
   className = 'review-icon',
+  children,
 }: ReviewIconProps) {
   const Icon = reviewIcons[name];
   return (
@@ -122,6 +125,6 @@ export function ReviewIcon({
       className={className}
       size={size}
       strokeWidth={strokeWidth}
-    />
+    >{children}</Icon>
   );
 }
