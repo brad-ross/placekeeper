@@ -678,6 +678,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const [correspondingItemId, setCorrespondingItemId] = useState<string>();
   const [contentCorrespondingItemId, setContentCorrespondingItemId] = useState<string>();
   const [activeItemId, setActiveItemId] = useState<string>();
+  const [annotationPageClickToken, setAnnotationPageClickToken] = useState(0);
   const [referenceInspection, setReferenceInspection] = useState<ProductionReferenceInspection | null>(null);
   const referenceInspectionRef = useRef(referenceInspection);
   referenceInspectionRef.current = referenceInspection;
@@ -2043,6 +2044,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     if (event.type === 'owned-mark-clear') {
       if (surface?.kind === 'reference') return;
       if (authoringActiveRef.current) return;
+      if (event.pageClick) setAnnotationPageClickToken((token) => token + 1);
       setActiveItemId(undefined);
       return;
     }
@@ -2838,6 +2840,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
           if (selectedCorrespondence !== undefined) publishCorrespondence(selectedCorrespondence);
         }}
         activeItemId={activeItemId ?? null}
+        annotationPageClickToken={annotationPageClickToken}
         {...(contentCorrespondingItemId === undefined
           ? {}
           : { correspondingItemId: contentCorrespondingItemId })}

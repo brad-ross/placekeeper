@@ -1611,23 +1611,42 @@ test('expanded popup yields to another PDF annotation and reopens as a compact c
   await expect(reader).toHaveCount(0);
 });
 
-test('outside click and Escape dismiss an expanded popup without retaining full view', async ({ page }) => {
+test('page clicks, margin clicks, and Escape dismiss an annotation popup', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
   const { itemId } = await openLongAnnotationFixture(page);
   const reader = await expandPopup(page, itemId);
   const image = await waitForRenderedPageImage(page);
   const bounds = (await image.boundingBox())!;
-  await page.mouse.click(bounds.x + 30, bounds.y + 300);
+  const onPage = { x: bounds.x + 30, y: bounds.y + 300 };
+  const hitPdfPage = ({ x, y }: { x: number; y: number }) =>
+    document.elementFromPoint(x, y)?.closest('.pdf-workspace__page')?.getAttribute('data-page-index');
+  expect(await page.evaluate(hitPdfPage, onPage)).toBe('0');
+  await page.mouse.click(onPage.x, onPage.y);
   await expect(reader).toHaveCount(0);
   await expect(page.locator('[data-annotation-peek]')).toHaveCount(0);
-  const center = await markCenter(page, itemId);
-  await page.mouse.click(center.x, center.y);
-  await expect(page.locator(`[data-annotation-peek="${itemId}"]`)).toBeVisible();
-  await expect(reader).toHaveCount(0);
-  await page.locator(`[data-annotation-peek="${itemId}"] [data-read-full-annotation]`).click();
+  await expandPopup(page, itemId);
   await page.keyboard.press('Escape');
   await expect(reader).toHaveCount(0);
   await expect(page.locator('[data-annotation-peek]')).toHaveCount(0);
+
+  const center = await markCenter(page, itemId);
+  await page.mouse.click(center.x, center.y);
+  const popup = page.locator(`[data-annotation-peek="${itemId}"]`);
+  await expect(popup).toHaveAttribute('data-peek-selected', 'true');
+  const viewport = page.locator('[data-viewer-framing-viewport]');
+  const margin = (await viewport.boundingBox())!;
+  const offPage = { x: margin.x + 8, y: margin.y + 100 };
+  expect(await page.evaluate(hitPdfPage, offPage)).toBeUndefined();
+  await page.mouse.click(offPage.x, offPage.y);
+  await expect(popup).toHaveCount(0);
+
+  await page.mouse.click(center.x, center.y);
+  await expect(popup).toHaveAttribute('data-peek-selected', 'true');
+  const link = page.getByRole('button', { name: 'Open PDF link to Primary result, Page 2' });
+  await link.click();
+  const linkAction = page.getByRole('menuitem', { name: 'Open in References' });
+  await expect(linkAction).toBeVisible();
+  await expect(popup).toHaveCount(0);
 });
 
 test('opens a focused Main editor at its PDF anchor before paint and dismisses the card after Cancel', async ({ page }) => {
