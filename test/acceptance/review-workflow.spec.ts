@@ -995,12 +995,17 @@ test.describe('canonical review workflow', () => {
     await expect(page.locator('[data-review-stage]')).not.toHaveAttribute('data-horizontal-scroll-locked', 'true');
   });
 
-  test('keeps the gap above bottom References equal to the outside tray inset', async ({ page }) => {
+  test('keeps Workspace rightmost and preserves the inset between split trays', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 800 });
     await installRuntimeClassicScrollport(page);
     await page.getByRole('button', { name: 'Open harness reference' }).press('Enter');
     await page.getByRole('button', { name: 'Show References' }).click();
     await page.getByRole('button', { name: 'Show workspace' }).click();
+    const trayToggles = page.getByRole('group', { name: 'Workspace trays' }).getByRole('button');
+    await expect(trayToggles).toHaveCount(2);
+    await expect(trayToggles.nth(0)).toHaveAccessibleName('Hide References');
+    await expect(trayToggles.nth(1)).toHaveAccessibleName('Hide workspace');
+
     const stage = page.locator('[data-review-stage]');
     await expect(stage).toHaveAttribute('data-reference-layout', 'wide-split');
     await expect.poll(async () => stage.evaluate((element) => {
@@ -1380,6 +1385,33 @@ test.describe('canonical review workflow', () => {
     await expect(zoomSuffix).toBeVisible();
   });
 
+  test('keeps the right workspace hidden when widening a narrow References tray', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto('/test/acceptance/review-harness/index.html?visual=reference-layout');
+    await page.getByRole('button', { name: 'Show References' }).click();
+    const stage = page.locator('[data-review-stage]');
+    await expect(stage).toHaveAttribute('data-reference-layout', 'wide-bottom');
+    await page.setViewportSize({ width: 760, height: 900 });
+    await expect(stage).toHaveAttribute('data-reference-layout', 'narrow-unified');
+    const references = page.getByRole('tab', { name: 'References', exact: true });
+    await expect(references).toHaveAttribute('aria-selected', 'true');
+    const tools = page.locator('#review-tools-workspace');
+    await tools.evaluate(element => {
+      const observer = new MutationObserver(() => {
+        if (element.getAttribute('data-workspace-presentation') !== 'right') return;
+        observer.disconnect();
+        element.setAttribute('data-test-first-wide-visibility', getComputedStyle(element).visibility);
+      });
+      observer.observe(element, { attributes: true, attributeFilter: ['data-workspace-presentation'] });
+    });
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await expect(tools).toHaveAttribute('data-test-first-wide-visibility', 'hidden');
+    await expect(page.locator('#review-workspace')).toHaveAttribute('data-workspace-open', 'true');
+    await expect(tools).toHaveAttribute('data-tools-workspace-open', 'false');
+    await page.mouse.move(12, 120);
+    await expect(page.getByRole('group', { name: 'Workspace trays' })).toHaveCSS('opacity', '1');
+  });
+
   test('reveals right-side controls on bar hover and dismisses hover menus outside their trigger and popup', async ({ page }) => {
     const bar = page.locator('[data-review-chrome]');
     const rightControls = bar.locator(':scope > .review-chrome__viewer-controls');
@@ -1397,6 +1429,12 @@ test.describe('canonical review workflow', () => {
     const canvas = page.getByRole('application', { name: 'PDF review canvas' });
     await canvas.hover();
     await expect(rightControls).toHaveCSS('opacity', '0');
+    const trayControls = bar.getByRole('group', { name: 'Workspace trays' });
+    await expect(trayControls).toHaveCSS('opacity', '0');
+    await bar.hover();
+    await expect(trayControls).toHaveCSS('opacity', '1');
+    await canvas.hover();
+    await expect(trayControls).toHaveCSS('opacity', '0');
     for (const control of await bar.locator('[data-review-copy-link], [data-main-history]').all()) {
       await expect(control).toHaveCSS('opacity', '0');
     }
@@ -1470,12 +1508,12 @@ test.describe('canonical review workflow', () => {
     await expect(zoomMenu).toHaveCount(0);
     await expect(zoomTrigger).toBeFocused();
 
-    const toggle = bar.locator('[data-workspace-tray-toggle="right"]');
+    const toggle = trayControls.locator('[data-workspace-tray-toggle]');
     await toggle.click();
     await expect(toggle).toHaveAttribute('aria-expanded', 'true');
     await page.mouse.move(12, 120);
     await canvas.focus();
-    await expect(toggle).toBeVisible();
+    await expect(trayControls).toHaveCSS('opacity', '1');
     await expect(rightControls).toHaveCSS('opacity', '0');
   });
 
@@ -1755,7 +1793,9 @@ test.describe('canonical review workflow', () => {
         ));
         expect(chromeButtonHeights.length).toBeGreaterThan(0);
         expect(chromeButtonHeights.every((height) => height >= 44)).toBe(true);
-        const trayToggle = chrome.getByRole('group', { name: 'Workspace trays' }).getByRole('button');
+        const trayControls = chrome.getByRole('group', { name: 'Workspace trays' });
+        await expect(trayControls).toHaveCSS('opacity', '1');
+        const trayToggle = trayControls.getByRole('button');
         await expect(trayToggle).toBeVisible();
         const trayBounds = (await trayToggle.boundingBox())!;
         expect(trayBounds.width).toBeGreaterThanOrEqual(44);

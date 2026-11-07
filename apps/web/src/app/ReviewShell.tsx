@@ -1816,6 +1816,24 @@ export function ReviewShell(props: ReviewShellProps) {
   const workspaceTrayMode = authoringActive ? 'references' : effectiveWorkspaceMode;
   const sharedTrayShowsTarget = !authoringActive || effectiveWorkspaceMode === 'references';
   const workspaceTrayToggles: ReviewChromeTrayToggle[] = [];
+  if (narrowWorkspace ? !authoringActive || referencesAvailable
+    : referencesAvailable && effectiveReferenceLayout.referenceDock === 'bottom') {
+    const open = referenceSurfaceOpen && (!narrowWorkspace || sharedTrayShowsTarget);
+    workspaceTrayToggles.push({
+      surface: 'bottom',
+      target: narrowWorkspace ? workspaceTrayTarget : 'References',
+      open,
+      controls: narrowWorkspace ? 'review-workspace review-tools-workspace' : 'review-workspace',
+      buttonRef: bottomWorkspaceToggleRef,
+      onToggle: open
+        ? () => hideWorkspaceTray('bottom')
+        : narrowWorkspace
+          ? () => openWorkspaceTray(
+            { type: authoringActive ? 'show-references' : 'toggle-narrow-workspace' }, workspaceTrayMode,
+          )
+          : () => openWorkspaceTray({ type: 'toggle-references' }, 'references', false),
+    });
+  }
   if (!narrowWorkspace && shouldShowRightWorkspaceToggle({
     authoringActive,
     referencesAvailable,
@@ -1835,24 +1853,6 @@ export function ReviewShell(props: ReviewShellProps) {
         : () => openWorkspaceTray(
           { type: authoringActive ? 'show-references' : 'show-right-workspace' }, workspaceTrayMode,
         ),
-    });
-  }
-  if (narrowWorkspace ? !authoringActive || referencesAvailable
-    : referencesAvailable && effectiveReferenceLayout.referenceDock === 'bottom') {
-    const open = referenceSurfaceOpen && (!narrowWorkspace || sharedTrayShowsTarget);
-    workspaceTrayToggles.push({
-      surface: 'bottom',
-      target: narrowWorkspace ? workspaceTrayTarget : 'References',
-      open,
-      controls: narrowWorkspace ? 'review-workspace review-tools-workspace' : 'review-workspace',
-      buttonRef: bottomWorkspaceToggleRef,
-      onToggle: open
-        ? () => hideWorkspaceTray('bottom')
-        : narrowWorkspace
-          ? () => openWorkspaceTray(
-            { type: authoringActive ? 'show-references' : 'toggle-narrow-workspace' }, workspaceTrayMode,
-          )
-          : () => openWorkspaceTray({ type: 'toggle-references' }, 'references', false),
     });
   }
   const rememberWorkspaceModeFocus = (mode: WorkspaceMode, token: string) => {

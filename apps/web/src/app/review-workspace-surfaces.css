@@ -166,6 +166,10 @@
   transition: transform var(--review-motion-surface) ease-out, visibility var(--review-motion-surface) step-end, bottom var(--review-motion-surface) ease-out;
 }
 
+.review-tools-workspace[hidden] {
+  display: none;
+}
+
 .review-tools-workspace[data-workspace-presentation="bottom"] {
   top: auto;
   right: var(--review-overlay-inset, 12px);

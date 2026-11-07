@@ -166,6 +166,16 @@
 }
 
 @media (hover: hover) and (pointer: fine) {
+  [data-review-chrome] > .review-chrome__tray-controls {
+    opacity: 0;
+  }
+
+  [data-review-chrome]:is(:hover, :has(:focus-visible, [data-workspace-tray-toggle][aria-expanded="true"]))
+    > .review-chrome__tray-controls,
+  .electron-review-shell[data-toolbar-hovered="true"] [data-review-chrome] > .review-chrome__tray-controls {
+    opacity: 1;
+  }
+
   [data-review-chrome] > .review-chrome__viewer-controls,
   [data-review-chrome] :is([data-review-copy-link], [data-main-history]) {
     opacity: 0;
