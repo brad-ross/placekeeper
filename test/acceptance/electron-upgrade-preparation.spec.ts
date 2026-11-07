@@ -18,7 +18,13 @@ test('packaged consented upgrade exits naturally with the final composer input a
   let credentials: UpgradeAttemptCredentials | undefined;
   const prepare = async (request: UpgradePreparationRequest): Promise<UpgradePreparationStatus> => {
     const response = await requestControl(socket, { kind: 'upgrade-preparation', request }, { timeoutMs: 5000 });
-    if (response.kind !== 'upgrade-preparation' || !('token' in response.result)) throw new Error(`Preparation did not return controller credentials: ${JSON.stringify(response)}`);
+    if (response.kind !== 'upgrade-preparation' || !('token' in response.result)) {
+      const status = credentials ? await requestControl(socket, { kind: 'upgrade-preparation', request: { operation: 'status', credentials } }) : undefined;
+      if (request.operation === 'begin' && response.kind === 'error' && response.reason === 'unavailable' && status?.kind === 'upgrade-preparation' && 'token' in status.result
+        && status.result.phase === 'canceled' && status.result.reason === 'Review revision changed') return status.result;
+      const detail = status?.kind === 'upgrade-preparation' ? { phase: status.result.phase, reason: 'reason' in status.result ? status.result.reason : undefined } : { kind: status?.kind };
+      throw new Error(`Preparation ${request.operation} did not return controller credentials: ${JSON.stringify({ kind: response.kind, status: detail })}`);
+    }
     return response.result;
   };
   try {
@@ -49,14 +55,23 @@ test('packaged consented upgrade exits naturally with the final composer input a
     await page.getByRole('menuitem', { name: 'Add Page Note' }).click();
     const editor = page.locator('[data-comment-composer] textarea');
     const text = 'Final real packaged composer input immediately before consented preparation.';
-    // No test-issued draft commands or wait for an autosave: the renderer's own
-    // close settlement must protect this DOM value before its acknowledgement.
+    // No test-issued draft commands or wait for an autosave: this final DOM
+    // value must be durable by upgrade completion, including after a new preview.
     await editor.fill(text);
-    const preview = await prepare({ operation: 'preview', installedDaemonIdentity: management.status.daemonIdentity,
-      candidate: { daemonIdentity: manifest.daemonIdentity, installArtifactIdentity: manifest.installArtifactIdentity } });
-    credentials = { attemptId: preview.attemptId, token: preview.token, candidate: preview.candidate };
-    expect(preview.participants.some(p => p.id.startsWith('app:'))).toBe(true);
-    await prepare({ operation: 'begin', credentials, consent: true });
+    let begun: UpgradePreparationStatus | undefined;
+    // The draft can reach the service between preview and consent. That correctly
+    // invalidates the preview; renew it without waiting for an autosave or
+    // accepting any other preparation failure.
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const preview = await prepare({ operation: 'preview', installedDaemonIdentity: management.status.daemonIdentity,
+        candidate: { daemonIdentity: manifest.daemonIdentity, installArtifactIdentity: manifest.installArtifactIdentity } });
+      credentials = { attemptId: preview.attemptId, token: preview.token, candidate: preview.candidate };
+      expect(preview.participants.some(p => p.id.startsWith('app:'))).toBe(true);
+      begun = await prepare({ operation: 'begin', credentials, consent: true });
+      if (begun.phase !== 'canceled' || begun.reason !== 'Review revision changed') break;
+    }
+    if (!credentials) throw new Error('Missing upgrade preview credentials');
+    expect(['preparing', 'ready']).toContain(begun?.phase);
     await expect.poll(async () => {
       const { phase, reason } = await prepare({ operation: 'status', credentials: credentials! });
       return { phase, reason };
