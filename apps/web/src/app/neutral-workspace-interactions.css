@@ -11,6 +11,12 @@
     pointer-events: none;
   }
 
+  /* Keep the tab endcap hit-testable while its icons are hidden. WebKit can
+     otherwise lose hover when the horizontal tab strip scrolls to an action. */
+  .reference-tab-segment :is(.reference-tab-segment__action, .reference-panel__return) {
+    pointer-events: auto;
+  }
+
   :is(li[data-annotation-origin], li[data-search-result]):is(:hover, [data-corresponding="true"])
     .row-action-group__direct,
   :is(li[data-annotation-origin], li[data-search-result]):has(:focus-visible)

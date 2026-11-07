@@ -2872,7 +2872,8 @@ test("switches and sends references from the right-docked workspace", async ({ p
   }).toBeLessThan(2);
 
   const sendToMain = page.getByRole("button", { name: "Open in main document" });
-  await sendToMain.focus();
+  await referenceViewport.hover({ position: { x: 32, y: 64 } });
+  await expect(sendToMain).toHaveCSS('opacity', '0');
   await clickHoverRevealedReferenceTabAction(sendToMain);
   await expect(page.locator(".review-workspace__status")).toHaveText(
     "Reference sent to the main document.",
