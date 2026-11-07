@@ -698,25 +698,44 @@ it("actual runtime ready-first releases the same genuine hook before ordinary at
   const experiments = new NativeQualificationExperiments(root);
   const { manager, sessionId } = await fixture(false, undefined, experiments, true);
   const panel = stage(manager, sessionId);
-  await experiments.publicResult(panel.receipt, { runId, invocationNonce, expiresAt }, processNonce);
+
   const event = { session_id: "task-a", hook_event_name: "PostToolUse", tool_name: "mcp__placekeeper__display_review", tool_input: { handoff: "h".repeat(43) }, tool_response: { structuredContent: panel.receipt } };
   const source = `import ${JSON.stringify(resolve("apps/service/src/cli/context-command.ts"))};
 import {runHookCommand} from ${JSON.stringify(resolve("apps/service/src/cli/hook-command.ts"))};
+const selected = new Promise(resolve => process.once('message', resolve));
+process.send('initialized');
+await selected;
+process.disconnect();
 await runHookCommand(['hook','--event'],${JSON.stringify(JSON.stringify(event))},async request=>{process.stdout.write(JSON.stringify(request));return {kind:'codex-attestation',status:'accepted'}},()=>{});`;
-  const child = spawn(process.execPath, ["--import", "tsx", "--input-type=module", "-e", source], { env: { ...process.env, PLACEKEEPER_MAC_DEVELOPMENT_ROOT: root }, stdio: ["ignore", "pipe", "pipe"] });
-  let output = ""; child.stdout.on("data", data => { output += String(data); });
+  const child = spawn(process.execPath, ["--import", "tsx", "--input-type=module", "-e", source], { env: { ...process.env, PLACEKEEPER_MAC_DEVELOPMENT_ROOT: root }, stdio: ["ignore", "pipe", "pipe", "ipc"], timeout: 10000 });
+  let output = "", stderr = "";
+  child.stdout!.on("data", data => { output += String(data); });
+  child.stderr!.on("data", data => { stderr += String(data); });
   const completed = new Promise(resolve => child.once("close", resolve));
-  const dir = join(root, "native-qualification-experiments", runId);
-  for (let check = 0; check < 100 && !(await readdir(dir)).includes("hook-consumed.json"); check++) await new Promise(resolve => setTimeout(resolve, 10));
-  expect((await readdir(dir))).toContain("hook-consumed.json");
-  expect(output).toBe("");
-  expect(await manager.pending(request(panel.privateMeta, "status"))).toEqual({ status: "pending" });
-  expect((await readdir(dir))).not.toContain("ready.json");
-  expect(await manager.pending(request(panel.privateMeta))).toEqual({ status: "pending" });
-  expect(await completed).toBe(0);
-  const ordinary = JSON.parse(output);
-  expect(ordinary).toEqual({ kind: "codex-attest", taskSessionId: "task-a", receipt: panel.receipt });
-  expect(manager.attestDisplay(ordinary.receipt, ordinary.taskSessionId)).toBe(true);
-  expect(await manager.pending(request(panel.privateMeta, "status"))).toMatchObject({ status: "active" });
-  expect(JSON.parse(await readFile(join(dir, "hook-terminal.json"), "utf8")).outcome).toBe("ready");
-});
+  try {
+    // Start the experiment only after the real hook loader is initialized.
+    await new Promise<void>((resolve, reject) => {
+      child.once("message", message => message === "initialized" ? resolve() : reject(new Error(`unexpected hook initialization: ${String(message)}`)));
+      child.once("error", reject);
+      child.once("close", code => reject(new Error(`hook exited before initialization (${code}): ${stderr}`)));
+    });
+    await experiments.publicResult(panel.receipt, { runId, invocationNonce, expiresAt }, processNonce);
+    child.send("selected");
+    const dir = join(root, "native-qualification-experiments", runId);
+    for (let check = 0; check < 100 && !(await readdir(dir)).includes("hook-consumed.json"); check++) await new Promise(resolve => setTimeout(resolve, 10));
+    expect((await readdir(dir))).toContain("hook-consumed.json");
+    expect(output).toBe("");
+    expect(await manager.pending(request(panel.privateMeta, "status"))).toEqual({ status: "pending" });
+    expect((await readdir(dir))).not.toContain("ready.json");
+    expect(await manager.pending(request(panel.privateMeta))).toEqual({ status: "pending" });
+    expect(await completed, stderr).toBe(0);
+    const ordinary = JSON.parse(output);
+    expect(ordinary).toEqual({ kind: "codex-attest", taskSessionId: "task-a", receipt: panel.receipt });
+    expect(manager.attestDisplay(ordinary.receipt, ordinary.taskSessionId)).toBe(true);
+    expect(await manager.pending(request(panel.privateMeta, "status"))).toMatchObject({ status: "active" });
+    expect(JSON.parse(await readFile(join(dir, "hook-terminal.json"), "utf8")).outcome).toBe("ready");
+  } finally {
+    if (child.exitCode === null && child.signalCode === null) child.kill();
+    await completed;
+  }
+}, 15000);
