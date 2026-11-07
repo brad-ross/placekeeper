@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef, useState } from 'react';
 
+import type { QuoteContext } from './annotation-content.js';
 import type { AnnotationReaderRecord } from './annotation-reader.js';
 
 export interface AnnotationExcerptGeometry {
@@ -79,6 +80,8 @@ export interface AnnotationExcerptProps {
   readonly sourceText?: string;
   readonly sourceTreatment?: 'plain' | 'struck';
   readonly quoteText?: string;
+  /** Page text around the quote or source; the annotated text itself is marked in its color. */
+  readonly quoteContext?: QuoteContext;
   readonly readerRecord: AnnotationReaderRecord | null;
   readonly onReadFull?: (record: AnnotationReaderRecord, trigger: HTMLButtonElement) => void;
   readonly onOverflowChange?: (record: AnnotationReaderRecord, overflowing: boolean) => void;
@@ -89,10 +92,18 @@ export function AnnotationExcerpt({
   sourceText,
   sourceTreatment = 'plain',
   quoteText,
+  quoteContext,
   readerRecord,
   onReadFull,
   onOverflowChange,
 }: AnnotationExcerptProps) {
+  const inContext = (text: string, kind: 'highlight' | 'struck' | 'plain') => quoteContext === undefined
+    ? text
+    : <>
+      <span className="annotation-item__quote-context">{quoteContext.before}</span>
+      <mark className="annotation-item__quote-mark" data-quote-mark={kind}>{text}</mark>
+      <span className="annotation-item__quote-context">{quoteContext.after}</span>
+    </>;
   const readerPageDescription = readerRecord === null
     ? ''
     : readerRecord.lastPageNumber === undefined
@@ -111,12 +122,12 @@ export function AnnotationExcerpt({
   // clamped on its own, so the note or replacement below it stays visible.
   const contents = <>
     {sourceText ? (
-      <span className="annotation-item__source" data-source-treatment={sourceTreatment} data-quote-only={content ? 'false' : 'true'}>
-        {sourceText}
+      <span className="annotation-item__source" data-source-treatment={sourceTreatment} data-quote-only={content ? 'false' : 'true'} data-has-quote-context={quoteContext ? 'true' : undefined}>
+        {inContext(sourceText, sourceTreatment === 'struck' ? 'struck' : 'plain')}
       </span>
     ) : null}
     {quoteText ? (
-      <span className="annotation-item__quote" data-quote-only={content ? 'false' : 'true'}>{quoteText}</span>
+      <span className="annotation-item__quote" data-quote-only={content ? 'false' : 'true'} data-has-quote-context={quoteContext ? 'true' : undefined}>{inContext(quoteText, 'highlight')}</span>
     ) : null}
     {content ? (
       <span className="annotation-item__excerpt-main">

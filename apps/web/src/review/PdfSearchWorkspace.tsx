@@ -178,6 +178,11 @@ export function PdfSearchWorkspace({
           onClick={() => setSymbolSuggestionsOpen(true)}
           onKeyDown={handleQueryKeyDown}
         />
+        {hasEffectiveQuery && !indexing ? (
+          <span className="pdf-search__count" data-pdf-search-count aria-hidden="true">
+            {resultCount === 1 ? '1 result' : `${resultCount} results`}
+          </span>
+        ) : null}
         <span className="pdf-search__clear-slot" aria-hidden={!hasEffectiveQuery ? 'true' : undefined}>
           <ReviewTooltipButton
             label="Clear search"
@@ -255,12 +260,9 @@ export function PdfSearchWorkspace({
         </section>
       ) : null}
 
-      {hasEffectiveQuery && !indexing ? (
+      {hasEffectiveQuery && !indexing && state.coverage.searchedPages < state.coverage.totalPages ? (
         <p className="pdf-search__summary">
-          {resultCount === 1 ? '1 result' : `${resultCount} results`}
-          {state.coverage.searchedPages < state.coverage.totalPages
-            ? ` · ${state.coverage.searchedPages} of ${state.coverage.totalPages} pages searchable`
-            : ''}
+          {`${state.coverage.searchedPages} of ${state.coverage.totalPages} pages searchable`}
         </p>
       ) : null}
 
@@ -322,7 +324,7 @@ export function PdfSearchWorkspace({
                     <span className="annotation-item__excerpt pdf-search__excerpt">
                       <span className="pdf-search__result-context">
                         {excerptParts.before}
-                        <mark className="pdf-search__result-match">{excerptParts.match}</mark>
+                        <mark className="pdf-search__result-match" data-pdf-search-match-kind={result.kind === 'variant' ? 'related' : 'exact'}>{excerptParts.match}</mark>
                         {excerptParts.after}
                       </span>
                     </span>

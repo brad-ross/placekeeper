@@ -2,7 +2,11 @@ import { describe, expect, it } from 'vitest';
 
 import {
   REVIEW_CHROME_PRESENTATIONS,
+  chooseReviewChromeHistoryCompact,
   chooseReviewChromePresentation,
+  chooseReviewChromeTitlePresentation,
+  REVIEW_CHROME_TITLE_HYSTERESIS,
+  REVIEW_CHROME_TITLE_MIN_WIDTH,
   type ReviewChromePresentationWidths,
 } from '../src/review/review-chrome-layout.js';
 
@@ -137,5 +141,51 @@ describe('review chrome responsive presentation', () => {
       widths,
       previous: 'expanded',
     })).toBe('navigationCompact');
+  });
+});
+
+describe('review chrome title presentation', () => {
+  it('shows the title while there is room for a readable truncated title', () => {
+    expect(chooseReviewChromeTitlePresentation({ titleRoom: 200, previous: 'title' })).toBe('title');
+    expect(chooseReviewChromeTitlePresentation({ titleRoom: REVIEW_CHROME_TITLE_MIN_WIDTH, previous: 'title' })).toBe('title');
+  });
+
+  it('collapses to the file icon below the minimum title width', () => {
+    expect(chooseReviewChromeTitlePresentation({ titleRoom: REVIEW_CHROME_TITLE_MIN_WIDTH - 1, previous: 'title' })).toBe('icon');
+    expect(chooseReviewChromeTitlePresentation({ titleRoom: -40, previous: 'title' })).toBe('icon');
+  });
+
+  it('needs extra runway to restore the title so it does not flicker at the edge', () => {
+    expect(chooseReviewChromeTitlePresentation({ titleRoom: REVIEW_CHROME_TITLE_MIN_WIDTH + 4, previous: 'icon' })).toBe('icon');
+    expect(chooseReviewChromeTitlePresentation({
+      titleRoom: REVIEW_CHROME_TITLE_MIN_WIDTH + REVIEW_CHROME_TITLE_HYSTERESIS,
+      previous: 'icon',
+    })).toBe('title');
+  });
+
+  it('keeps the previous presentation for an unusable measurement', () => {
+    expect(chooseReviewChromeTitlePresentation({ titleRoom: Number.NaN, previous: 'icon' })).toBe('icon');
+  });
+});
+
+describe('review chrome history compaction', () => {
+  it('combines history controls only once even the icon-only title no longer fits', () => {
+    expect(chooseReviewChromeHistoryCompact({ titleRoom: 0, compact: false, savings: null })).toBe(false);
+    expect(chooseReviewChromeHistoryCompact({ titleRoom: -1, compact: false, savings: null })).toBe(true);
+  });
+
+  it('restores separate controls only when the room they need, plus runway, is back', () => {
+    // Combining freed 70px: separate controls need titleRoom >= 70 + hysteresis.
+    expect(chooseReviewChromeHistoryCompact({ titleRoom: 75, compact: true, savings: 70 })).toBe(true);
+    expect(chooseReviewChromeHistoryCompact({
+      titleRoom: 70 + REVIEW_CHROME_TITLE_HYSTERESIS,
+      compact: true,
+      savings: 70,
+    })).toBe(false);
+  });
+
+  it('stays combined until the freed room has been measured', () => {
+    expect(chooseReviewChromeHistoryCompact({ titleRoom: 500, compact: true, savings: null })).toBe(true);
+    expect(chooseReviewChromeHistoryCompact({ titleRoom: Number.NaN, compact: false, savings: null })).toBe(false);
   });
 });

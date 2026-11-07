@@ -315,6 +315,32 @@
   margin-bottom: 0;
 }
 
+/* With surrounding page text, the annotated words carry the mark's color,
+   as on the PDF; the context keeps the quotation styling. */
+.annotation-item__quote-mark {
+  padding: 0 1px;
+  border-radius: 2px;
+  color: inherit;
+  background: var(--pdf-comment-fill);
+}
+
+.annotation-item__quote[data-quote-only="true"] .annotation-item__quote-mark {
+  background: var(--pdf-note-fill);
+}
+
+.annotation-item__quote-mark[data-quote-mark="struck"] {
+  background: var(--pdf-correction-fill);
+  text-decoration: line-through;
+}
+
+.annotation-item__quote-mark[data-quote-mark="plain"] {
+  background: var(--pdf-edit-fill);
+}
+
+.annotation-item__source[data-source-treatment="struck"][data-has-quote-context="true"] {
+  text-decoration: none;
+}
+
 .annotation-item__provenance {
   position: relative;
   z-index: 2;

@@ -21,10 +21,40 @@ import {
 import { TopBarMenu } from './TopBarMenu.js';
 import {
   REVIEW_CHROME_PRESENTATIONS,
+  chooseReviewChromeHistoryCompact,
   chooseReviewChromePresentation,
+  chooseReviewChromeTitlePresentation,
   type ReviewChromePresentation,
   type ReviewChromePresentationWidths,
+  type ReviewChromeTitlePresentation,
 } from './review-chrome-layout.js';
+
+/**
+ * Width left for the document title text once the page, history and zoom
+ * controls and the title button's own icon and padding have their natural
+ * widths. Independent of whether the title is currently shown.
+ */
+function measureReviewChromeTitleRoom(chrome: HTMLElement): number {
+  const style = getComputedStyle(chrome);
+  const contentWidth = chrome.clientWidth
+    - (Number.parseFloat(style.paddingLeft) || 0)
+    - (Number.parseFloat(style.paddingRight) || 0);
+  const columnGap = Number.parseFloat(style.columnGap) || 0;
+  const width = (element: Element | null) => element?.getBoundingClientRect().width ?? 0;
+  const identity = chrome.querySelector<HTMLElement>(':scope > .review-chrome__identity');
+  const trigger = identity?.querySelector<HTMLElement>('.review-chrome__save-identity') ?? null;
+  const filename = trigger?.querySelector<HTMLElement>('.review-chrome__filename') ?? null;
+  const context = identity?.querySelector<HTMLElement>(':scope > [data-review-context-status]') ?? null;
+  const identityGap = identity === null ? 0 : Number.parseFloat(getComputedStyle(identity).columnGap) || 0;
+  const filenameShown = filename !== null && getComputedStyle(filename).display !== 'none';
+  const triggerChrome = width(trigger) - (filenameShown ? width(filename) : 0);
+  return contentWidth
+    - width(chrome.querySelector(':scope > .review-chrome__left-controls'))
+    - width(chrome.querySelector(':scope > .review-chrome__viewer-controls'))
+    - 2 * columnGap
+    - (context === null ? 0 : width(context) + identityGap)
+    - triggerChrome;
+}
 
 export function validPageNumber(draft: string, totalPages: number): number | undefined {
   const normalized = draft.trim();
@@ -180,6 +210,11 @@ export function ReviewChrome({
   const [compactTouch, setCompactTouch] = useState(false);
   const compactTouchFocusRef = useRef<TopBarMenuId | null>(null);
   const [presentation, setPresentation] = useState<ReviewChromePresentation>('navigationCompact');
+  const [titlePresentation, setTitlePresentation] = useState<ReviewChromeTitlePresentation>('title');
+  // Too narrow for separate history controls even with an icon-only title.
+  const [narrowHistory, setNarrowHistory] = useState(false);
+  // Undo/Redo share one menu button and Back/Forward move into the page menu.
+  const compactHistory = compactTouch || narrowHistory;
   const [activeTopBarMenu, setActiveTopBarMenu] = useState<TopBarMenuId | null>(null);
   const topBarMenuKeyboardOpenRef = useRef(true);
   const [topBarMenuHoverOpen, setTopBarMenuHoverOpen] = useState(false);
@@ -331,7 +366,7 @@ export function ReviewChrome({
     let target: HTMLElement | null | undefined;
     switch (group) {
       case 'history':
-        target = compactTouch ? historyAnchorRef.current
+        target = compactHistory ? historyAnchorRef.current
           : chromeRef.current?.querySelector<HTMLElement>('.review-chrome__history-control:not(:disabled)') ?? navigationAnchorRef.current;
         break;
       case 'navigation':
@@ -344,7 +379,7 @@ export function ReviewChrome({
         target = chromeRef.current?.querySelector<HTMLElement>('[data-document-actions-trigger]') ?? saveTriggerRef.current;
     }
     target?.focus({ preventScroll: true });
-  }, [compactTouch]);
+  }, [compactHistory]);
 
   useLayoutEffect(() => {
     const chrome = chromeRef.current;
@@ -397,6 +432,66 @@ export function ReviewChrome({
     observer.observe(chrome);
     for (const candidate of sizingRack.querySelectorAll<HTMLElement>('[data-review-chrome-candidate]')) {
       observer.observe(candidate);
+    }
+    measure();
+    void document.fonts?.ready.then(scheduleMeasure);
+    return () => {
+      disposed = true;
+      if (frame !== 0) cancelAnimationFrame(frame);
+      observer.disconnect();
+    };
+  }, []);
+
+  // As the bar narrows: the title truncates with an ellipsis, then collapses
+  // to its file icon, then Undo/Redo and Back/Forward combine so the controls
+  // keep their normal spacing.
+  useLayoutEffect(() => {
+    const chrome = chromeRef.current;
+    if (!chrome || typeof ResizeObserver === 'undefined') return;
+    let frame = 0;
+    let disposed = false;
+    let current: ReviewChromeTitlePresentation = 'title';
+    let narrow = false;
+    // Room before combining; becomes the room it freed once the bar shows it.
+    let roomBeforeCombining: number | null = null;
+    let savings: number | null = null;
+    const measure = () => {
+      frame = 0;
+      if (disposed || chrome.clientWidth <= 0) return;
+      const titleRoom = measureReviewChromeTitleRoom(chrome);
+      const showsCombined = chrome.querySelector('.review-chrome__history-trigger') !== null;
+      if (narrow && roomBeforeCombining !== null && showsCombined) {
+        savings = titleRoom - roomBeforeCombining;
+        roomBeforeCombining = null;
+      }
+      const nextNarrow = chooseReviewChromeHistoryCompact({ titleRoom, compact: narrow, savings });
+      if (nextNarrow !== narrow) {
+        narrow = nextNarrow;
+        roomBeforeCombining = nextNarrow && !showsCombined ? titleRoom : null;
+        // Already combined (touch layout): nothing to free, so no runway owed.
+        savings = nextNarrow && showsCombined ? 0 : null;
+        if (!(documentMenuPendingRef.current && activeTopBarMenuRef.current === 'document')) {
+          setActiveTopBarMenu(null);
+        }
+        setNarrowHistory(nextNarrow);
+      }
+      // Combined controls come after the title has collapsed; the freed room
+      // must not bring the title back, or widening would hide it again.
+      const next = narrow ? 'icon' : chooseReviewChromeTitlePresentation({ titleRoom, previous: current });
+      if (next === current) return;
+      current = next;
+      setTitlePresentation(next);
+    };
+    const scheduleMeasure = () => {
+      if (disposed || frame !== 0) return;
+      frame = requestAnimationFrame(measure);
+    };
+    const observer = new ResizeObserver(scheduleMeasure);
+    observer.observe(chrome);
+    for (const element of chrome.querySelectorAll<HTMLElement>(
+      ':scope > :is(.review-chrome__identity, .review-chrome__left-controls, .review-chrome__viewer-controls)',
+    )) {
+      observer.observe(element);
     }
     measure();
     void document.fonts?.ready.then(scheduleMeasure);
@@ -754,14 +849,14 @@ export function ReviewChrome({
   // Edit history keeps both slots so the toolbar never shifts; unavailable
   // actions are greyed out rather than removed.
   const historyControls = <span
-    ref={(element) => { if (!compactTouch) historyAnchorRef.current = element; }}
-    tabIndex={compactTouch ? undefined : -1}
+    ref={(element) => { if (!compactHistory) historyAnchorRef.current = element; }}
+    tabIndex={compactHistory ? undefined : -1}
     data-review-chrome-group="history"
     className="review-chrome__control-cluster review-chrome__edit-cluster"
     role="group"
     aria-label="Edit history"
   >
-    {compactTouch ? <>
+    {compactHistory ? <>
       <ReviewTooltipButton label="Open edit history" tooltip={false} type="button"
         ref={(element) => { historyAnchorRef.current = element; }}
         className="review-chrome__icon-control review-chrome__history-trigger"
@@ -800,7 +895,7 @@ export function ReviewChrome({
 
   const pageNavigationAvailable = viewerState.pageReady && viewerState.totalPages > 1;
   const navigationMenuAvailable = pageNavigationAvailable
-    || (compactTouch && (canNavigateBack || canNavigateForward));
+    || (compactHistory && (canNavigateBack || canNavigateForward));
   const navigationMenuLabel = viewerState.pageReady
     ? `Page ${viewerState.currentPage} of ${viewerState.totalPages}. Open page navigation`
     : navigationMenuAvailable ? 'Open document navigation' : 'Page navigation unavailable';
@@ -832,10 +927,10 @@ export function ReviewChrome({
     </span>
       {copyLink === undefined ? null : <div className="review-chrome__link" data-review-copy-link><CopyLinkControl {...copyLink} /></div>}
     {/* Back and Forward keep fixed slots, greyed out when unavailable. */}
-    {compactTouch ? null : <>{mainHistoryControl('back')}{mainHistoryControl('forward')}</>}
+    {compactHistory ? null : <>{mainHistoryControl('back')}{mainHistoryControl('forward')}</>}
     <TopBarMenu hoverOpen={topBarMenuHoverOpen} hoverRegionRef={navigationHoverRef} open={activeTopBarMenu === 'navigation'} menuId={navigationMenuId} label="Page navigation" openerRef={navigationAnchorRef} focusOnOpen={topBarMenuKeyboardOpenRef.current} onDismiss={() => requestTopBarMenu('navigation', false)}>
       <div className="review-chrome__control-cluster review-chrome__page-menu" role="group" aria-label="Page navigation controls">
-        {compactTouch ? <>{mainHistoryControl('back', true)}{mainHistoryControl('forward', true)}</> : null}
+        {compactHistory ? <>{mainHistoryControl('back', true)}{mainHistoryControl('forward', true)}</> : null}
         <ReviewTooltipButton label="Previous page" type="button" role="menuitem" className="review-chrome__icon-control" data-review-page-step="previous" disabled={!viewerState.pageReady || viewerState.currentPage <= 1} onPointerDown={preparePageStep} onPointerUp={clearPageStepIntent} onPointerCancel={clearPageStepIntent} onClick={(event) => runPageStep(event.currentTarget, () => controls?.previousPage())}><ReviewIcon name="chevron-up" /></ReviewTooltipButton>
         <ReviewTooltipButton label="Next page" type="button" role="menuitem" className="review-chrome__icon-control" data-review-page-step="next" disabled={!viewerState.pageReady || viewerState.currentPage >= viewerState.totalPages} onPointerDown={preparePageStep} onPointerUp={clearPageStepIntent} onPointerCancel={clearPageStepIntent} onClick={(event) => runPageStep(event.currentTarget, () => controls?.nextPage())}><ReviewIcon name="chevron-down" /></ReviewTooltipButton>
       </div>
@@ -968,8 +1063,8 @@ export function ReviewChrome({
   </>;
 
   const sizingCluster = (_candidate: ReviewChromePresentation): ReactNode => <div className="review-chrome__viewer-controls" style={{ display: 'inline-flex', gridColumn: 'auto', gridRow: 'auto', flexWrap: 'nowrap' }}>
-    <span className="review-chrome__control-cluster review-chrome__edit-cluster"><button type="button" title={compactTouch ? 'Open edit history' : 'Undo'} className="review-chrome__icon-control">{compactTouch ? <span className="review-chrome__paired-icon"><ReviewIcon name="undo" /><ReviewIcon name="redo" /></span> : <ReviewIcon name="undo" />}</button>{compactTouch ? null : <button type="button" title="Redo" className="review-chrome__icon-control"><ReviewIcon name="redo" /></button>}</span>
-    <span className="review-chrome__control-cluster review-chrome__navigation-cluster">{compactTouch ? null : <><button type="button" title="Back in document history" data-main-history="back" className="review-chrome__icon-control"><ReviewIcon name="arrow-left" /></button><button type="button" title="Forward in document history" data-main-history="forward" className="review-chrome__icon-control"><ReviewIcon name="arrow-right" /></button></>}<span className="review-chrome__stat">{viewerState.pageReady ? `${viewerState.currentPage} / ${viewerState.totalPages}` : '— / —'}</span></span>
+    <span className="review-chrome__control-cluster review-chrome__edit-cluster"><button type="button" title={compactHistory ? 'Open edit history' : 'Undo'} className="review-chrome__icon-control">{compactHistory ? <span className="review-chrome__paired-icon"><ReviewIcon name="undo" /><ReviewIcon name="redo" /></span> : <ReviewIcon name="undo" />}</button>{compactHistory ? null : <button type="button" title="Redo" className="review-chrome__icon-control"><ReviewIcon name="redo" /></button>}</span>
+    <span className="review-chrome__control-cluster review-chrome__navigation-cluster">{compactHistory ? null : <><button type="button" title="Back in document history" data-main-history="back" className="review-chrome__icon-control"><ReviewIcon name="arrow-left" /></button><button type="button" title="Forward in document history" data-main-history="forward" className="review-chrome__icon-control"><ReviewIcon name="arrow-right" /></button></>}<span className="review-chrome__stat">{viewerState.pageReady ? `${viewerState.currentPage} / ${viewerState.totalPages}` : '— / —'}</span></span>
     <span className="review-chrome__control-cluster"><span className="review-chrome__stat">{viewerState.zoomReady ? `${viewerState.zoomPercent}%` : '—%'}</span></span>
     {copyLink === undefined ? null : <div className="review-chrome__link"><button type="button" title="Copy link to current location" className="review-chrome__icon-control"><ReviewIcon name="link" /></button></div>}
   </div>;
@@ -990,6 +1085,7 @@ export function ReviewChrome({
     className="review-chrome"
     data-review-chrome
     data-review-chrome-presentation={presentation}
+    data-review-chrome-title={titlePresentation}
     data-review-chrome-touch-compact={compactTouch ? 'true' : undefined}
     data-top-bar-menu-open={activeTopBarMenu ?? undefined}
   >
