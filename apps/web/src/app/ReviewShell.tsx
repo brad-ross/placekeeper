@@ -4,6 +4,7 @@ import {
   useContext,
   useLayoutEffect,
   useEffect,
+  useEffectEvent,
   useMemo,
   useReducer,
   useRef,
@@ -60,9 +61,10 @@ import type { ViewerControls, ViewerControlsSnapshot } from '../pdf/viewer-contr
 import { unavailableViewerControls } from '../pdf/viewer-controls.js';
 import type { ViewerFramingControls, ViewerPosition } from '../pdf/viewer-framing.js';
 import type { PdfViewerNavigation } from '../pdf/viewer-navigation-adapter.js';
-import type {
-  ViewerClientPlacement,
-  ViewerPdfLinkInvocation,
+import {
+  PDF_LINK_INTERACTION_ATTRIBUTE,
+  type ViewerClientPlacement,
+  type ViewerPdfLinkInvocation,
 } from '../pdf/viewer-interaction-events.js';
 import type { PdfAnnotationSurface } from '../pdf/annotation-surface.js';
 import type { DestinationSnippetRenderer } from '../pdf/destination-snippet.js';
@@ -347,6 +349,7 @@ export interface ReviewShellProps {
   existingAnnotations?: ExistingAnnotationsDiscovery;
   onRetryExistingAnnotations?(): void;
   activeItemId?: string | null;
+  annotationPageClickToken?: number;
   correspondingItemId?: string;
   activationRequest?: { readonly id: string; readonly token: number };
   onItemCorrespondenceChange?(id: string | undefined): void;
@@ -1095,6 +1098,16 @@ export function ReviewShell(props: ReviewShellProps) {
     setActiveItem(undefined);
     setPeekItemId(undefined);
   };
+  const dismissAnnotationPeekForPageClick = useEffectEvent(() => {
+    if (!anyWorkspaceOpen && authoringSessionRef.current === null
+      && (peekItemId !== undefined || annotationReaderSession?.origin === 'peek')) {
+      dismissAnnotationPeek();
+    }
+  });
+  useEffect(() => {
+    if (props.annotationPageClickToken) dismissAnnotationPeekForPageClick();
+  }, [props.annotationPageClickToken]);
+
   useEffect(() => {
     if (authoringSession !== null || annotationReaderSession?.origin !== 'peek') return;
     if (annotationReaderOwnedItemId === activeItemId) return;
@@ -1981,7 +1994,10 @@ export function ReviewShell(props: ReviewShellProps) {
           && (peekItemId !== undefined || annotationReaderSession?.origin === 'peek')
           && event.button === 0
           && event.target instanceof Element
-          && event.target.closest('.annotation-peek, [data-owned-focus-id], [data-owned-mark], [data-page-index]') === null
+          && (
+            event.target.closest('.annotation-peek, [data-owned-focus-id], [data-owned-mark], [data-page-index]') === null
+            || (!anyWorkspaceOpen && event.target.closest(`[${PDF_LINK_INTERACTION_ATTRIBUTE}]`) !== null)
+          )
         ) dismissAnnotationPeek();
         if (
           authoringSessionRef.current === null

@@ -120,7 +120,7 @@ export type ViewerInteractionEvent = (
   | { readonly type: 'page-note-cursor'; readonly value: ViewerPagePoint | null }
   | { readonly type: 'page-note-commit'; readonly value: ViewerPagePoint }
   | { readonly type: 'owned-mark'; readonly value: ViewerOwnedMarkInteraction }
-  | { readonly type: 'owned-mark-clear' }
+  | { readonly type: 'owned-mark-clear'; readonly pageClick?: boolean }
   | { readonly type: 'source-mark'; readonly value: ViewerSourceMarkInteraction }
   | { readonly type: 'pdf-external-link'; readonly value: { readonly sourceScope: ViewerPdfLinkSourceScope; readonly sourcePageIndex: number; readonly documentGeneration: number; readonly url: string } }
   | { readonly type: 'pdf-link'; readonly value: ViewerPdfLinkInvocation }

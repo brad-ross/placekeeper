@@ -1037,7 +1037,11 @@ export function App({
                 }, surface);
                 return;
               }
-              publish({ type: 'owned-mark-clear' }, surface);
+              publish({
+                type: 'owned-mark-clear',
+                pageClick: click !== undefined
+                  && hitTestOwnedMark(pageGeometry(), position, pageScale()) === undefined,
+              }, surface);
               const pagePoint: ViewerPagePoint = {
                 documentId,
                 pageIndex: page.index,
