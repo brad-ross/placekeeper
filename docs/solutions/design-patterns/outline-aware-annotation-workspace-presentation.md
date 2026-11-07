@@ -1,7 +1,7 @@
 ---
 title: Content-aware annotation workspace presentation
 date: 2026-08-11
-last_updated: 2026-09-10
+last_updated: 2026-11-07
 category: design-patterns
 module: PDF review workspace presentation
 problem_type: design_pattern
@@ -55,17 +55,17 @@ Keep the canonical vocabulary and ordering in one constant, then filter it once 
 
 Do not reserve placeholders for filtered modes. `WorkspaceModeStrip` maps exactly the supplied array and preserves its order (`apps/web/src/review/WorkspaceModeStrip.tsx`). When the input shrinks, the visual strip, keyboard sequence, and accessible tablist shrink together.
 
-### Keep tabs, panels, rails, and contextual actions under the same predicate
+### Keep tabs, panels, tray toggles, and contextual actions under the same predicate
 
 Removing only a tab leaves an unreachable panel and broken `aria-controls` relationships. Removing only a panel leaves a control that points nowhere. Availability must govern the entire capability:
 
 - `OutlineAnnotationsWorkspace` always mounts Search, and mounts Outline and Annotations only when each appears in `modes`. Its panel visibility uses the same effective mode as the selected tab (`apps/web/src/review/OutlineAnnotationsWorkspace.tsx`).
 - `ReferenceWorkspace` omits its header when it has no modes and mounts the References panel only when `references` is present (`apps/web/src/review/ReferenceWorkspace.tsx`).
-- The bottom References edge rail exists only while References is available, and the right rail stops claiming the References surface after the capability disappears (`apps/web/src/app/ReviewShell.tsx`).
+- A separate bottom toolbar toggle appears only when References is available and docked independently. A shared right or narrow toolbar toggle opens the Workspace. During authoring, any available tray toggle targets References (`apps/web/src/app/ReviewShell.tsx`).
 - The move-References action exists only while References is selected and a real docking destination is available. It remains outside the tablist so arrow-key navigation stays mode-only (`apps/web/src/review/ReferenceWorkspace.tsx`, `apps/web/src/review/WorkspaceModeStrip.tsx`).
 - The reversible Outline-collapse action exists only while the tools surface is open in Outline mode. Its slot renders outside the tablist in whichever shared or split header owns Outline, suppresses itself when there are no branches, and disables collapse when nothing is expanded and no restore snapshot is pending (`apps/web/src/app/ReviewShell.tsx`, `apps/web/src/review/OutlineExpansionController.tsx`).
 
-Closing the final Reference Tab should not create a separate empty-mode cleanup path. The navigation reducer removes the tab, cancels operations that no longer have a source, and records the return-focus token (`apps/web/src/review/reference-navigation-state.ts`). On the next render, the normal availability projection removes the References tab, panel, docking action, and References-only rail together.
+Closing the final Reference Tab should not create a separate empty-mode cleanup path. The navigation reducer removes the tab, cancels operations that no longer have a source, and records the return-focus token (`apps/web/src/review/reference-navigation-state.ts`). On the next render, the normal availability projection removes the References tab, panel, docking action, and separate References toggle together.
 
 ### Revalidate selection without erasing durable workspace memory
 
@@ -84,6 +84,12 @@ Availability and docking are separate concerns:
 - The tools workspace receives the projected non-References modes whether it owns its header or shares one rendered by `ReferenceWorkspace`.
 
 Moving References between right and bottom keeps References selected and restores focus after the new layout settles (`apps/web/src/app/ReviewShell.tsx`). Presentation changes should preserve the same mounted workspace and PDF reading state; they rearrange capability ownership rather than recreate navigation or viewer models. See [Adaptive annotation tray framing](../architecture-patterns/adaptive-annotation-tray-framing.md) for the mounted-state contract.
+
+### Keep the inactive tools surface out of the responsive transition
+
+A narrow Workspace showing References can be logically open while its tools surface is inactive. If the tools surface starts the width change as a visible bottom panel, its closing transition can briefly paint a right panel as soon as the presentation changes. Keep that inactive tools surface mounted for state continuity and remove it from layout while narrow References owns the shared surface. The normal closing transition still applies to a tools tray that was actually open (`apps/web/src/review/OutlineAnnotationsWorkspace.tsx`, `apps/web/src/app/review-workspace-surfaces.css`).
+
+The regression check samples tools visibility on the first wide presentation, while separately asserting that bottom References remains open. A check of the settled layout would miss the flash (`test/acceptance/review-workflow.spec.ts`). This change is pending in [PR #164](https://github.com/brad-ross/placekeeper/pull/164).
 
 ### Repair focus when dynamic removal disconnects a control
 
@@ -122,7 +128,7 @@ Protect the projection at several boundaries:
 1. Verify authoritative absence omits both the corresponding tab and panel. Include current `loaded-empty` Outline, final Reference close, pending References, and stale-generation Outline results. Separately require a usable empty Annotations tab and panel.
 2. Render a selected mode absent from the supplied array and assert Search is selected, visible, and labelled by a real tab.
 3. Remove a focused mode live and assert focus moves to a connected destination. Repeat while References is selected to prove an unrelated mode removal does not change the active capability.
-4. Close or send the final reference and assert its tab, panel, docking action, and edge rail disappear together.
+4. Close or send the final reference and assert its tab, panel, docking action, and separate References toggle disappear together.
 5. Click both workspace modes and individual Reference Tab selectors; assert `aria-selected` changes. Static screenshots cannot detect an overlay or pointer regression.
 6. Measure individual tab-segment sizing, compact inactive targets, selected-label expansion, and contextual-action placement in a real browser. Keep stylesheet-shape assertions as a fast warning, not a substitute for behavior.
 7. Run responsive and focus-sensitive coverage in Chromium and WebKit.
@@ -131,9 +137,9 @@ For negative annotation-label tests, begin with a valid annotation, page geometr
 
 ## Why This Matters
 
-A navigation control is a promise that a meaningful destination exists. Content-aware projection keeps that promise: no Outline tab for a definitively outline-free PDF, an informative Annotations empty state before any review or discovered annotation exists, and no References tab or rail after the final reference closes. Loading, failure, retry, and pending states remain available when they are themselves informative.
+A navigation control is a promise that a meaningful destination exists. Content-aware projection keeps that promise: no Outline tab for a definitively outline-free PDF, an informative Annotations empty state before any review or discovered annotation exists, and no References tab or dedicated toggle after the final reference closes. Loading, failure, retry, and pending states remain available when they are themselves informative.
 
-Central projection also prevents responsive drift. Right, bottom, and narrow presentations arrange capabilities differently, but they do not invent separate availability rules. Selection fallback, roving tab order, panel mounting, docking actions, focus restoration, and edge rails all consume the same current set.
+Central projection also prevents responsive drift. Right, bottom, and narrow presentations arrange capabilities differently, but they do not invent separate availability rules. Selection fallback, roving tab order, panel mounting, docking actions, focus restoration, and tray toggles all consume the same current set.
 
 Finally, separating state from polish keeps the design maintainable. The compact strip looks balanced with one, two, three, or four modes because unavailable elements do not exist. Icons, labels, hover, and compound References styling can evolve without reopening document-capability semantics.
 
@@ -151,7 +157,7 @@ Do not hide a capability merely because its content collection is empty when its
 
 ### PDF with no optional workspace content
 
-If Outline is current `loaded-empty`, there are no owned or discovered annotations, and no reference is open or pending, project `['search', 'annotations']`. Render Search and Annotations, including its empty state. Omit Outline, References, the docking action, and the bottom References rail. A remembered removed mode falls back to Search for this render without deleting its memory.
+If Outline is current `loaded-empty`, there are no owned or discovered annotations, and no reference is open or pending, project `['search', 'annotations']`. Render Search and Annotations, including its empty state. Omit Outline, References, the docking action, and the separate References toggle. A remembered removed mode falls back to Search for this render without deleting its memory.
 
 ### Outline and References, but no annotations
 
@@ -159,7 +165,7 @@ The shared list is `['outline', 'search', 'annotations', 'references']`; the too
 
 ### Final Reference Tab closes while References is selected
 
-Remove the tab from navigation state, record the return-focus token, and let the next projection remove References everywhere. Revalidate the selected mode and focus a connected tab or panel. Do not leave a reopen rail leading to an empty workspace or manufacture an empty Reference Tab to preserve selection.
+Remove the tab from navigation state, record the return-focus token, and let the next projection remove References everywhere. Revalidate the selected mode and focus a connected tab or panel. Leave the shared Workspace toggle available for its remaining modes.
 
 ### Outline disappears during discovery refresh
 

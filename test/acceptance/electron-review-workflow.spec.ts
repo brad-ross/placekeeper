@@ -107,7 +107,7 @@ test('canceling a protected page note without a save destination clears the draf
 });
 
 async function showAnnotations(page: Page): Promise<void> {
-  const show = page.getByRole('button', { name: 'Show workspace', exact: true });
+  const show = page.getByRole('button', { name: 'Show Workspace', exact: true });
   if (await show.isVisible()) await show.click();
   await page.getByRole('tab', { name: 'Annotations', exact: true }).click();
 }

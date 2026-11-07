@@ -110,7 +110,7 @@ async function openAnnotationsWorkspace(page: Page): Promise<void> {
   const workspace = page.locator(presentation === "bottom" ? "#review-workspace" : "#review-tools-workspace");
   const openAttribute = presentation === "bottom" ? "data-workspace-open" : "data-tools-workspace-open";
   if (await workspace.getAttribute(openAttribute) !== "true") {
-    await page.getByRole("button", { name: "Show workspace", exact: true }).click();
+    await page.getByRole("button", { name: "Show Workspace", exact: true }).click();
   }
   await expect(workspace).toHaveAttribute(openAttribute, "true");
   await expect(workspace).toBeVisible();
@@ -588,7 +588,7 @@ for (const width of [390, 1280]) test(`@critical landing showcase and PDF contro
   await demo.locator('[data-initial-view-ready="true"]').waitFor({ state: 'attached' });
   await expect(demo.locator('[data-page-index="13"] > img').first()).toBeVisible();
   await expect(demo.locator('[data-owned-mark]')).toHaveCount(0);
-  await demo.getByRole('button', { name: 'Show workspace', exact: true }).click();
+  await demo.getByRole('button', { name: 'Show Workspace', exact: true }).click();
   await expect(demo.getByRole('tab', { name: 'Outline', exact: true })).toBeEnabled();
   if (width === 1280) {
     expect(await demo.locator('body').evaluate(() => innerWidth)).toBe(1000);
@@ -858,7 +858,7 @@ test('@critical real-paper demo keeps its metadata while bounding the main previ
   });
   expect(momentum.canceled.every(Boolean)).toBe(true);
   expect(new Set(momentum.offsets).size).toBe(1);
-  await demo.getByRole('button', { name: 'Show workspace', exact: true }).click();
+  await demo.getByRole('button', { name: 'Show Workspace', exact: true }).click();
   await expect(demo.getByRole('button', { name: /Theoretical Properties/ }).first()).toBeVisible();
   await page.getByRole('tab', { name: 'Follow references', exact: true }).click();
   await expect(demo.getByRole('tab', { name: 'Appendix A, Page 31', exact: true })).toBeVisible();
@@ -887,11 +887,20 @@ test('@critical demo starts fitted and Fit Width keeps the requested scale', asy
   const demo = page.frameLocator('iframe');
   await demo.locator('[data-initial-view-ready="true"]').waitFor({ state: 'attached' });
   const zoom = demo.getByRole('textbox', { name: /^Current zoom/ });
-  await expect(zoom).toHaveValue('146');
   await expect(demo.getByRole('textbox', { name: /^Current page/ })).toHaveValue('14');
   await expect(demo.locator('body')).toHaveAttribute('data-first-fitted-demo-page', '14');
   const readPage = demo.locator('[data-pdf-copy-surface="main"] [data-page-index="13"] > img').first();
-  // Initial fitting must match the button's horizontal geometry, not just its percentage.
+  // Use the viewport's client bounds to exclude any native scrollbar gutter.
+  const initialMargins = await readPage.evaluate((image) => {
+    const workspace = image.closest('.pdf-workspace')!;
+    const viewport = workspace.querySelector<HTMLElement>('[data-viewer-framing-viewport]')!;
+    const left = viewport.getBoundingClientRect().left + viewport.clientLeft;
+    const right = Math.min(left + viewport.clientWidth, workspace.getBoundingClientRect().right);
+    const pageBounds = image.getBoundingClientRect();
+    return { left: pageBounds.left - left, right: right - pageBounds.right };
+  });
+  expect(Math.abs(initialMargins.left - 10)).toBeLessThan(1);
+  expect(Math.abs(initialMargins.right - 10)).toBeLessThan(1);
   const initialBounds = (await readPage.boundingBox())!;
   await expect(demo.locator('body')).not.toHaveAttribute('data-unfitted-demo-paint', 'true');
   for (const mode of ['Read with focus', 'Follow references', 'Make comments']) {

@@ -145,7 +145,11 @@ export function WorkspaceModeStrip<Mode extends WorkspaceMode>({
           <ReviewIcon
             name={dockAction.destination === 'bottom' ? 'panel-bottom' : 'panel-right'}
             size={16}
-          />
+          >
+            <path d={dockAction.destination === 'bottom'
+              ? 'M12 6v6M8.75 8.75L12 12l3.25-3.25'
+              : 'M6 12h6M8.75 8.75L12 12l-3.25 3.25'} />
+          </ReviewIcon>
         </ReviewTooltipButton>
       ) : null}
     </div>

@@ -18,8 +18,6 @@ export function protectNativeScrollbarBacking(scrollport: HTMLElement): void {
     '--scrollbar-backing-height': `${scrollport.clientHeight}px`,
     '--scrollbar-backing-padding-top': style.paddingTop,
     '--scrollbar-backing-padding-left': style.paddingLeft,
-    '--scrollbar-backing-right': `${Math.max(0, 16 - (scrollport.offsetWidth - scrollport.clientWidth))}px`,
-    '--scrollbar-backing-bottom': `${Math.max(0, 16 - (scrollport.offsetHeight - scrollport.clientHeight))}px`,
   };
   for (const [key, value] of Object.entries(values)) {
     if (scrollport.style.getPropertyValue(key) !== value) scrollport.style.setProperty(key, value);
@@ -28,7 +26,6 @@ export function protectNativeScrollbarBacking(scrollport: HTMLElement): void {
 
 export const REVIEW_OVERLAY_INSET = 12;
 export const REVIEW_OVERLAY_FADE_SIZE = 12;
-export const REVIEW_COLLAPSED_RAIL_SIZE = 40;
 
 interface RectLike {
   readonly left: number;
@@ -243,7 +240,6 @@ export function useReviewOverlayGeometry(input: {
     ...zoomActions,
     geometry,
     style: {
-      '--review-collapsed-rail-size': `${REVIEW_COLLAPSED_RAIL_SIZE}px`,
       '--review-overlay-inset': `${geometry.outsideInset}px`,
       '--review-main-scrollbar-width': `${geometry.scrollbarWidth}px`,
       '--review-main-scrollbar-height': `${geometry.scrollbarHeight}px`,

@@ -63,7 +63,7 @@ test('PDF link pointer opening does not impersonate a tooltip hover', async ({ p
 
 test('search has a borderless input and equally inset clear action', async ({ page }) => {
   await openPdf(page, 'reference-navigation.pdf');
-  await page.getByRole('button', { name: 'Show workspace', exact: true }).click();
+  await page.getByRole('button', { name: 'Show Workspace', exact: true }).click();
   await page.getByRole('tab', { name: 'Search', exact: true }).click();
   const input = page.getByRole('searchbox', { name: 'Search this PDF' });
   await input.fill('Primary');

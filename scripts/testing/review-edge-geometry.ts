@@ -6,18 +6,14 @@ export function reviewEdgeGeometry(stage: Element) {
   const paint = getComputedStyle(backing, '::after');
   const number = (name: string, fallback: number) => Number.parseFloat(style.getPropertyValue(name)) || fallback;
   const fadeSize = number('--review-overlay-fade-size', 12);
-  const rightStart = bounds.left + (stage.getAttribute('data-right-overlay') === 'true'
-    ? number('--review-overlay-right-start', 0)
-    : Number.parseFloat(paint.width) - Math.max(0, number('--review-document-right-space', 40)
-      - number('--review-main-scrollbar-width', 0)));
-  const bottomEnd = bounds.top + Number.parseFloat(paint.height);
-  const railHeight = Math.max(number('--review-collapsed-rail-size', 40),
-    number('--review-overlay-inset', 12) + Math.max(32, number('--review-edge-rail-size', number('--review-control-default', 32))));
+  const rightEnd = bounds.left + number('--scrollbar-backing-width', 0);
+  const rightOverlay = stage.getAttribute('data-right-overlay') === 'true';
+  const rightStart = rightOverlay ? bounds.left + number('--review-overlay-right-start', 0) : rightEnd;
+  const bottomEnd = bounds.top + number('--scrollbar-backing-height', 0);
   const bottomStart = stage.getAttribute('data-bottom-overlay') === 'true'
     ? bounds.top + number('--review-overlay-bottom-start', 0)
-    : bottomEnd - railHeight;
-  const clearRight = stage.getAttribute('data-workspace-presentation') === 'right'
-    ? rightStart - fadeSize : bounds.left + Number.parseFloat(paint.width);
+    : bottomEnd;
+  const clearRight = rightOverlay ? rightStart - fadeSize : rightEnd;
   return { rightStart, bottomStart, bottomEnd, clearRight,
     fadeSize, display: paint.display, background: paint.backgroundImage };
 }

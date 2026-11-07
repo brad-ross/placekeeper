@@ -1368,8 +1368,8 @@ describe('review shell layout and accessibility contract', () => {
     expect(html).toContain('aria-label="PDF zoom"');
     expect(html).toContain('aria-label="Zoom unavailable"');
     expect(html).not.toContain('aria-label="Workspace (0 annotations)"');
-    expect(html).toContain('data-workspace-edge-rail="right"');
-    expect(html).not.toContain('data-workspace-edge-rail="bottom"');
+    expect(html).toContain('data-workspace-tray-toggle="right"');
+    expect(html).not.toContain('data-workspace-tray-toggle="bottom"');
     expect(html).toContain('class="review-workspace__activity-strip"');
     expect(html).toContain('data-workspace-mode-count="3"');
     expect(html).not.toContain('data-workspace-mode-label="references"');
@@ -1679,10 +1679,39 @@ describe('review shell layout and accessibility contract', () => {
     );
   });
 
-  it('uses only the right rail and controls the combined surface when References is right-docked', () => {
+  it.each([
+    {
+      name: 'a split layout with the right tray closed',
+      layout: 'wide-bottom',
+      trayButtons: [
+        ['bottom', 'true', 'review-workspace', 'Hide References'],
+        ['right', 'false', 'review-tools-workspace', 'Show Workspace'],
+      ],
+    },
+    {
+      name: 'a split layout with both trays open',
+      layout: 'wide-split',
+      trayButtons: [
+        ['bottom', 'true', 'review-workspace', 'Hide References'],
+        ['right', 'true', 'review-tools-workspace', 'Hide Workspace'],
+      ],
+    },
+    {
+      name: 'the right-docked layout',
+      layout: 'wide-right',
+      trayButtons: [['right', 'true', 'review-workspace review-tools-workspace', 'Hide Workspace']],
+    },
+    {
+      name: 'the narrow layout',
+      layout: 'narrow-unified',
+      trayButtons: [['bottom', 'true', 'review-workspace review-tools-workspace', 'Hide Workspace']],
+    },
+  ])('exposes the toolbar tray controls for $name', ({ layout: kind, trayButtons }) => {
     let layout = createReferenceWorkspaceLayout({ width: 1440, height: 900 });
     layout = reduceReferenceWorkspaceLayout(layout, { type: 'show-references' });
-    layout = reduceReferenceWorkspaceLayout(layout, { type: 'move-references-right' });
+    if (kind === 'wide-split') layout = reduceReferenceWorkspaceLayout(layout, { type: 'show-right-workspace' });
+    if (kind === 'wide-right') layout = reduceReferenceWorkspaceLayout(layout, { type: 'move-references-right' });
+    if (kind === 'narrow-unified') layout = reduceReferenceWorkspaceLayout(layout, { type: 'set-regime', regime: 'narrow' });
     const html = renderToStaticMarkup(
       <ReviewShell
         state={state}
@@ -1701,10 +1730,17 @@ describe('review shell layout and accessibility contract', () => {
       ><div>Document canvas</div></ReviewShell>,
     );
 
-    expect(html).toContain('data-reference-layout="wide-right"');
-    expect(html).not.toContain('data-workspace-edge-rail="right"');
-    expect(html).not.toContain('data-workspace-edge-rail="bottom"');
-    expect(html).toContain('aria-controls="review-workspace"');
+    expect(html).toContain(`data-reference-layout="${kind}"`);
+    const toolbar = html.slice(html.indexOf('<header'), html.indexOf('</header>'));
+    expect(toolbar).toContain('role="group" aria-label="Workspace trays"');
+    const toggles = toolbar.match(/<button[^>]*data-workspace-tray-toggle=[^>]*>/gu) ?? [];
+    expect(toggles).toHaveLength(trayButtons.length);
+    trayButtons.forEach(([surface, expanded, controls, label], index) => {
+      expect(toggles[index]).toContain(`data-workspace-tray-toggle="${surface}"`);
+      expect(toggles[index]).toContain(`aria-expanded="${expanded}"`);
+      expect(toggles[index]).toContain(`aria-controls="${controls}"`);
+      expect(toggles[index]).toContain(`aria-label="${label}"`);
+    });
   });
 
   it('keeps annotations task-first and source annotations explicitly read-only', () => {

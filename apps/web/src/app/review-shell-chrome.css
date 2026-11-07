@@ -151,6 +151,7 @@
   row-gap: .35rem;
 }
 
+.review-chrome__tray-controls,
 .review-chrome__control-cluster {
   display: inline-flex;
   flex: none;
@@ -540,7 +541,7 @@
   padding-right: calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw) + 16px);
 }
 
-.electron-review-shell [data-review-chrome] :is([data-review-chrome-group], button, input, select, textarea, a, [role="button"], [tabindex], [contenteditable="true"], .copy-link-control__fallback),
+.electron-review-shell [data-review-chrome] :is([data-review-chrome-group], .review-chrome__tray-controls, button, input, select, textarea, a, [role="button"], [tabindex], [contenteditable="true"], .copy-link-control__fallback),
 body:has(.electron-review-shell) .top-bar-menu__surface {
   -webkit-app-region: no-drag;
 }

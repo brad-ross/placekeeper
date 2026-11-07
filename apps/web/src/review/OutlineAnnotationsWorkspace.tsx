@@ -55,7 +55,7 @@ export function chooseToolModeFocusTarget(
 
 export function OutlineAnnotationsWorkspace({
   workspaceRef,
-  open,
+  open: layoutOpen,
   authoringTakeover = false,
   mode,
   modes,
@@ -67,7 +67,7 @@ export function OutlineAnnotationsWorkspace({
   search,
   headerAction,
   onHide,
-  hideLabel = 'Hide workspace',
+  hideLabel = 'Hide Workspace',
   onModeChange,
   onOutlineActivate,
   onOutlineReference,
@@ -78,6 +78,9 @@ export function OutlineAnnotationsWorkspace({
   const outlineAvailable = modes.includes('outline');
   const annotationsAvailable = modes.includes('annotations');
   const toolModes = modes;
+  // The narrow References view has no tools content to carry into a wide layout.
+  const referencesOnly = presentation === 'bottom' && mode === 'references';
+  const open = layoutOpen && !referencesOnly;
   const effectiveMode: WorkspaceMode = mode !== 'references' && !modes.includes(mode)
     ? modes[0] ?? 'search'
     : mode;
@@ -187,6 +190,7 @@ export function OutlineAnnotationsWorkspace({
       data-authoring-takeover={authoringTakeover ? 'true' : undefined}
       data-tools-workspace-shared={headerVariant === 'shared' ? 'true' : 'false'}
       data-workspace-presentation={presentation}
+      hidden={referencesOnly}
       aria-label={outlineAvailable
         ? annotationsAvailable ? 'Outline, search, and annotations' : 'Outline and search'
         : annotationsAvailable ? 'Search and annotations' : 'Search'}
