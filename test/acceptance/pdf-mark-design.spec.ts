@@ -1,3 +1,4 @@
+import { reviewEdgeGeometry } from '../../scripts/testing/review-edge-geometry.js';
 import { randomUUID } from 'node:crypto';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -175,7 +176,7 @@ test('text selection uses the shared blue wash and a plain I-beam', async ({ pag
   }, start)).toBe('text');
   await page.mouse.down();
   await page.mouse.move(box.x + 246 * scale, start.y, { steps: 12 });
-  const selection = pdfPage.locator(':scope > div[style*="mix-blend-mode"] > div').first();
+  const selection = pdfPage.locator(':scope > [data-pdf-selection-layer] > div[style*="mix-blend-mode"] > div').first();
   await expect(selection).toHaveCSS('background-color', 'rgb(207, 222, 234)');
   await page.mouse.up();
   const palette = page.getByRole('toolbar', { name: 'Selection review actions' });
@@ -342,23 +343,13 @@ for (const width of [1280, 620]) {
     await expect(peek).toBeVisible();
     const tray = page.locator('[data-tools-workspace-open="true"], [data-workspace-open="true"]').filter({ visible: true }).first();
     const trayBox = (await tray.boundingBox())!;
-    const edge = await page.locator('[data-review-stage]').evaluate((stage, vertical) => {
-      const side = vertical ? 'right' : 'bottom';
-      const fade = stage.querySelector(`.review-overlay-frame__${side}-fade`)!;
-      const backing = stage.querySelector(`.review-overlay-frame__${side}-backing`)!;
-      const fadeBox = fade.getBoundingClientRect();
-      const backingBox = backing.getBoundingClientRect();
-      return { size: vertical ? fadeBox.width : fadeBox.height,
-        start: vertical ? backingBox.left : backingBox.top,
-        end: vertical ? fadeBox.right : fadeBox.bottom,
-        gradient: getComputedStyle(fade).backgroundImage,
-        color: getComputedStyle(backing).backgroundColor };
-    }, width > 700);
-    expect(edge.size).toBe(12);
-    expect(edge.end).toBeCloseTo(edge.start, 2);
-    expect((width > 700 ? trayBox.x : trayBox.y) - edge.start).toBeCloseTo(12, 2);
-    expect(edge.gradient).toContain('rgba(0, 0, 0, 0)');
-    expect(edge.gradient).toContain(edge.color);
+    const edge = await page.locator('[data-review-stage]').evaluate(reviewEdgeGeometry);
+    expect(edge.fadeSize).toBe(12);
+    const start = width > 700 ? edge.rightStart : edge.bottomStart;
+    expect((width > 700 ? trayBox.x : trayBox.y) - start).toBeCloseTo(12, 2);
+    expect(edge.display).toBe('block');
+    expect(edge.background).toContain('linear-gradient');
+    expect(edge.background).toContain('rgba(0, 0, 0, 0)');
 
     const peekBox = (await peek.boundingBox())!;
     if (width > 700) expect(peekBox.x + peekBox.width).toBeCloseTo(trayBox.x - 12, 0);

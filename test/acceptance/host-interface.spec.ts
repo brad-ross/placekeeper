@@ -314,7 +314,7 @@ async function openAnimatedHostReview(page: Page, width = 1280) {
   await page.waitForTimeout(500);
 }
 
-test('normal-motion workspace opening fits once after the tray settles', async ({ page }) => {
+test('normal-motion workspace opening and closing refit after the tray settles', async ({ page }) => {
   await openAnimatedHostReview(page, 960);
   const samples = await page.evaluate(() => new Promise<{ width: number; trayX: number }[]>((resolve) => {
     const pdf = document.querySelector<HTMLElement>('[data-page-index="0"]')!;
@@ -349,9 +349,11 @@ test('normal-motion workspace opening fits once after the tray settles', async (
     sample();
     document.querySelector<HTMLButtonElement>('button[aria-label="Hide workspace"]')!.click();
   }));
-  expect(closing.every((sample) => Math.abs(sample.width - last.width) < 2)).toBe(true);
-  expect(closing.at(-1)!.x).toBeGreaterThan(closing[0]!.x + 100);
-  expect(closing.some((sample) => sample.x > closing[0]!.x + 5 && sample.x < closing.at(-1)!.x - 5)).toBe(true);
+  expect(Math.abs(closing.at(-1)!.width - first.width)).toBeLessThan(2);
+  for (let index = 1; index < closing.length; index += 1) {
+    expect(closing[index]!.width).toBeGreaterThanOrEqual(closing[index - 1]!.width - 2);
+  }
+  expect(closing.some((sample) => sample.x > closing[0]!.x + 5)).toBe(true);
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await expect(page.locator('[data-viewer-framing-viewport]')).toHaveCSS('transition-duration', '0s');
 });
@@ -438,3 +440,102 @@ for (const { referencesOpen, tall, zoomPercent } of [
     expect(samples.some((sample) => sample.trayX < first.trayX - 5 && sample.trayX > last.trayX + 5)).toBe(true);
   });
 }
+
+test('refreshes the current page when workspace occlusion changes without scrolling', async ({ page }) => {
+  const settlePages = async () => {
+    await page.locator('.pdf-workspace:not(.pdf-workspace--reference)').evaluate(async workspace => {
+      let previous = '';
+      let stableSince = performance.now();
+      await new Promise<void>(resolve => {
+        const measure = () => {
+          const next = JSON.stringify([...workspace.querySelectorAll('.pdf-workspace__page')]
+            .map(page => page.getBoundingClientRect().toJSON()));
+          if (next !== previous) {
+            previous = next;
+            stableSince = performance.now();
+          }
+          if (performance.now() - stableSince >= 250) resolve();
+          else requestAnimationFrame(measure);
+        };
+        requestAnimationFrame(measure);
+      });
+    });
+  };
+  await page.setViewportSize({ width: 375, height: 800 });
+  await page.goto('/test/acceptance/review-harness/?host-history=1&host-resumed=1');
+  await page.locator('#root').evaluate(root => { root.dataset.productionRoot = 'true'; });
+  await page.getByRole('button', { name: 'Finish host bootstrap' }).click();
+  const currentPage = page.getByRole('textbox', { name: /^Current page \d+ of 4/u });
+  await expect(currentPage).toBeVisible();
+  const show = page.getByRole('button', { name: 'Show workspace', exact: true });
+  if (await show.isVisible()) await show.click();
+  await page.getByRole('tab', { name: 'Outline', exact: true }).click();
+  await page.getByRole('button', { name: 'Overview, Page 2', exact: true }).click();
+  await expect(currentPage).toHaveValue('2');
+  await settlePages();
+  await page.getByRole('button', { name: 'Hide workspace', exact: true }).click();
+  await settlePages();
+  const zoom = page.getByRole('textbox', { name: /^Current zoom/u });
+  await zoom.fill(String(Number(await zoom.inputValue()) + 1));
+  await zoom.press('Enter');
+  await settlePages();
+  const viewport = page.locator('.pdf-workspace:not(.pdf-workspace--reference) [data-viewer-framing-viewport]');
+  await viewport.evaluate(element => { element.scrollTop = 625; });
+  await expect(currentPage).toHaveValue('3');
+  const before = await viewport.evaluate(element => ({
+    scrollTop: element.scrollTop,
+    pages: [...element.querySelectorAll('.pdf-workspace__page')].map(page => page.getBoundingClientRect().top),
+  }));
+  await show.click();
+  await settlePages();
+  await expect(currentPage).toHaveValue('2');
+  expect(await viewport.evaluate(element => ({
+    scrollTop: element.scrollTop,
+    pages: [...element.querySelectorAll('.pdf-workspace__page')].map(page => page.getBoundingClientRect().top),
+  }))).toEqual(before);
+  const pageMenu = page.getByRole('button', { name: /Open page navigation/u });
+  await pageMenu.focus();
+  await pageMenu.press('Enter');
+  await page.getByRole('menuitem', { name: 'Previous page', exact: true }).click();
+  await expect(currentPage).toHaveValue('1');
+  await pageMenu.focus();
+  await pageMenu.press('Enter');
+  await page.getByRole('menuitem', { name: 'Next page', exact: true }).click();
+  await expect(currentPage).toHaveValue('2');
+});
+
+test('refreshes the current page when a right workspace narrows mixed-width pages without scrolling', async ({ page }) => {
+  const { PDFDocument } = await import('pdf-lib');
+  const document = await PDFDocument.create();
+  for (const width of [612, 1000, 612, 612]) document.addPage([width, 792]);
+  const bytes = Buffer.from(await document.save());
+  await page.route('**/test/fixtures/pdfs/reference-navigation.pdf', route => route.fulfill({
+    body: bytes, contentType: 'application/pdf',
+  }));
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.goto('/test/acceptance/review-harness/?host-history=1&host-resumed=1');
+  await page.locator('#root').evaluate(root => { root.dataset.productionRoot = 'true'; });
+  await page.getByRole('button', { name: 'Finish host bootstrap' }).click();
+  const currentPage = page.getByRole('textbox', { name: /^Current page \d+ of 4/u });
+  await expect(currentPage).toBeVisible();
+  const hide = page.getByRole('button', { name: 'Hide workspace', exact: true });
+  if (await hide.isVisible()) await hide.click();
+  const zoom = page.getByRole('textbox', { name: /^Current zoom/u });
+  await zoom.fill('120');
+  await zoom.press('Enter');
+  const viewport = page.locator('.pdf-workspace:not(.pdf-workspace--reference) [data-viewer-framing-viewport]');
+  await expect.poll(() => viewport.locator('.pdf-workspace__page[data-page-index="0"]').evaluate(
+    element => Math.round(element.getBoundingClientRect().width),
+  )).toBe(734);
+  await viewport.evaluate(element => {
+    const firstPage = element.querySelector('.pdf-workspace__page[data-page-index="0"]')!;
+    element.scrollTop = firstPage.getBoundingClientRect().bottom + element.scrollTop - 530;
+  });
+  await expect(currentPage).toHaveValue('2');
+  const before = await viewport.evaluate(element => ({ top: element.scrollTop, left: element.scrollLeft }));
+  await page.getByRole('button', { name: 'Show workspace', exact: true }).click();
+  await expect(currentPage).toHaveValue('1');
+  expect(await viewport.evaluate(element => ({ top: element.scrollTop, left: element.scrollLeft }))).toEqual(before);
+  await expect(zoom).toHaveValue('120');
+});

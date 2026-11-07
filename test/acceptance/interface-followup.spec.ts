@@ -1,3 +1,4 @@
+import { reviewEdgeGeometry } from '../../scripts/testing/review-edge-geometry.js';
 import { copyFile, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -41,7 +42,8 @@ test('page and zoom menus align to the right edge of their numeric groups', asyn
       const group = page.locator(`[data-review-chrome] ${groupSelector}:visible`);
       const a = (await group.boundingBox())!;
       const b = (await menu.boundingBox())!;
-      expect(b.x + b.width).toBeCloseTo(a.x + a.width, 0);
+      const expectedRight = Math.min(width - 8, Math.max(8 + b.width, a.x + a.width));
+      expect(b.x + b.width).toBeCloseTo(expectedRight, 0);
       expect(b.x).toBeGreaterThanOrEqual(6);
       expect(b.x + b.width).toBeLessThanOrEqual(width - 6);
       await menu.press('Escape');
@@ -55,15 +57,17 @@ test('workspace fade follows the opening tray without another pointer or scroll 
   await page.getByRole('button', { name: 'Show workspace', exact: true }).click();
   // Do not move the pointer after opening: the transition itself must publish geometry.
   await page.waitForTimeout(240);
-  const geometry = await page.locator('[data-review-stage]').evaluate((stage) => {
-    const tray = stage.querySelector('.review-tools-workspace')!.getBoundingClientRect();
-    const fade = stage.querySelector('.review-overlay-frame__right-fade')!;
-    const bounds = fade.getBoundingClientRect();
-    return { gap: tray.left - bounds.right, width: bounds.width,
-      display: getComputedStyle(fade).display, background: getComputedStyle(fade).backgroundImage };
-  });
-  expect(geometry).toMatchObject({ gap: 12, width: 12, display: 'block' });
-  expect(geometry.background).toContain('linear-gradient');
+  const geometry = await page.locator('[data-review-stage]').evaluate(reviewEdgeGeometry);
+  const tray = (await page.locator('#review-tools-workspace').boundingBox())!;
+  expect(tray.x - geometry.rightStart).toBeCloseTo(12, 2);
+  expect(geometry).toMatchObject({ fadeSize: 12, display: 'block' });
+  const backing = (await page.locator('.pdf-workspace__scrollbar-backing').first().boundingBox())!;
+  const gradient = geometry.background.match(
+    /linear-gradient\(to left, rgb\([^)]+\) calc\(100% - ([\d.]+)px\), rgba\(0, 0, 0, 0\) calc\(100% - ([\d.]+)px\)\)/u,
+  );
+  expect(gradient, 'the painted right edge must include its opaque backing and transparent fade').not.toBeNull();
+  expect(Number(gradient![1]) + backing.x).toBeCloseTo(geometry.rightStart, 2);
+  expect(Number(gradient![2]) + backing.x).toBeCloseTo(geometry.rightStart - geometry.fadeSize, 2);
   await page.screenshot({ path: test.info().outputPath('opened-tray-fade.png') });
 });
 

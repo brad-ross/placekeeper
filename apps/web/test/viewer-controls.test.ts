@@ -80,6 +80,56 @@ describe('viewer controls adapter', () => {
     expect(unsubscribeZoom).toHaveBeenCalledOnce();
   });
 
+  it('reports the unobscured reading page and uses it for adjacent jumps', async () => {
+    let readingPage: number | null = 2;
+    const scroll = {
+      getCurrentPage: () => 3, getTotalPages: () => 4,
+      onScroll: () => () => undefined,
+    };
+    const registry = {
+      getStore: () => ({ getState: () => ({ core: { activeDocumentId: 'doc' } }) }),
+      getPlugin: (id: string) => id === ScrollPlugin.id ? { provides: () => ({
+        forDocument: () => scroll, onPageChange: () => () => undefined,
+      }) } : undefined,
+    } as unknown as PluginRegistry;
+    const jump = vi.fn(() => Promise.resolve(true));
+    const controls = createViewerControls(registry, {
+      currentReadingPage: () => readingPage, jumpToPage: jump,
+    });
+    expect(controls.snapshot().currentPage).toBe(2);
+    controls.nextPage();
+    expect(jump).toHaveBeenLastCalledWith(3);
+    await Promise.resolve();
+    readingPage = 1;
+    expect(controls.snapshot().currentPage).toBe(1);
+    controls.previousPage();
+    expect(jump).toHaveBeenCalledTimes(1);
+    readingPage = null;
+    expect(controls.snapshot().currentPage).toBe(3);
+    readingPage = 5;
+    expect(controls.snapshot().currentPage).toBe(3);
+    controls.dispose();
+  });
+
+  it('validates the reading page against the page count reported by the new layout', () => {
+    let onLayout: ((event: { documentId: string; pageNumber: number; totalPages: number }) => void) | undefined;
+    const registry = {
+      getStore: () => ({ getState: () => ({ core: { activeDocumentId: 'doc' } }) }),
+      getPlugin: (id: string) => id === ScrollPlugin.id ? { provides: () => ({
+        forDocument: () => ({ getCurrentPage: () => 1, getTotalPages: () => 4, onScroll: () => () => undefined }),
+        onPageChange: () => () => undefined,
+        onLayoutReady: (listener: typeof onLayout) => { onLayout = listener; return () => undefined; },
+      }) } : undefined,
+    } as unknown as PluginRegistry;
+    const controls = createViewerControls(registry, { currentReadingPage: () => 3 });
+    const listener = vi.fn();
+    controls.subscribe(listener);
+    onLayout?.({ documentId: 'doc', pageNumber: 1, totalPages: 2 });
+    expect(listener).toHaveBeenLastCalledWith({ type: 'page', currentPage: 1, totalPages: 2 });
+    expect(controls.snapshot().currentPage).toBe(1);
+    controls.dispose();
+  });
+
   it('routes page buttons and entry through the shared jump handler when available', async () => {
     const scroll = {
       getCurrentPage: () => 2, getTotalPages: () => 3,

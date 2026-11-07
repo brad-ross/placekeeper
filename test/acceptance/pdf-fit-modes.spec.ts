@@ -1,3 +1,4 @@
+import { reviewEdgeGeometry } from '../../scripts/testing/review-edge-geometry.js';
 import { expect, test, type Page } from '@playwright/test';
 import { addStaticKeyboardPageNote, waitForStaticPdf } from '../../scripts/static-browser-journey.js';
 
@@ -414,17 +415,20 @@ test('balances text margins within the clear reading area beside the workspace r
   await openBook(page);
   await fit(page, 'text');
   const expectBalancedMargins = async (index = 0) => {
-    await expect.poll(() => mainPage(page, index).evaluate((element, pageIndex) => {
-      const bounds = element.getBoundingClientRect();
-      const zoom = bounds.width / 600;
-      const textLeft = bounds.left + (pageIndex % 2 === 0 ? 90 : 210) * zoom;
-      const textRight = textLeft + 300 * zoom;
-      const viewport = element.closest('.review-document')!.getBoundingClientRect();
-      const fade = document.querySelector('.review-overlay-frame__right-fade')!;
-      const clearRight = getComputedStyle(fade).display === 'none'
-        ? viewport.right : fade.getBoundingClientRect().left;
-      return Math.abs((textLeft - viewport.left) - (clearRight - textRight));
-    }, index)).toBeLessThan(1);
+    await expect.poll(async () => {
+      const { clearRight } = await page.locator('[data-review-stage]').evaluate(reviewEdgeGeometry);
+      return mainPage(page, index).evaluate((element, { pageIndex, clearRight }) => {
+        const bounds = element.getBoundingClientRect();
+        const zoom = bounds.width / 600;
+        const textLeft = bounds.left + (pageIndex % 2 === 0 ? 90 : 210) * zoom;
+        const textRight = textLeft + 300 * zoom;
+        const viewport = element.closest('.review-document')!.getBoundingClientRect();
+        // Native horizontal scrolling quantizes to whole CSS pixels; WebKit
+        // truncates fractional offsets. Compare centers, since a margin
+        // difference doubles that subpixel positioning error.
+        return Math.abs((textLeft + textRight) / 2 - (viewport.left + clearRight) / 2);
+      }, { pageIndex: index, clearRight });
+    }).toBeLessThan(1);
   };
   await expectBalancedMargins();
   await viewport(page).evaluate((element) => {

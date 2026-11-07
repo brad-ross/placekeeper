@@ -166,12 +166,12 @@ describe('Reference authoring continuity', () => {
       sync: { phase: 'not-saved' as const, desiredRevision: 1, savedRevision: 0 },
     };
 
-    expect(acceptedAuthoringCommandRequiresPersistence(next, unsettled, true)).toBe(true);
+    expect(acceptedAuthoringCommandRequiresPersistence(next, unsettled, true, 'apply-draft')).toBe(true);
     expect(acceptedAuthoringCommandRequiresPersistence(next, {
       ...unsettled,
       sync: { phase: 'clean', desiredRevision: 1, savedRevision: 1 },
-    }, true)).toBe(false);
-    expect(acceptedAuthoringCommandRequiresPersistence(next, unsettled, false)).toBe(false);
+    }, true, 'apply-draft')).toBe(false);
+    expect(acceptedAuthoringCommandRequiresPersistence(next, unsettled, false, 'apply-draft')).toBe(false);
     expect(authoringCommandDisposition({
       accepted: false,
       state: next,
@@ -204,6 +204,17 @@ describe('Reference authoring continuity', () => {
       forcedInvalidToken: session.token,
       persistedRevision: 1,
     })).toBe(false);
+  });
+
+  it('accepts a protected draft while an unrelated annotation is still saving to the PDF', () => {
+    const next = { ...reviewState, revision: 5 };
+    const saving = {
+      destination: { phase: 'active' as const, generation: 1, kind: 'copy' as const, targetPath: '/tmp/review.pdf' },
+      sync: { phase: 'saving' as const, desiredRevision: 4, savedRevision: 3 },
+    };
+
+    expect(acceptedAuthoringCommandRequiresPersistence(next, saving, true, 'put-draft')).toBe(false);
+    expect(acceptedAuthoringCommandRequiresPersistence(next, saving, true, 'apply-draft')).toBe(true);
   });
 
   it('scopes duplicate mark and scrollport lookup to the originating Reference tab', () => {

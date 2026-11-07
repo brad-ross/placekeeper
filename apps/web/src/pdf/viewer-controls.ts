@@ -62,6 +62,8 @@ export function createViewerControls(
   registry: PluginRegistry,
   options: {
     readonly viewport?: () => HTMLElement | null;
+    /** Current page in the unobscured reading viewport, or null before geometry is ready. */
+    readonly currentReadingPage?: () => number | null;
     /** Return false only when navigation is not ready and native scrolling should handle the jump. */
     readonly jumpToPage?: (pageNumber: number) => Promise<boolean> | false;
     readonly onManualZoom?: () => void;
@@ -93,6 +95,13 @@ export function createViewerControls(
     ...(!pageReady || !zoomReady ? { unavailableReason: UNAVAILABLE } : {}),
   };
 
+  const currentPage = (fallback = state.currentPage, totalPages = state.totalPages): number => {
+    const readingPage = options.currentReadingPage?.();
+    return typeof readingPage === 'number'
+      && Number.isSafeInteger(readingPage) && readingPage >= 1 && readingPage <= totalPages
+      ? readingPage : fallback;
+  };
+
   let pendingPage: number | null = null;
   let jumpGeneration = 0;
   const requestPageJump = (pageNumber: number): boolean => {
@@ -111,12 +120,13 @@ export function createViewerControls(
     for (const listener of listeners) listener(event);
   };
   if (documentId && scrollCapability && scroll) {
-    const updatePage = (currentPage: number, reportedTotalPages: number) => {
+    const updatePage = (reportedPage: number, reportedTotalPages: number) => {
       const loadedPageCount = registry.getStore().getState().core.documents?.[documentId]
         ?.document?.pages.length ?? documentPageCount;
       const totalPages = Math.max(reportedTotalPages, loadedPageCount);
-      state = { ...state, currentPage, totalPages };
-      emit({ type: 'page', currentPage, totalPages });
+      const page = currentPage(reportedPage, totalPages);
+      state = { ...state, currentPage: page, totalPages };
+      emit({ type: 'page', currentPage: page, totalPages });
     };
     subscriptions.push(
       scrollCapability.onPageChange((event) => {
@@ -144,16 +154,16 @@ export function createViewerControls(
   }
 
   return {
-    snapshot: () => state,
+    snapshot: () => ({ ...state, currentPage: currentPage() }),
     previousPage: () => {
-      const currentPage = pendingPage ?? state.currentPage;
-      if (currentPage <= 1) return;
-      if (!requestPageJump(currentPage - 1)) scroll?.scrollToPreviousPage('smooth');
+      const page = pendingPage ?? currentPage();
+      if (page <= 1) return;
+      if (!requestPageJump(page - 1)) scroll?.scrollToPreviousPage('smooth');
     },
     nextPage: () => {
-      const currentPage = pendingPage ?? state.currentPage;
-      if (currentPage >= state.totalPages) return;
-      if (!requestPageJump(currentPage + 1)) scroll?.scrollToNextPage('smooth');
+      const page = pendingPage ?? currentPage();
+      if (page >= state.totalPages) return;
+      if (!requestPageJump(page + 1)) scroll?.scrollToNextPage('smooth');
     },
     goToPage: (pageNumber) => {
       if (!scroll || !Number.isSafeInteger(pageNumber) || pageNumber < 1 || pageNumber > state.totalPages) return;
