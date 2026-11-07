@@ -2728,9 +2728,10 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     : effectiveReferenceLayout.rightWorkspaceOpen || effectiveReferenceLayout.bottomReferencesOpen;
   const onInitialFitComplete = useCallback((generation: number) => {
     if (generation !== documentGenerationRef.current) return;
+    onViewerReadingAreaChange(generation);
     setInitialFitRequest(undefined);
     setInitialViewReady(true);
-  }, []);
+  }, [onViewerReadingAreaChange]);
   const onCommitMainFramingPositionChange = useCallback((commit: (() => void) | null) => {
     commitMainFramingPositionRef.current = commit ?? (() => undefined);
   }, []);

@@ -870,7 +870,11 @@ test('@critical demo starts fitted and Fit Width keeps the requested scale', asy
   await page.addInitScript(() => {
     const checkFirstPaint = () => {
       const reader = document.querySelector<HTMLElement>('[data-initial-view-ready]');
-      if (reader?.dataset.initialViewReady === 'true') return;
+      if (reader?.dataset.initialViewReady === 'true') {
+        const pageInput = reader.querySelector<HTMLInputElement>('input[aria-label^="Current page"]');
+        document.body.dataset.firstFittedDemoPage = pageInput?.value ?? 'missing';
+        return;
+      }
       if (reader && getComputedStyle(reader).visibility !== 'hidden') {
         document.body.dataset.unfittedDemoPaint = 'true';
       }
@@ -885,6 +889,7 @@ test('@critical demo starts fitted and Fit Width keeps the requested scale', asy
   const zoom = demo.getByRole('textbox', { name: /^Current zoom/ });
   await expect(zoom).toHaveValue('146');
   await expect(demo.getByRole('textbox', { name: /^Current page/ })).toHaveValue('14');
+  await expect(demo.locator('body')).toHaveAttribute('data-first-fitted-demo-page', '14');
   const readPage = demo.locator('[data-pdf-copy-surface="main"] [data-page-index="13"] > img').first();
   // Initial fitting must match the button's horizontal geometry, not just its percentage.
   const initialBounds = (await readPage.boundingBox())!;
