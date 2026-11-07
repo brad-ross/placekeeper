@@ -32,6 +32,7 @@
 
 .review-workspace[data-workspace-presentation="bottom"][data-workspace-header-variant="references"] {
   --reference-tab-column: 11.5rem;
+  --reference-tab-header-clearance: 46px;
 }
 
 .review-workspace[data-workspace-presentation="bottom"][data-workspace-header-variant="references"]
@@ -327,7 +328,12 @@
 
 .reference-tabs[data-reference-tabs-orientation="vertical"] {
   gap: 4px;
-  padding: 46px 0 0;
+  padding: var(--reference-tab-header-clearance, 46px) 0 0;
+}
+
+.review-workspace__panel--references[data-reference-tabs-orientation="vertical"][data-reference-panel-layout="full"]
+  .reference-panel__pending[data-reference-pending="error"] {
+  margin-block-start: var(--reference-tab-header-clearance, 46px);
 }
 
 .reference-tabs[data-reference-tabs-orientation="vertical"] .reference-tab-segment__selector {

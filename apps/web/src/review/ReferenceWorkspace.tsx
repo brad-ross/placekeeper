@@ -586,20 +586,32 @@ export function ReferenceWorkspace({
         >
           {pendingReference ? (
             <div className="reference-panel__pending" data-reference-pending={pendingReference.status}>
-              <p><strong>{pendingReference.label}</strong><span>{pendingReference.pageContext}</span></p>
               {pendingReference.status === 'loading' ? (
-                <p className="workspace-state"><ReviewIcon name="loading" />Opening reference…</p>
+                <>
+                  <p><strong>{pendingReference.label}</strong><span>{pendingReference.pageContext}</span></p>
+                  <p className="workspace-state"><ReviewIcon name="loading" />Opening reference…</p>
+                </>
               ) : (
-                <div className="workspace-state" data-reference-state="error">
-                  <p>Reference unavailable.</p>
+                <div className="workspace-error" data-reference-state="error">
+                  <ReviewIcon name="alert" />
+                  <p>
+                    <strong>Reference unavailable.</strong>
+                    <span>
+                      {pendingReference.label}
+                      {pendingReference.pageContext && pendingReference.pageContext !== pendingReference.label
+                        ? ` · ${pendingReference.pageContext}`
+                        : null}
+                    </span>
+                  </p>
                   <button
                     ref={retryReferenceRef}
                     type="button"
                     data-workspace-focus-token="references:retry"
+                    aria-label="Retry reference"
                     title="Retry opening reference"
                     onClick={onRetryReference}
                   >
-                    Retry reference
+                    Retry
                   </button>
                 </div>
               )}

@@ -534,36 +534,6 @@
   animation: annotation-status-spin 900ms linear infinite;
 }
 
-.annotation-status--error {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  border-style: solid;
-  border-color: var(--review-danger);
-  color: var(--review-danger);
-  background: var(--review-surface-panel);
-}
-
-.annotation-status--error p {
-  display: grid;
-  gap: 2px;
-  margin: 0;
-}
-
-.annotation-status--error p span {
-  color: var(--review-ink-muted);
-}
-
-.annotation-status--error button {
-  min-height: var(--review-control-compact);
-  padding: 0 9px;
-  border: 1px solid var(--review-border);
-  border-radius: var(--review-radius-control);
-  color: var(--review-ink-primary);
-  background: var(--review-surface-subtle);
-  font-size: 11px;
-  font-weight: 500;
-}
-
 @keyframes annotation-status-spin {
   to { transform: rotate(360deg); }
 }

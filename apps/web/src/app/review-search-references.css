@@ -489,6 +489,11 @@
   margin: 14px;
 }
 
+.reference-panel__pending[data-reference-pending="error"] {
+  align-self: stretch;
+  overflow: auto;
+}
+
 .reference-panel__pending > p {
   display: grid;
   margin: 0 0 9px;

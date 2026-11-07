@@ -813,8 +813,9 @@ describe('shared reference workspace', () => {
     expect(loading).toContain('aria-disabled="true"');
     expect(loading).toContain('Equation (4)');
     expect(failed).toContain('Reference unavailable.');
+    expect(failed).toContain('Equation (4) · Page 6');
     expect(failed).toContain('data-reference-panel-layout="full"');
-    expect(failed).toContain('Retry reference');
+    expect(failed).toContain('aria-label="Retry reference"');
     expect(failed).not.toContain('role="alert"');
   });
 

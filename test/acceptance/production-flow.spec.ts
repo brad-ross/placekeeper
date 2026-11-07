@@ -3729,9 +3729,15 @@ test("retries one failed reference clone without exposing raw load details", asy
   const retry = page.getByRole("button", { name: "Retry reference" });
   await expect(retry).toBeVisible();
   await expect(retry).toBeFocused();
-  await expect(page.locator("[data-reference-state='error']")).toContainText(
-    "Reference unavailable.",
-  );
+  const error = page.locator("[data-reference-state='error']");
+  await expect(error).toContainText("Reference unavailable.");
+  await expect(error).toContainText("Primary result · Page 2");
+  const clearsTrayHeader = await error.evaluate((card) => {
+    const header = card.closest('[data-review-workspace]')?.querySelector('header');
+    return header !== null && header !== undefined
+      && card.getBoundingClientRect().top >= header.getBoundingClientRect().bottom;
+  });
+  expect(clearsTrayHeader).toBe(true);
   await expect(page.locator(".review-workspace__status")).toHaveText(
     "Reference unavailable. Retry when ready.",
   );

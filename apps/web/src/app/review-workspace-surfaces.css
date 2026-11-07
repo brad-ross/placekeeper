@@ -388,6 +388,41 @@
   background: var(--review-surface-subtle);
 }
 
+.workspace-error {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--review-danger);
+  border-radius: var(--review-radius-row);
+  color: var(--review-danger);
+  background: var(--review-surface-panel);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.workspace-error p {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+}
+
+.workspace-error p span {
+  color: var(--review-ink-muted);
+}
+
+.workspace-error button {
+  min-height: var(--review-control-compact);
+  padding: 0 9px;
+  border: 1px solid var(--review-border);
+  border-radius: var(--review-radius-control);
+  color: var(--review-ink-primary);
+  background: var(--review-surface-subtle);
+  font-size: 11px;
+  font-weight: 500;
+}
+
 .review-workspace__tabs button,
 .reference-tabs button,
 .review-workspace__move,
