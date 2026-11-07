@@ -6,7 +6,7 @@ Placekeeper is a desktop PDF reader for reading and marking up papers, drafts, a
 
 ## Install
 
-[Download the latest desktop release](https://github.com/brad-ross/placekeeper/releases/latest). The current release, **0.3.1**, includes the installers below and a `SHA256SUMS` file. The installers bundle the runtime.
+[Download the latest desktop release](https://github.com/brad-ross/placekeeper/releases/latest). Desktop releases include the installers below and a `SHA256SUMS` file. The installers bundle the runtime.
 
 | Platform | Install |
 | --- | --- |
@@ -24,7 +24,11 @@ Open Placekeeper and choose a local PDF. Click a citation or another internal PD
 
 The default save creates a reviewed copy. **Replace Original** is a separate, explicit action. If another app rewrites an open PDF, Placekeeper waits for a valid file and refreshes the review. It waits until active annotation edits finish, then carries over your reading position and annotations where it can. If Placekeeper cannot confidently reattach an annotation, it leaves it available for manual reattachment. See [Privacy and recovery](docs/privacy-and-recovery.md) for what stays local and how to recover drafts.
 
-In the current source tree, you can pan across pages and zoom in link previews. The References tray also detects when the original target scrolls out of view more reliably. Hover the tab or move keyboard focus into it to reveal **Return to reference**. The toolbar also has buttons for opening References and the Annotations Workspace. These changes landed after 0.3.1.
+## What's new in 0.3.2
+
+- **Explore references.** Pan across pages and zoom in PDF link previews. In the References tray, hover the tab or focus it with the keyboard to reveal **Return to reference** when the original target scrolls out of view. Links that point just outside a page open at its edge. You can retry or close a failed reference in its own tab.
+- **Find controls at narrow widths.** Open the References and Annotations trays from the toolbar. When space runs short, the filename gives way to its icon, and history controls move into menus.
+- **Read excerpts and annotations more easily.** The search field shows the result count, matches use clearer colors, and snippets cut off at word boundaries. Annotation quotes include nearby text. Hover stays active between lines of a highlight, and clicking the PDF dismisses an open annotation popup.
 
 ## Optional integrations
 
