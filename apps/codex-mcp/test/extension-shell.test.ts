@@ -1095,7 +1095,7 @@ it('invalidates accepted PDF context during host refresh and honors clear-all be
     current = { updateId: 'host-clear', content: [], structuredContent: {} };
     f.shell.hostContextChanged({ 'openai/modelContext': null });
     resourceRead.resolve(pdf);
-    await vi.advanceTimersByTimeAsync(0);
+    await vi.waitFor(() => expect(host.mounts).toHaveLength(2));
     const next = host.mounts[1][4].documentContext;
     const successor = paperSource(2);
     next.setSource(successor);
