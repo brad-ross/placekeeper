@@ -312,9 +312,12 @@ export function createPdfTargetLocation(
       if (x === undefined || pdfY === undefined || requestedZoom === undefined || requestedZoom < 0) {
         return null;
       }
+      const anchor = pdfBottomOriginPointToNaturalAnchor({ x, y: pdfY }, page, cropOrigin);
       return {
         pageIndex: target.pageIndex,
-        anchor: pdfBottomOriginPointToNaturalAnchor({ x, y: pdfY }, page, cropOrigin),
+        // Some PDFs (including Beamer decks) place XYZ destinations outside
+        // the crop box. Land at the nearest page edge instead of rejecting them.
+        anchor: { x: clamp(anchor.x, 0, page.width), y: clamp(anchor.y, 0, page.height) },
         alignment: { xPercent: 0, yPercent: 0 },
         zoom: requestedZoom === 0 ? currentZoom : requestedZoom,
       };

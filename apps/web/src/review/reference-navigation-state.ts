@@ -42,8 +42,8 @@ export interface ReferenceTab {
   readonly annotationTarget?: PdfNavigationTarget;
   /** The canonical target that first created this durable tab. */
   readonly originalTarget: PdfNavigationTarget;
-  /** The most recently settled, fully restorable view for this tab. */
-  readonly settledLocation: PdfViewerLocation;
+  /** The most recently settled view, or null when the tab needs a retry. */
+  readonly settledLocation: PdfViewerLocation | null;
   readonly label?: string;
   readonly pageContext?: string;
 }
@@ -112,11 +112,11 @@ export type ReferenceNavigationAction =
   | {
       readonly type: 'open-reference';
       readonly target: PdfNavigationTarget;
-      readonly settledLocation: PdfViewerLocation;
+      readonly settledLocation: PdfViewerLocation | null;
       readonly label?: string;
       readonly pageContext?: string;
       readonly annotationIdentity?: AnnotationReaderIdentity;
-      /** Frozen recovery identity used when recreating a closed annotation tab. */
+      /** Identity retained when retrying a tab or recovering a closed annotation tab. */
       readonly tabIdentity?: string;
     }
   | {
@@ -124,11 +124,12 @@ export type ReferenceNavigationAction =
       readonly settledLocation: PdfViewerLocation;
       readonly annotationTarget?: PdfNavigationTarget;
     }
+  | { readonly type: 'select-failed-reference'; readonly targetIdentity: string }
   | {
       readonly type: 'request-reference-switch';
       readonly token: number;
       readonly targetIdentity: string;
-      readonly outgoingLocation: PdfViewerLocation;
+      readonly outgoingLocation: PdfViewerLocation | null;
     }
   | ({
       readonly type: 'complete-reference-switch';
@@ -244,6 +245,7 @@ function replaceTabLocation(
   const index = tabs.findIndex((tab) => tab.identity === identity);
   if (index < 0) return tabs;
   const current = tabs[index]!;
+  if (current.settledLocation === null) return tabs;
   if (
     exactlySameLocation(current.settledLocation, settledLocation)
     && (annotationTarget === undefined || current.annotationTarget === annotationTarget)
@@ -340,7 +342,10 @@ export function reduceReferenceNavigation(
       };
     case 'open-reference': {
       if (action.target.documentGeneration !== state.documentGeneration) return state;
-      const existing = action.annotationIdentity === undefined
+      const preferredExisting = action.tabIdentity === undefined
+        ? undefined
+        : state.tabs.find((tab) => tab.identity === action.tabIdentity);
+      const existing = preferredExisting ?? (action.annotationIdentity === undefined
         ? state.tabs.find((tab) => (
             tab.annotationIdentity === undefined
             && tab.originalTarget.identity === action.target.identity
@@ -348,15 +353,25 @@ export function reduceReferenceNavigation(
         : state.tabs.find((tab) => (
             tab.annotationIdentity !== undefined
             && annotationReaderIdentityMatches(tab.annotationIdentity, action.annotationIdentity!)
-          ));
+          )));
       if (existing) {
+        const statusChanged = (existing.settledLocation === null) !== (action.settledLocation === null);
         if (
-          state.activeTabIdentity === existing.identity
+          !statusChanged
+          && state.activeTabIdentity === existing.identity
           && state.workspace.lastMode === 'references'
           && state.pendingReferenceSwitch === null
         ) return state;
+        const tabs = statusChanged
+          ? state.tabs.map((tab) => tab === existing ? {
+              ...tab,
+              settledLocation: action.settledLocation,
+              ...(action.annotationIdentity === undefined ? {} : { annotationTarget: action.target }),
+            } : tab)
+          : state.tabs;
         return {
           ...state,
+          tabs,
           activeTabIdentity: existing.identity,
           pendingReferenceSwitch: null,
           workspace: { ...state.workspace, lastMode: 'references' },
@@ -398,13 +413,17 @@ export function reduceReferenceNavigation(
       );
       return tabs === state.tabs ? state : { ...state, tabs };
     }
+    case 'select-failed-reference':
+      if (!state.tabs.some((tab) => tab.identity === action.targetIdentity && tab.settledLocation === null)) return state;
+      return { ...state, activeTabIdentity: action.targetIdentity, pendingReferenceSwitch: null };
     case 'request-reference-switch': {
       if (!state.tabs.some((tab) => tab.identity === action.targetIdentity)) return state;
       if (state.activeTabIdentity === action.targetIdentity) {
+        if (action.outgoingLocation === null) return state;
         const tabs = replaceTabLocation(state.tabs, action.targetIdentity, action.outgoingLocation);
         return tabs === state.tabs ? state : { ...state, tabs, pendingReferenceSwitch: null };
       }
-      const tabs = state.activeTabIdentity === null
+      const tabs = state.activeTabIdentity === null || action.outgoingLocation === null
         ? state.tabs
         : replaceTabLocation(state.tabs, state.activeTabIdentity, action.outgoingLocation);
       return {

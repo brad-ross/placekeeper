@@ -1633,6 +1633,15 @@ describe('viewer navigation adapter', () => {
     expect(harness.pageRect.width).toBe(600);
   });
 
+  it('opens an XYZ link just above its page in References', async () => {
+    const harness = navigationHarness({ farTargetInitiallyUnmounted: true });
+    // Beamer's Roadmap links can use an XYZ top one point above the page.
+    const destination = { ...target(PdfZoomMode.XYZ, [18.842, page.height + 1, 0]), pageIndex: 2 };
+
+    expect(await harness.navigation.applyTarget(destination, 'reference-fit-width')).toBe(true);
+    expect(harness.navigation.captureLocation()?.pageIndex).toBe(2);
+  });
+
   it('fits a reference target to the live client box when classic scrollbars reduce usable width', async () => {
     const harness = navigationHarness({
       initialViewportWidth: 620,

@@ -511,7 +511,7 @@ export function AnnotationList({
         </p>
       ) : null}
       {existingAnnotations.status === 'error' ? (
-        <div className="annotation-status annotation-status--error" data-annotation-status="error" role="alert">
+        <div className="workspace-error" data-annotation-status="error" role="alert">
           <ReviewIcon name="alert" className="review-icon annotation-status__icon" />
           <p><strong>Existing annotations unavailable.</strong><span>{existingAnnotations.message}</span></p>
           <button type="button" title="Retry loading existing annotations" onClick={onRetryExistingAnnotations}>Retry</button>

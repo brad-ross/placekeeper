@@ -25,6 +25,7 @@
     :is(.reference-tab-segment__action, .reference-panel__return),
   .reference-tab-segment:has(:focus-visible)
     :is(.reference-tab-segment__action, .reference-panel__return),
+  .reference-tab-segment[data-reference-tab-failed="true"] [data-reference-tab-action="close"],
   .review-workspace__header:hover > .review-workspace__outline-toggle,
   .review-workspace__header:has(:focus-visible) > .review-workspace__outline-toggle,
   .review-shell .review-workspace__activity-strip--compound:hover

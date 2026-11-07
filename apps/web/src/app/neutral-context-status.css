@@ -267,13 +267,15 @@
   padding-block: 8px;
 }
 
-.annotation-status--error {
+.workspace-error {
   padding: 10px 12px;
+  border: 0;
   border-radius: 10px;
   color: #843b33;
   background: #faf0ee;
+  font: 400 13px/1.5 var(--pk-font-ui);
 }
-.annotation-status--error button {
+.workspace-error button {
   min-height: 32px;
   padding: 6px 8px;
   border: 0;
@@ -282,7 +284,7 @@
   background: transparent;
   font: 400 13px/1.2 var(--pk-font-ui);
 }
-.annotation-status--error button:hover { background: var(--pk-hover); }
+.workspace-error button:hover { background: var(--pk-hover); }
 .pdf-search__message { background: transparent; }
 .row-action-group__menu,
 .pdf-search__symbol-suggestions {
@@ -305,7 +307,7 @@
 .review-toast--error,
 .pdf-workspace__status { color: #843b33; background: #faf0ee; }
 @media (pointer: coarse) {
-  .annotation-status--error button,
+  .workspace-error button,
   .document-actions__menu > button,
   .document-actions__confirmation > button { min-height: 44px; }
 }

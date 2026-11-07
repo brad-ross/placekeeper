@@ -490,6 +490,31 @@
   margin: 14px;
 }
 
+.reference-panel__pending[data-reference-pending="error"] {
+  align-self: stretch;
+  overflow: auto;
+}
+
+.reference-panel__error {
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: 16px;
+}
+
+.reference-panel__error-content {
+  display: grid;
+  gap: 5px;
+}
+
+.reference-panel__error-heading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.reference-panel__error-body {
+  color: var(--review-ink-muted);
+}
+
 .reference-panel__pending > p {
   display: grid;
   margin: 0 0 9px;

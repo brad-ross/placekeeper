@@ -948,20 +948,42 @@ describe('document-scoped navigation coordinator', () => {
     expect(run.reference.controls.focusAtDestination).not.toHaveBeenCalledWith(5);
   });
 
-  it('keeps durable state on failure and retries only a stable failed reference', async () => {
+  it('keeps a failed reference tab and retries it in place', async () => {
     const run = harness();
+    const destination = target(4);
     vi.mocked(run.controller.open).mockResolvedValueOnce(false);
-    expect(await run.coordinator.openReference(target(4), {
+    expect(await run.coordinator.openReference(destination, {
       label: 'Proof', pageContext: 'Page 5',
     })).toBe(false);
-    expect(run.state().tabs).toEqual([]);
-    expect(run.pending()).toMatchObject({ status: 'error', label: 'Proof' });
+    expect(run.state().tabs).toMatchObject([{
+      identity: destination.identity, label: 'Proof', settledLocation: null,
+    }]);
+    expect(run.state().activeTabIdentity).toBe(destination.identity);
+    expect(run.pending()).toBeNull();
     expect(run.announcement()).toBe('Reference unavailable. Retry when ready.');
 
     vi.mocked(run.controller.snapshot).mockReturnValue({ documentGeneration: 1, status: 'failed' });
     expect(await run.coordinator.retryReference()).toBe(true);
     expect(run.controller.retry).toHaveBeenCalledTimes(1);
-    expect(run.state().tabs).toHaveLength(1);
+    expect(run.state().tabs).toMatchObject([{ identity: destination.identity, settledLocation: location(4) }]);
+  });
+
+  it('switches away from a failed tab and restores the adjacent reference when closing it', async () => {
+    const run = harness();
+    const ready = target(2);
+    const failed = target(4);
+    await run.coordinator.openReference(ready, { label: 'Lemma', pageContext: 'Page 3' });
+    vi.mocked(run.reference.controls.applyTarget).mockResolvedValueOnce(false);
+    await run.coordinator.openReference(failed, { label: 'Proof', pageContext: 'Page 5' });
+
+    expect(await run.coordinator.switchReference(ready.identity)).toBe(true);
+    expect(await run.coordinator.retryReference()).toBe(false);
+    expect(await run.coordinator.switchReference(failed.identity)).toBe(true);
+    expect(run.state().activeTabIdentity).toBe(failed.identity);
+    expect(await run.coordinator.closeReference(failed.identity)).toBe(true);
+    expect(run.state().activeTabIdentity).toBe(ready.identity);
+    expect(run.state().tabs).toMatchObject([{ identity: ready.identity, settledLocation: location(2) }]);
+    expect(run.controller.close).not.toHaveBeenCalled();
   });
 
   it('retries a failed destination apply on an already loaded clone without retrying the document', async () => {
@@ -1133,7 +1155,7 @@ describe('document-scoped navigation coordinator', () => {
 
     expect(await opening).toBe(false);
     expect(onSettled).not.toHaveBeenCalled();
-    expect(run.state().tabs).toEqual([]);
+    expect(run.state().tabs).toMatchObject([{ label: 'Annotation', settledLocation: null }]);
   });
 
   it('recreates a closed frozen reference tab for annotation passage recovery', async () => {
@@ -1265,7 +1287,14 @@ describe('document-scoped navigation coordinator', () => {
 
     expect(run.main.controls.applyTarget).toHaveBeenCalledOnce();
     expect(run.main.controls.applyTarget).toHaveBeenCalledWith(selectedMainTarget);
-    expect(run.pending()).toMatchObject({ status: 'error', label: 'Search result' });
+    expect(run.state().tabs).toMatchObject([{ label: 'Search result', settledLocation: null }]);
+
+    const laterMainLocation = location(7);
+    run.main.set(laterMainLocation);
+    vi.mocked(run.controller.snapshot).mockReturnValue({ documentGeneration: 1, status: 'failed' });
+    expect(await run.coordinator.retryReference()).toBe(true);
+    expect(run.main.controls.applyTarget).toHaveBeenCalledOnce();
+    expect(run.main.controls.captureLocation()).toEqual(laterMainLocation);
   });
 
   it('waits for dock layout settlement before restoring another reference tab', async () => {
@@ -2102,13 +2131,13 @@ describe('link destination descriptions and destination bands', () => {
     expect(run.referenceBand(target(13).identity)).toBeNull();
   });
 
-  it('bands a link tab created by retrying a failed Open in References', async () => {
+  it('bands a failed link tab once its retry succeeds', async () => {
     const run = harness({ describeDestination: describing(() => destinationDescription(13)) });
     vi.mocked(run.controller.open).mockResolvedValueOnce(false);
     const request = linkRequest(13, 'main', { authorLabel: false });
     run.coordinator.requestLink(request);
     expect(await run.coordinator.chooseLink('references', request)).toBe(false);
-    expect(run.state().tabs).toEqual([]);
+    expect(run.state().tabs).toMatchObject([{ identity: target(13).identity, settledLocation: null }]);
 
     vi.mocked(run.controller.snapshot).mockReturnValue({ documentGeneration: 1, status: 'failed' });
     expect(await run.coordinator.retryReference()).toBe(true);
