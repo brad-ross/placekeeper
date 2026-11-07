@@ -593,17 +593,19 @@ export function ReferenceWorkspace({
                   <p className="workspace-state"><ReviewIcon name="loading" />Opening reference…</p>
                 </>
               ) : (
-                <div className="workspace-error" data-reference-state="error">
-                  <ReviewIcon name="alert" />
-                  <p>
-                    <strong>Reference unavailable.</strong>
-                    <span>
+                <div className="workspace-error reference-panel__error" data-reference-state="error">
+                  <div className="reference-panel__error-content">
+                    <div className="reference-panel__error-heading">
+                      <ReviewIcon name="alert" />
+                      <strong>Reference unavailable.</strong>
+                    </div>
+                    <span className="reference-panel__error-body">
                       {pendingReference.label}
                       {pendingReference.pageContext && pendingReference.pageContext !== pendingReference.label
                         ? ` · ${pendingReference.pageContext}`
                         : null}
                     </span>
-                  </p>
+                  </div>
                   <button
                     ref={retryReferenceRef}
                     type="button"
