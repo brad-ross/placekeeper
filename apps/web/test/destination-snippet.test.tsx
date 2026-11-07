@@ -20,6 +20,7 @@ import {
   createEngineDestinationSnippetRenderer,
   destinationSnippetOverlay,
   destinationSnippetRegion,
+  type DestinationSnippetImage,
   type DestinationSnippetImageState,
 } from '../src/pdf/destination-snippet.js';
 import { PdfLinkControl } from '../src/pdf/PdfLinkControl.js';
@@ -125,11 +126,12 @@ describe('engine destination snippet renderer', () => {
     const renderPageRect = vi.fn(() => ({ toPromise: () => pending.promise, abort }));
     const engine = { renderPageRect } as unknown as PdfEngine;
     const page = { index: 13, size: PAGE, rotation: 0 };
-    const document = { id: 'doc', pageCount: 20, pages: Object.assign([], { 13: page }) } as unknown as PdfDocumentObject;
-    return { blob, pending, abort, renderPageRect, engine, document, page };
+    const neighbor = { index: 14, size: { width: 350, height: 500 }, rotation: 0 };
+    const document = { id: 'doc', pageCount: 20, pages: Object.assign([], { 13: page, 14: neighbor }) } as unknown as PdfDocumentObject;
+    return { blob, pending, abort, renderPageRect, engine, document, page, neighbor };
   }
 
-  it('renders the destination strip at the snippet width through the engine region render', async () => {
+  it('renders the destination page at the initial crop scale so the preview can pan', async () => {
     const fake = fakeEngine();
     const render = createEngineDestinationSnippetRenderer({
       engine: fake.engine,
@@ -141,14 +143,22 @@ describe('engine destination snippet renderer', () => {
     const result = render(description(), new AbortController().signal);
     fake.pending.resolve(fake.blob);
     const image = await result;
-    const expectedRegion = destinationSnippetRegion(description(), PAGE, DESTINATION_SNIPPET_ASPECT, 300);
+    const region = rect(0, 0, PAGE.width, PAGE.height);
+    const initialRegion = destinationSnippetRegion(description(), PAGE, DESTINATION_SNIPPET_ASPECT, 300);
     expect(fake.renderPageRect).toHaveBeenCalledWith(
       fake.document,
       fake.page,
-      expectedRegion,
+      region,
       expect.objectContaining({ scaleFactor: 1, dpr: 2 }),
     );
-    expect(image).toEqual({ blob: fake.blob, region: expectedRegion });
+    expect(image).toEqual({ blob: fake.blob, region, initialRegion, pageSizes: fake.document.pages.map(({ size }) => size) });
+    await render(description({ spot: null, extent: null }), new AbortController().signal, 14);
+    expect(fake.renderPageRect).toHaveBeenLastCalledWith(
+      fake.document,
+      fake.neighbor,
+      rect(0, 0, 350, 500),
+      { scaleFactor: 0.5, dpr: 2 },
+    );
   });
 
   it('aborts the engine task when the menu goes away', async () => {
@@ -179,6 +189,9 @@ describe('engine destination snippet renderer', () => {
 });
 
 describe('destination snippet image session', () => {
+  const region = rect(0, 0, 600, 800);
+  const initialRegion = rect(64, 300, 280, 112);
+  const pageSizes = [PAGE];
   it('uses native data images and fences a conversion that finishes after dismissal', async () => {
     const readers: Reader[] = [];
     class Reader {
@@ -192,7 +205,7 @@ describe('destination snippet image session', () => {
     }
     vi.stubGlobal('FileReader', Reader);
     try {
-      const run = session(async () => ({ blob: new Blob(['png']), region: rect(0, 0, 100, 40), nativeImage: true }));
+      const run = session(async () => ({ blob: new Blob(['png']), region, initialRegion, pageSizes, nativeImage: true }));
       run.controller.load(description());
       await vi.waitFor(() => expect(readers).toHaveLength(1));
       readers[0]!.onload!();
@@ -227,19 +240,18 @@ describe('destination snippet image session', () => {
   }
 
   it('shows loading, then the image, and revokes the object URL when the menu closes', async () => {
-    const region = rect(0, 300, 600, 240);
     const blob = new Blob(['png']);
-    const run = session(async () => ({ blob, region }));
+    const run = session(async () => ({ blob, region, initialRegion, pageSizes }));
     run.controller.load(description());
     expect(run.states.at(-1)).toEqual({ status: 'loading' });
-    await vi.waitFor(() => expect(run.states.at(-1)).toEqual({ status: 'ready', url: 'blob:snippet-1', region }));
+    await vi.waitFor(() => expect(run.states.at(-1)).toEqual({ status: 'ready', url: 'blob:snippet-1', region, initialRegion, pageSizes }));
     expect(run.createObjectURL).toHaveBeenCalledWith(blob);
     run.controller.dispose();
     expect(run.revokeObjectURL).toHaveBeenCalledWith('blob:snippet-1');
   });
 
   it('aborts and ignores a render that settles after dismissal', async () => {
-    const pending = deferred<{ blob: Blob; region: Rect } | null>();
+    const pending = deferred<DestinationSnippetImage | null>();
     let signal: AbortSignal | undefined;
     const run = session((_description, abortSignal) => {
       signal = abortSignal;
@@ -248,7 +260,7 @@ describe('destination snippet image session', () => {
     run.controller.load(description());
     run.controller.dispose();
     expect(signal?.aborted).toBe(true);
-    pending.resolve({ blob: new Blob(['late']), region: rect(0, 0, 600, 240) });
+    pending.resolve({ blob: new Blob(['late']), region, initialRegion, pageSizes });
     await pending.promise;
     await Promise.resolve();
     expect(run.createObjectURL).not.toHaveBeenCalled();
@@ -256,13 +268,12 @@ describe('destination snippet image session', () => {
   });
 
   it('revokes the previous image when the request changes', async () => {
-    const region = rect(0, 0, 600, 240);
-    const run = session(async () => ({ blob: new Blob(['png']), region }));
+    const run = session(async () => ({ blob: new Blob(['png']), region, initialRegion, pageSizes }));
     run.controller.load(description());
     await vi.waitFor(() => expect(run.states.at(-1)?.status).toBe('ready'));
     run.controller.load(description({ targetIdentity: 'other' }));
     expect(run.revokeObjectURL).toHaveBeenCalledWith('blob:snippet-1');
-    await vi.waitFor(() => expect(run.states.at(-1)).toEqual({ status: 'ready', url: 'blob:snippet-2', region }));
+    await vi.waitFor(() => expect(run.states.at(-1)).toEqual({ status: 'ready', url: 'blob:snippet-2', region, initialRegion, pageSizes }));
   });
 
   it('reports a failed render without creating an object URL', async () => {
@@ -278,33 +289,40 @@ describe('destination snippet image session', () => {
 });
 
 describe('destination snippet frame (R3, R6; KTD11)', () => {
-  const region = rect(0, 300, 600, 240);
+  const image = {
+    status: 'ready',
+    url: 'blob:snippet-1',
+    region: rect(0, 0, 600, 800),
+    initialRegion: rect(64, 300, 280, 112),
+    pageSizes: Array.from({ length: 14 }, () => PAGE),
+  } as const;
 
   // Covers AE1.
   it('shows the rendered snippet with the extent overlay in the band token and the bare page numeral', () => {
     const html = renderToStaticMarkup(
       <DestinationSnippetFrame
-        image={{ status: 'ready', url: 'blob:snippet-1', region }}
+        image={image}
         description={description()}
         resolving={false}
       />,
     );
     expect(html).toContain('data-destination-snippet=""');
     expect(html).toContain('data-snippet-status="ready"');
-    expect(html).toContain('aria-hidden="true"');
+    expect(html).toContain('aria-label="Reference preview"');
+    expect(html).toContain('tabindex="0"');
     expect(html).toMatch(/<img[^>]*src="blob:snippet-1"/u);
     expect(html.match(/data-destination-snippet-extent=""/g)).toHaveLength(2);
     expect(html).toContain(`var(${DESTINATION_BAND_TOKEN})`);
     // The page numeral lives in the menu's action row, not on the preview.
     expect(html).not.toContain('destination-snippet__page');
-    expect(html).not.toMatch(/tabindex|<button|<input/u);
+    expect(html).not.toMatch(/<button|<input/u);
   });
 
   // Covers AE5.
   it('shows the top of a whole-page destination with nothing highlighted', () => {
     const html = renderToStaticMarkup(
       <DestinationSnippetFrame
-        image={{ status: 'ready', url: 'blob:snippet-1', region: rect(0, 0, 600, 240) }}
+        image={{ ...image, initialRegion: rect(0, 0, 600, 240) }}
         description={description({ spot: null, extent: null })}
         resolving={false}
       />,
@@ -314,21 +332,16 @@ describe('destination snippet frame (R3, R6; KTD11)', () => {
   });
 
   it('keeps the same fixed frame while pending and after the image arrives', () => {
-    const frame = (markup: string) => markup.match(/<div[^>]*data-destination-snippet=""[^>]*>/u)?.[0]
-      .replace(/data-snippet-status="\w+"/u, '');
     const pending = renderToStaticMarkup(
       <DestinationSnippetFrame image={{ status: 'idle' }} description={null} resolving />,
     );
     const ready = renderToStaticMarkup(
-      <DestinationSnippetFrame
-        image={{ status: 'ready', url: 'blob:snippet-1', region }}
-        description={description()}
-        resolving={false}
-      />,
+      <DestinationSnippetFrame image={image} description={description()} resolving={false} />,
     );
     expect(pending).toContain('data-snippet-status="loading"');
     expect(pending).not.toContain('<img');
-    expect(frame(pending)).toBe(frame(ready));
+    expect(pending).toContain('class="destination-snippet"');
+    expect(ready).toContain('class="destination-snippet"');
 
     const css = readFileSync(
       fileURLToPath(new URL('../src/app/neutral-context-status.css', import.meta.url)),

@@ -20,7 +20,7 @@ import type {
 } from '../pdf/viewer-interaction-events.js';
 import { PDF_LINK_ACTION_MENU_ID } from '../pdf/viewer-interaction-events.js';
 import { CopyLinkControl, type CopyLinkControlProps } from './CopyLinkControl.js';
-import { DestinationSnippet } from './DestinationSnippet.js';
+import { DestinationSnippetFrame, useDestinationSnippet } from './DestinationSnippet.js';
 import { compositeFocusIndex, enabledMenuItems } from './menu-focus.js';
 import { ReviewIcon, type ReviewIconName } from './ReviewIcon.js';
 import { ReviewTooltipButton } from './ReviewTooltipButton.js';
@@ -52,7 +52,7 @@ export interface LinkActionPopoverProps {
   readonly sourceFocusFallback?: (source: ViewerPdfLinkSourceScope) => HTMLElement | null;
   /** The request's destination description; null until resolution starts. */
   readonly destination?: LinkActionDestinationState | null;
-  /** Region-renders the destination snippet (KTD3). */
+  /** Renders the destination preview from the current document. */
   readonly renderDestinationSnippet?: DestinationSnippetRenderer;
   /** The chosen action while it waits for the destination name (`aria-busy`). */
   readonly busyChoice?: LinkActionChoice | null;
@@ -168,6 +168,7 @@ export function LinkActionMenuContent({
   copyLink,
   openInReferencesDisabled = false,
   snippet,
+  onReturnToReference,
   busyChoice = null,
   onChoose,
   onKeyDown,
@@ -181,8 +182,9 @@ export function LinkActionMenuContent({
   readonly firstItemRef: Ref<HTMLButtonElement>;
   readonly copyLink?: CopyLinkControlProps;
   readonly openInReferencesDisabled?: boolean;
-  /** Non-focusable destination preview shown above the action row (R3). */
+  /** Destination preview shown above the action row. */
   readonly snippet?: ReactNode;
+  readonly onReturnToReference?: () => void;
   /** The chosen action waiting for its destination name; the menu is inert meanwhile. */
   readonly busyChoice?: LinkActionChoice | null;
   readonly onChoose: (choice: LinkActionChoice) => void;
@@ -238,6 +240,18 @@ export function LinkActionMenuContent({
             buttonRole="menuitem"
             feedbackPlacement="inline"
           />
+        )}
+        {onReturnToReference === undefined || busy ? null : (
+          <ReviewTooltipButton
+            label="Return to reference"
+            type="button"
+            role="menuitem"
+            className="link-action-popover__item"
+            aria-label="Return to reference"
+            onClick={onReturnToReference}
+          >
+            <ReviewIcon name="locate" />
+          </ReviewTooltipButton>
         )}
         {/* The menu's accessible name already carries the page. */}
         <span className="link-action-popover__page" aria-hidden="true">{pageNumeral}</span>
@@ -304,6 +318,11 @@ export function LinkActionPopover({
   onDismissRef.current = onDismiss;
   sourceFocusFallbackRef.current = sourceFocusFallback;
   const [placement, setPlacement] = useState<LinkActionPopoverPlacement | null>(null);
+  const { frameProps, returnToReference } = useDestinationSnippet({
+    description: request === null ? null : destination?.description ?? null,
+    resolving: destination?.status === 'resolving',
+    ...(renderDestinationSnippet === undefined ? {} : { render: renderDestinationSnippet }),
+  });
 
   const restoreCancelFocus = useCallback((activeRequest: ViewerPdfLinkInvocation) => {
     requestAnimationFrame(() => {
@@ -469,13 +488,13 @@ export function LinkActionPopover({
         firstItemRef={firstItemRef}
         {...(dismissingCopyLink === undefined ? {} : { copyLink: dismissingCopyLink })}
         openInReferencesDisabled={openInReferencesDisabled}
-        snippet={(
-          <DestinationSnippet
-            description={destination?.description ?? null}
-            resolving={destination?.status === 'resolving'}
-            {...(renderDestinationSnippet === undefined ? {} : { render: renderDestinationSnippet })}
-          />
-        )}
+        snippet={<DestinationSnippetFrame {...frameProps} />}
+        {...(returnToReference === null ? {} : {
+          onReturnToReference: () => {
+            firstItemRef.current?.focus({ preventScroll: true });
+            returnToReference();
+          },
+        })}
         busyChoice={busyChoice}
         onChoose={choose}
         onKeyDown={keyDown}

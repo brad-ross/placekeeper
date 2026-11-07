@@ -897,18 +897,18 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     readonly generation: number;
     readonly resolver: DestinationDescriptionResolver;
   } | null>(null);
-  // The link menu's snippet stage (KTD3): a region render of the current main document.
+  // The link menu previews pages from the current main document.
   const destinationSnippetRendererRef = useRef<{
     readonly generation: number;
     readonly render: DestinationSnippetRenderer;
   } | null>(null);
-  const renderDestinationSnippet = useCallback<DestinationSnippetRenderer>((description, signal) => {
+  const renderDestinationSnippet = useCallback<DestinationSnippetRenderer>((description, signal, pageIndex) => {
     const renderer = destinationSnippetRendererRef.current;
     return renderer === null
       || renderer.generation !== description.documentGeneration
       || renderer.generation !== documentGenerationRef.current
       ? Promise.resolve(null)
-      : renderer.render(description, signal);
+      : renderer.render(description, signal, pageIndex);
   }, []);
   const outlineDiscoveryRef = useRef<PdfOutlineDiscovery>({
     status: 'loading',
