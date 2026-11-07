@@ -78,7 +78,6 @@ import {
 } from '../pdf/NativePdfSelectionBridge.js';
 import { isEditableTarget } from '../review/input-controller.js';
 import { App } from "./App.js";
-import { ReferenceManualScrollObserver } from '../pdf/reference-manual-scroll.js';
 import { WorkspaceInitialReferenceDock, WorkspaceModeAvailability, WorkspacePresentation } from '../review/WorkspaceModeStrip.js';
 import { ReviewShell } from "./ReviewShell.js";
 import type {
@@ -800,7 +799,6 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const referenceNavigationRef = useRef<PdfViewerNavigation | null>(null);
   const [referenceNavigation, setReferenceNavigation] = useState<PdfViewerNavigation | null>(null);
   const referenceControllerRef = useRef<ReferenceDocumentController | null>(null);
-  const referenceManualScrollObserverRef = useRef(new ReferenceManualScrollObserver());
   const [referenceReturnState, renderReferenceReturnState] = useState<
     ReferenceReturnPresentationState | null
   >(null);
@@ -902,13 +900,13 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     readonly generation: number;
     readonly render: DestinationSnippetRenderer;
   } | null>(null);
-  const renderDestinationSnippet = useCallback<DestinationSnippetRenderer>((description, signal, pageIndex) => {
+  const renderDestinationSnippet = useCallback<DestinationSnippetRenderer>((description, signal, pageIndex, rasterZoom) => {
     const renderer = destinationSnippetRendererRef.current;
     return renderer === null
       || renderer.generation !== description.documentGeneration
       || renderer.generation !== documentGenerationRef.current
       ? Promise.resolve(null)
-      : renderer.render(description, signal, pageIndex);
+      : renderer.render(description, signal, pageIndex, rasterZoom);
   }, []);
   const outlineDiscoveryRef = useRef<PdfOutlineDiscovery>({
     status: 'loading',
@@ -1148,7 +1146,6 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       setPendingReference,
       getReferenceReturnState: () => referenceReturnStateRef.current,
       setReferenceReturnState,
-      resetReferenceManualScrollIntent: () => referenceManualScrollObserverRef.current.clear(),
       setLinkActionRequest,
       setAnnouncement: setNavigationAnnouncement,
       focusReferenceTab: (identity) => {
@@ -2507,8 +2504,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       referenceViewportHost={referenceViewportHost}
       activeReferenceTabIdentity={navigationState.activeTabIdentity}
       onReferenceDocumentControls={onReferenceDocumentControls}
-      onReferenceManualScroll={() => navigationCoordinator.observeReferenceManualScroll()}
-      referenceManualScrollObserver={referenceManualScrollObserverRef.current}
+      onReferenceViewportScroll={() => navigationCoordinator.observeReferenceViewportScroll()}
       onViewerNavigationInitialized={onViewerNavigationInitialized}
       onOutlineDiscovery={onOutlineDiscovery}
       onViewerInitialized={onViewerInitialized}

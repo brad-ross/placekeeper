@@ -215,7 +215,7 @@ test("Covers AE1. a split citation previews its bibliography entry, names its ta
   // outside the review root.
   await expect(extent.first()).toHaveCSS("background-color", "rgba(56, 132, 230, 0.24)");
   const items = menu.getByRole("menuitem");
-  await expect(items).toHaveCount(2);
+  await expect(items).toHaveCount(4);
   await expect(items.nth(0)).toHaveAttribute("aria-label", "Open in References");
   await expect(items.nth(1)).toHaveAttribute("aria-label", "Open in main document");
   await expect(menu.locator(".copy-link-control")).toHaveCount(0);
@@ -223,6 +223,13 @@ test("Covers AE1. a split citation previews its bibliography entry, names its ta
   const snippetBox = await snippet.boundingBox();
   const firstItemBox = await items.first().boundingBox();
   const lastItemBox = await items.last().boundingBox();
+  const destinationActions = menu.getByRole("group", { name: "Destination actions" });
+  const previewControls = menu.getByRole("group", { name: "Preview controls" });
+  const [destinationBox, controlsBox] = await Promise.all([
+    destinationActions.boundingBox(),
+    previewControls.boundingBox(),
+  ]);
+  expect(controlsBox!.x - (destinationBox!.x + destinationBox!.width)).toBeGreaterThanOrEqual(8);
   expect(snippetBox!.y + snippetBox!.height).toBeLessThanOrEqual(firstItemBox!.y + 1);
   // Icon actions share one row, left-aligned, and the page sits at its right end.
   expect(Math.abs(lastItemBox!.y - firstItemBox!.y)).toBeLessThan(1);
@@ -241,12 +248,53 @@ test("Covers AE1. a split citation previews its bibliography entry, names its ta
     animations: "disabled",
   });
 
-  const returnToReference = menu.getByRole("menuitem", { name: "Return to reference" });
+  const returnToReference = previewControls.getByRole("menuitem", { name: "Return to reference" });
   const previewOffset = () => snippet.evaluate((element) => [element.scrollLeft, element.scrollTop]);
   const initialOffset = await previewOffset();
   const mainViewport = mainWorkspace(page).locator("[data-viewer-framing-viewport]");
   const mainScrollTop = await mainViewport.evaluate((element) => element.scrollTop);
   await expect(returnToReference).toHaveCount(0);
+
+  const zoomIn = menu.getByRole("menuitem", { name: "Zoom in", exact: true });
+  const zoomOut = menu.getByRole("menuitem", { name: "Zoom out", exact: true });
+  const previewPage = snippet.locator('[data-snippet-page-index="3"]');
+  const previewWidth = async () => (await previewPage.boundingBox())!.width;
+  const previewCenter = async () => {
+    const [frame, paper] = await Promise.all([snippet.boundingBox(), previewPage.boundingBox()]);
+    return {
+      x: (frame!.x + frame!.width / 2 - paper!.x) / paper!.width,
+      y: (frame!.y + frame!.height / 2 - paper!.y) / paper!.height,
+    };
+  };
+  const rasterWidth = () => previewPage.locator("img").evaluate((image: HTMLImageElement) => image.naturalWidth);
+  const initialWidth = await previewWidth();
+  const initialCenter = await previewCenter();
+  await expect.poll(rasterWidth).toBeGreaterThan(0);
+  const initialRasterWidth = await rasterWidth();
+  await zoomIn.click();
+  await expect.poll(previewWidth).toBeGreaterThan(initialWidth);
+  await expect.poll(rasterWidth).toBeGreaterThan(initialRasterWidth);
+  const zoomedCenter = await previewCenter();
+  expect(zoomedCenter.x).toBeCloseTo(initialCenter.x, 2);
+  expect(zoomedCenter.y).toBeCloseTo(initialCenter.y, 2);
+  await expect(returnToReference).toBeVisible();
+  await zoomOut.click();
+  await expect.poll(previewWidth).toBeCloseTo(initialWidth, 0);
+  await zoomOut.click();
+  await expect.poll(previewWidth).toBeLessThan(initialWidth);
+  await returnToReference.press("Enter");
+  await expect(returnToReference).toHaveCount(0);
+  await expect.poll(previewWidth).toBeCloseTo(initialWidth, 0);
+  await expect.poll(previewOffset).toEqual(initialOffset);
+
+  await snippet.hover();
+  await page.keyboard.down("Control");
+  await page.mouse.wheel(0, -70);
+  await page.keyboard.up("Control");
+  await expect.poll(previewWidth).toBeGreaterThan(initialWidth);
+  await returnToReference.click();
+  await expect.poll(previewOffset).toEqual(initialOffset);
+
   await snippet.hover();
   await page.mouse.wheel(60, 90);
   await expect(returnToReference).toBeVisible();
@@ -304,11 +352,36 @@ test("Covers AE1. a split citation previews its bibliography entry, names its ta
   await expect(bands.first()).toHaveCSS("pointer-events", "none");
   await page.screenshot({ path: test.info().outputPath("banded-reference-tab.png"), animations: "disabled" });
 
-  // The band survives scrolling away from the destination and back.
   const reference = referenceWorkspace(page);
+  const referenceViewport = reference.locator("[data-viewer-framing-viewport]");
+  const trayReturn = page.getByRole("button", { name: "Return to reference", exact: true });
+  const bandBottom = () => bands.last().evaluate((band) => {
+    const viewport = band.closest("[data-viewer-framing-viewport]")!;
+    return band.getBoundingClientRect().bottom - viewport.getBoundingClientRect().top;
+  });
+  await expect.poll(bandBottom).toBeGreaterThan(0);
+  await page.locator(".review-chrome__page-input").focus();
+  await referenceViewport.hover();
+  await page.mouse.wheel(0, Math.ceil(await bandBottom()) + 8);
+  await expect.poll(bandBottom).toBeLessThan(0);
+  await expect(reference.locator(".pdf-workspace__page[data-page-index='3']")).toBeInViewport();
+  await expect(trayReturn).toHaveCSS("opacity", "0");
+  await trayReturn.locator("..").hover();
+  await expect(trayReturn).toHaveCSS("opacity", "1");
+  await trayReturn.click();
+  await expect(trayReturn).toHaveCount(0);
+  await expect(bands.first()).toBeInViewport();
+
+  // Scroll offsets can also change without a wheel, key, or pointer event in the viewer.
+  const returnedTop = await referenceViewport.evaluate((element) => element.scrollTop);
+  const drift = Math.ceil(await bandBottom()) + 8;
+  await referenceViewport.evaluate((element, delta) => { element.scrollTop += delta; }, drift);
+  await expect.poll(bandBottom).toBeLessThan(0);
+  await expect(trayReturn).toHaveCSS("opacity", "1");
   await scrollViewportTo(reference, 5);
-  await expect(reference.locator(".pdf-workspace__page[data-page-index='5']")).toBeVisible();
-  await scrollViewportTo(reference, 3);
+  await expect(reference.locator(".pdf-workspace__page[data-page-index='5']")).toBeInViewport();
+  await referenceViewport.evaluate((element, top) => { element.scrollTop = top; }, returnedTop);
+  await expect(trayReturn).toHaveCount(0);
   await expect(bands).toHaveCount(3, { timeout: READY_TIMEOUT_MS });
   await expect(bands.first()).toBeVisible();
 });
@@ -381,6 +454,39 @@ test("Covers AE5. a null-top link previews the top of its page with no highlight
   await expect(returnToReference).toBeVisible();
   await returnToReference.click();
   await expect(returnToReference).toHaveCount(0);
+  await expect.poll(scrollTop).toBe(initialScrollTop);
+
+  const initialWidth = (await targetPage.boundingBox())!.width;
+  await menu.getByRole("menuitem", { name: "Zoom out", exact: true }).click();
+  await expect.poll(async () => {
+    const [frame, paper] = await Promise.all([snippet.boundingBox(), targetPage.boundingBox()]);
+    const left = paper!.x - frame!.x;
+    const right = frame!.x + frame!.width - (paper!.x + paper!.width);
+    return Math.min(left, right);
+  }).toBeGreaterThan(10);
+  const [frame, paper] = await Promise.all([snippet.boundingBox(), targetPage.boundingBox()]);
+  expect(paper!.x + paper!.width / 2).toBeCloseTo(frame!.x + frame!.width / 2, 0);
+  await returnToReference.click();
+  await expect.poll(async () => (await targetPage.boundingBox())!.width).toBeCloseTo(initialWidth, 0);
+
+  await snippet.evaluate((element) => {
+    const bounds = element.getBoundingClientRect();
+    const send = (type: string, radius: number) => {
+      const event = new Event(type, { bubbles: true, cancelable: true });
+      Object.defineProperty(event, "touches", {
+        value: type === "touchend" ? [] : [-radius, radius].map((offset) => ({
+          clientX: bounds.x + bounds.width / 2 + offset,
+          clientY: bounds.y + bounds.height / 2,
+        })),
+      });
+      element.dispatchEvent(event);
+    };
+    send("touchstart", 20);
+    send("touchmove", 30);
+    send("touchend", 0);
+  });
+  await expect.poll(async () => (await targetPage.boundingBox())!.width).toBeGreaterThan(initialWidth);
+  await returnToReference.click();
   await expect.poll(scrollTop).toBe(initialScrollTop);
   // The clicked words name the tab; the whole-page target adds no kind label.
   const tab = await chooseOpenInReferences(page, menu, "supplementary appendix, Page 5");

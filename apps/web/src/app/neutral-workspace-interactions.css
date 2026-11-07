@@ -13,7 +13,7 @@
 
   /* Keep the tab endcap hit-testable while its icons are hidden. WebKit can
      otherwise lose hover when the horizontal tab strip scrolls to an action. */
-  .reference-tab-segment :is(.reference-tab-segment__action, .reference-panel__return) {
+  .reference-tab-segment .reference-tab-segment__action {
     pointer-events: auto;
   }
 
@@ -21,9 +21,7 @@
     .row-action-group__direct,
   :is(li[data-annotation-origin], li[data-search-result]):has(:focus-visible)
     .row-action-group__direct,
-  .reference-tab-segment:hover
-    :is(.reference-tab-segment__action, .reference-panel__return),
-  .reference-tab-segment:has(:focus-visible)
+  .reference-tab-segment:is(:hover, :has(:focus-visible))
     :is(.reference-tab-segment__action, .reference-panel__return),
   .reference-tab-segment[data-reference-tab-failed="true"] [data-reference-tab-action="close"],
   .review-workspace__header:hover > .review-workspace__outline-toggle,
@@ -371,6 +369,13 @@ li[data-search-result] .pdf-search__result-heading > .pdf-search__result-page {
   width: max-content;
   min-width: min(112px, 100%);
   flex-basis: auto;
+}
+
+@media (pointer: coarse) {
+  /* Keep all three touch targets inside even a short active tab. */
+  .reference-tabs[data-reference-tabs-orientation="horizontal"] .reference-tab-segment--compound {
+    min-width: min(calc(3px + 3 * var(--reference-tab-action-size)), 100%);
+  }
 }
 
 .full-annotation-reader__source,

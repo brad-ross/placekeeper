@@ -745,6 +745,16 @@ describe('viewer navigation adapter', () => {
     expect(harness.navigation.targetVisibility(destination)).toBe('outside');
   });
 
+  it('tracks the top of a fit-page target when the References tray opens it at fit width', () => {
+    const harness = navigationHarness({ initialPageTop: 0 });
+    const destination = target(PdfZoomMode.FitPage);
+
+    expect(harness.navigation.targetVisibility(destination, 'reference-fit-width')).toBe('visible');
+    harness.pageRect.top = -8;
+    expect(harness.navigation.targetVisibility(destination, 'reference-fit-width')).toBe('outside');
+    expect(harness.navigation.targetVisibility(destination)).toBe('visible');
+  });
+
   it('uses rotation, scrollbar client boxes, runway clipping, and edge tolerance for visibility', () => {
     const harness = navigationHarness({
       initialViewportWidth: 620,

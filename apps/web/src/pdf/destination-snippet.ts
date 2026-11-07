@@ -48,6 +48,7 @@ export type DestinationSnippetRenderer = (
   description: PdfDestinationDescription,
   signal: AbortSignal,
   pageIndex?: number,
+  rasterZoom?: number,
 ) => Promise<DestinationSnippetImage | null>;
 
 function clamp(value: number, minimum: number, maximum: number): number {
@@ -134,7 +135,7 @@ export function createEngineDestinationSnippetRenderer(options: {
 }): DestinationSnippetRenderer {
   const cssWidth = options.cssWidth ?? DESTINATION_SNIPPET_CSS_WIDTH;
   const pageSizes = options.document.pages.map(({ size }) => size);
-  return async (description, signal, pageIndex = description.pageIndex) => {
+  return async (description, signal, pageIndex = description.pageIndex, rasterZoom = 1) => {
     if (signal.aborted || description.documentGeneration !== options.documentGeneration) return null;
     const page = options.document.pages[pageIndex];
     const target = pageSizes[description.pageIndex];
@@ -148,7 +149,7 @@ export function createEngineDestinationSnippetRenderer(options: {
     );
     const task = options.engine.renderPageRect(options.document, page, region, {
       scaleFactor: Math.min(
-        cssWidth / initialRegion.size.width,
+        cssWidth * rasterZoom / initialRegion.size.width,
         MAX_RASTER_EDGE / (Math.max(page.size.width, page.size.height) * dpr),
       ),
       dpr,
@@ -176,7 +177,7 @@ export type DestinationSnippetImageState =
 
 export interface DestinationSnippetSession {
   /** Starts rendering a description, cancelling and revoking any previous one. */
-  load(description: PdfDestinationDescription | null, pageIndex?: number): void;
+  load(description: PdfDestinationDescription | null, pageIndex?: number, rasterZoom?: number): void;
   /** Cancels any render and revokes the current object URL. */
   dispose(): void;
 }
@@ -202,7 +203,7 @@ export function createDestinationSnippetSession(options: {
     url = null;
   };
   return {
-    load(description, pageIndex) {
+    load(description, pageIndex, rasterZoom) {
       release();
       if (description === null) {
         options.onChange({ status: 'idle' });
@@ -213,7 +214,7 @@ export function createDestinationSnippetSession(options: {
       options.onChange({ status: 'loading' });
       let rendered: Promise<DestinationSnippetImage | null>;
       try {
-        rendered = options.render(description, current.signal, pageIndex);
+        rendered = options.render(description, current.signal, pageIndex, rasterZoom);
       } catch {
         rendered = Promise.resolve(null);
       }

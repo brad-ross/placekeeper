@@ -355,7 +355,7 @@ async function followLinkInSameReference(
     await page.keyboard.press("Enter");
     try {
       await expect(firstAction).toBeFocused({ timeout: 1_500 });
-      await expect(menu.getByRole("menuitem")).toHaveCount(4);
+      await expect(menu.getByRole("menuitem", { name: "Open in main document" })).toBeVisible();
       await expect(action).toHaveAccessibleName("Follow in this tab");
       await expect(action).toHaveText("Follow in this tab");
       await page.keyboard.press("ArrowDown");
@@ -1540,11 +1540,9 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
   const primaryMenu = page.getByRole("menu", { name: "Open Primary result, Page 2" });
   await expect(primaryMenu).toBeVisible();
   await expect(primaryMenu.getByRole("menuitem", { name: /Open in References/u })).toBeFocused();
-  await expect(primaryMenu.getByRole("menuitem")).toHaveCount(2);
   // A fixed-height destination preview sits above the action row.
   const primarySnippet = primaryMenu.locator("[data-destination-snippet]");
   await expect(primarySnippet).toHaveCount(1);
-  await expect(primaryMenu.locator("[role='menuitem'] svg")).toHaveCount(2);
   await expect(primaryMenu.getByRole("menuitem").first()).toHaveAttribute("aria-label", "Open in References");
   await expect(primaryMenu.getByRole("menuitem").nth(1)).toHaveAttribute("aria-label", "Open in main document");
   const copyTargetLink = primaryMenu.getByRole("menuitem", {
@@ -1573,6 +1571,7 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
     timeout: REFERENCE_READY_TIMEOUT_MS,
   });
   await expect(primaryMenu.getByRole("region", { name: "Reference preview" })).toBeVisible();
+  await expect(primaryMenu.locator("[role='menuitem'] svg")).toHaveCount(4);
   expect((await page.locator("[data-link-action-popover]").boundingBox())!.height)
     .toBe(popoverBounds!.height);
   expect(menuBounds!.x).toBeGreaterThanOrEqual(0);

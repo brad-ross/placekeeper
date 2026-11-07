@@ -25,10 +25,6 @@ import {
   pageLinkAnnotationsFromRegistry,
   sourceAnnotationLinkRenderers,
 } from './PdfLinkControl.js';
-import {
-  isReferenceScrollIntent,
-  type ReferenceScrollPosition,
-} from './reference-manual-scroll.js';
 import type { ViewerInteractionEvent } from './viewer-interaction-events.js';
 import {
   PDF_LINK_INTERACTION_ATTRIBUTE,
@@ -173,7 +169,7 @@ export interface ReferencePdfViewportProps {
   readonly engine: PdfEngine;
   readonly host: HTMLElement;
   readonly onInteraction?: (event: ViewerInteractionEvent) => void;
-  readonly onScrollIntent?: (position: ReferenceScrollPosition) => void;
+  readonly onViewportScroll?: () => void;
   readonly onViewportElement?: (element: HTMLDivElement | null) => void;
   readonly searchResultsByPage?: ReadonlyMap<number, readonly PdfSearchResult[]>;
   /** The active References tab's Destination Band, passed like search results. */
@@ -202,7 +198,7 @@ export function ReferencePdfViewport({
   engine,
   host,
   onInteraction,
-  onScrollIntent,
+  onViewportScroll,
   onViewportElement,
   searchResultsByPage = new Map(),
   destinationBand = null,
@@ -228,10 +224,15 @@ export function ReferencePdfViewport({
   }) | null>(null);
   const surfaceKey = `${documentGeneration}:${tabIdentity ?? ''}`;
   const ownedPointerGestureRef = useRef(new ScopedOwnedMarkPointerGesture());
+  const scrollFrame = useRef<number | null>(null);
   useEffect(() => {
     ownedPointerGestureRef.current.cancel();
     return () => ownedPointerGestureRef.current.cancel();
   }, [surfaceKey]);
+  useEffect(() => () => {
+    if (scrollFrame.current !== null) cancelAnimationFrame(scrollFrame.current);
+    scrollFrame.current = null;
+  }, [surfaceKey, host]);
   const emit = (event: ViewerInteractionEvent) => {
     if (surface !== null) onInteraction?.(scopeViewerInteraction(event, surface));
   };
@@ -242,11 +243,6 @@ export function ReferencePdfViewport({
     pageLinkAnnotations: pageLinkAnnotationsFromRegistry(registry, documentId),
     ...(onInteraction === undefined ? {} : { onInteraction: emit }),
   });
-  const publishScrollIntent = (root: HTMLDivElement) => {
-    const viewport = root.querySelector<HTMLElement>('[data-viewer-framing-viewport]');
-    if (viewport) onScrollIntent?.({ left: viewport.scrollLeft, top: viewport.scrollTop });
-  };
-
   return createPortal(
     <div
       ref={onViewportElement}
@@ -257,57 +253,19 @@ export function ReferencePdfViewport({
       data-reference-tab-identity={tabIdentity ?? undefined}
       aria-label="Reference PDF document"
       role="region"
-      onWheelCapture={(event) => {
-        if (isReferenceScrollIntent({
-          kind: 'wheel',
-          ctrlKey: event.ctrlKey,
-          metaKey: event.metaKey,
-        })) publishScrollIntent(event.currentTarget);
-      }}
-      onKeyDownCapture={(event) => {
-        if (isReferenceScrollIntent({
-          kind: 'key',
-          key: event.key,
-          altKey: event.altKey,
-          ctrlKey: event.ctrlKey,
-          metaKey: event.metaKey,
-        })) publishScrollIntent(event.currentTarget);
-      }}
-      onPointerDownCapture={(event) => {
-        const viewport = event.currentTarget.querySelector<HTMLElement>(
-          '[data-viewer-framing-viewport]',
-        );
-        if (isReferenceScrollIntent({
-          kind: 'pointer',
-          phase: 'down',
-          pointerType: event.pointerType,
-          button: event.button,
-          buttons: event.buttons,
-          clientX: event.clientX,
-          clientY: event.clientY,
-        }, viewport)) publishScrollIntent(event.currentTarget);
-      }}
-      onPointerMoveCapture={(event) => {
-        const input = {
-          kind: 'pointer',
-          phase: 'move',
-          pointerType: event.pointerType,
-          button: event.button,
-          buttons: event.buttons,
-          clientX: event.clientX,
-          clientY: event.clientY,
-        } as const;
-        if (input.buttons === 0) return;
-        const viewport = input.pointerType === 'mouse'
-          ? event.currentTarget.querySelector<HTMLElement>('[data-viewer-framing-viewport]')
-          : null;
-        if (isReferenceScrollIntent(input, viewport)) publishScrollIntent(event.currentTarget);
-      }}
     >
       <Viewport
         documentId={documentId}
         className="pdf-workspace__viewport"
         data-viewer-framing-viewport
+        onScroll={onViewportScroll === undefined ? undefined : () => {
+          if (scrollFrame.current !== null) return;
+          // Let the scroller mount pages for the new position before measuring the target.
+          scrollFrame.current = requestAnimationFrame(() => {
+            scrollFrame.current = null;
+            onViewportScroll();
+          });
+        }}
       >
         <ZoomGestureWrapper
           documentId={documentId}
