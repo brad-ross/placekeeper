@@ -263,7 +263,7 @@
 }
 
 .review-chrome .review-chrome__tray-toggle[aria-expanded="true"] {
-  background: var(--pk-hover);
+  background: transparent;
 }
 
 @media (pointer: coarse) {
