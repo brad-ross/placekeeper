@@ -84,6 +84,11 @@ test('bottom and right Reference tabs share compact geometry and intent actions'
     if (!button) throw new Error('Reference action is missing');
     const actionBounds = button.getBoundingClientRect();
     const style = getComputedStyle(button);
+    const selector = row.querySelector<HTMLElement>('[data-reference-tab]')!;
+    const selectorBounds = selector.getBoundingClientRect();
+    const hitCenter = (rect: DOMRect) => document.elementFromPoint(
+      rect.left + rect.width / 2, rect.top + rect.height / 2,
+    );
     return {
       rowHeight: bounds.height,
       actionTop: actionBounds.top - bounds.top,
@@ -91,6 +96,8 @@ test('bottom and right Reference tabs share compact geometry and intent actions'
       actionBottom: bounds.bottom - actionBounds.bottom,
       opacity: style.opacity,
       pointerEvents: style.pointerEvents,
+      actionHit: button.contains(hitCenter(actionBounds)),
+      selectorHit: selector.contains(hitCenter(selectorBounds)),
     };
   });
 
@@ -105,7 +112,9 @@ test('bottom and right Reference tabs share compact geometry and intent actions'
     actionRight: 3,
     actionBottom: 3,
     opacity: '0',
-    pointerEvents: 'none',
+    pointerEvents: 'auto',
+    actionHit: true,
+    selectorHit: true,
   });
   await segment.hover();
   await expect(action).toHaveCSS('opacity', '1');
@@ -129,6 +138,8 @@ test('bottom and right Reference tabs share compact geometry and intent actions'
     actionTop: 3,
     actionRight: 3,
     actionBottom: 3,
+    actionHit: true,
+    selectorHit: true,
   });
   await expect(tab).toBeVisible();
 });

@@ -527,7 +527,7 @@ export function ReferencePdfViewport({
                   pageIndex={layout.pageIndex}
                   style={{ pointerEvents: 'none' }}
                 />
-                <div style={selectionLayerStyle(documentState.document!.pages[layout.pageIndex]!, layout, documentState.rotation)}>
+                <div data-pdf-selection-layer style={selectionLayerStyle(documentState.document!.pages[layout.pageIndex]!, layout, documentState.rotation)}>
                   <SelectionLayer
                     documentId={documentId}
                     pageIndex={layout.pageIndex}

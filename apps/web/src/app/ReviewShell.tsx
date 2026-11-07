@@ -865,7 +865,6 @@ export function ReviewShell(props: ReviewShellProps) {
     if (!pendingOpeningFitRef.current || navigation === undefined) return;
     let current = true;
     // Only an already-fitted page follows the new width on opening.
-    // Manual zooms, docking, and closing preserve the current scale.
     workspaceFraming.markUserIntent(undefined, { captureSettledPosition: false });
     void (navigation.refit ?? navigation.fitToWidth)(async (signal) => {
       const geometry = await workspaceFraming.waitForSettledGeometry(signal);
@@ -2073,7 +2072,7 @@ export function ReviewShell(props: ReviewShellProps) {
         data-workspace-presentation={workspaceFraming.presentation}
         data-annotation-presentation={workspaceFraming.presentation}
         data-right-surface-open={rightSurfaceOpen ? 'true' : 'false'}
-        data-bottom-surface-open={effectiveReferenceLayout.kind === 'wide-split'
+        data-bottom-surface-open={effectiveReferenceLayout.kind !== 'narrow-unified'
           && effectiveReferenceLayout.bottomReferencesOpen ? 'true' : 'false'}
         data-right-rail-present={effectiveReferenceLayout.kind === 'narrow-unified' ? 'false' : 'true'}
         data-bottom-rail-present={(

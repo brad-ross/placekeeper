@@ -1,3 +1,4 @@
+import { reviewEdgeGeometry } from '../../scripts/testing/review-edge-geometry.js';
 import { createHash, randomUUID } from "node:crypto";
 import { access, copyFile, mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -275,7 +276,7 @@ async function dragAcrossProductionPdfPages(
   }
   await whileSelecting?.();
   await page.mouse.up();
-  await expect(workspace.locator(':scope .pdf-workspace__page[data-page-index] > div[style*="mix-blend-mode"]'))
+  await expect(workspace.locator(':scope .pdf-workspace__page[data-page-index] > [data-pdf-selection-layer] > div[style*="mix-blend-mode"]'))
     .not.toHaveCount(0);
   await page.evaluate(() => new Promise<void>((resolve) => {
     requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
@@ -581,6 +582,7 @@ test('classifies an initial packaged-runtime bootstrap rejection as one preparat
 test('imports standard annotations into the editable tray and saves comment edits and deletion', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
   const { sessionId } = await openFreshProductionFixture(page, pdf, 'Standard annotation import failed');
+  await chooseFreshCopyDestination(page);
   const imported = host.broker.state(sessionId)!.items;
   expect(imported).toHaveLength(2);
   expect(imported.every(({ kind }) => kind === 'pdfAnnotation')).toBe(true);
@@ -985,30 +987,32 @@ for (const viewportWidth of [1280, 760]) {
         .filter((animation) => animation.effect?.getComputedTiming().iterations !== Infinity)
         .map((animation) => animation.finished.catch(() => undefined)));
     });
-    const rightFade = page.locator('.review-overlay-frame__right-fade:visible');
     await main.locator('.pdf-workspace__page[data-page-index="0"]').focus();
     await page.keyboard.press('Control+Meta+0');
     await waitForStageMotion();
     await expect.poll(() => zoom.inputValue()).not.toBe('100');
-    // The zoom menu enables Fit width only while the page is not already fitted.
+    const fitWidth = page.locator('[data-review-zoom-action="fit-width"]');
+    const zoomTrigger = page.getByRole('button', { name: 'Open zoom controls' });
+    await zoomTrigger.focus();
+    await zoomTrigger.press('Enter');
+    await expect(fitWidth).toHaveAttribute('aria-busy', 'false');
+    await expect(fitWidth).toHaveAttribute('data-fit-active', 'true');
+    // Fit remains available after fitting so it can cycle to another mode.
     await zoom.fill('100');
     await zoom.press('Enter');
     await waitForStageMotion();
     await expect(zoom).toHaveValue('100');
-    const zoomTrigger = page.getByRole('button', { name: 'Open zoom controls' });
     await zoomTrigger.focus();
     if (await zoomTrigger.getAttribute('aria-expanded') === 'true') await zoomTrigger.press('Escape');
     await expect(zoomTrigger).toHaveAttribute('aria-expanded', 'false');
     await zoomTrigger.press('Enter');
     await expect(page.getByRole('menu', { name: 'PDF zoom', exact: true })).toBeVisible();
-    const fitWidth = page.getByRole('menuitem', { name: 'Fit width', exact: true });
     await expect(fitWidth).toBeVisible();
     await fitWidth.press('Enter');
     await expect(fitWidth).toHaveAttribute('aria-busy', 'true');
-    await waitForStageMotion();
-    await expect(fitWidth).toBeDisabled();
-    await waitForStageMotion();
-    await expect(fitWidth).toBeDisabled();
+    await expect(fitWidth).toHaveAttribute('aria-busy', 'false');
+    await expect(fitWidth).toBeEnabled();
+    await expect(fitWidth).toHaveAttribute('data-fit-active', 'true');
     await page.keyboard.press('Escape');
     // Use the app's settled fit geometry, then preserve that scale as manual zoom.
     await expect.poll(() => zoom.inputValue()).not.toBe('100');
@@ -1026,15 +1030,16 @@ for (const viewportWidth of [1280, 760]) {
       await expect.poll(async () => {
         const viewport = await main.locator('[data-viewer-framing-viewport]').boundingBox();
         const bounds = await pdfPage.boundingBox();
-        const fade = await rightFade.count() > 0 ? await rightFade.boundingBox() : null;
+        const { clearRight } = await page.locator('[data-review-stage]').evaluate(reviewEdgeGeometry);
         if (!viewport || !bounds) return Number.POSITIVE_INFINITY;
-        const right = fade?.x ?? viewport.x + viewport.width;
+        const right = clearRight;
         return Math.max(viewport.x - bounds.x, bounds.x + bounds.width - right);
       }).toBeLessThan(2);
     };
     await results.first().click();
     await expectFittedPage(0);
-    await page.evaluate(() => {
+    const { clearRight } = await page.locator('[data-review-stage]').evaluate(reviewEdgeGeometry);
+    await page.evaluate((clearRight) => {
       const state = { running: true, overflow: [] as number[] };
       (window as unknown as { jumpFrames: typeof state }).jumpFrames = state;
       const sample = () => {
@@ -1042,15 +1047,13 @@ for (const viewportWidth of [1280, 760]) {
         const main = document.querySelector('.pdf-workspace:not(.pdf-workspace--reference)');
         const viewport = main?.querySelector('[data-viewer-framing-viewport]')?.getBoundingClientRect();
         const bounds = main?.querySelector('.pdf-workspace__page[data-page-index="1"]')?.getBoundingClientRect();
-        const fade = Array.from(document.querySelectorAll('.review-overlay-frame__right-fade'))
-          .find((element) => element.getBoundingClientRect().width > 0)?.getBoundingClientRect();
         if (viewport && bounds && bounds.top < viewport.bottom && bounds.bottom > viewport.top) {
-          state.overflow.push(Math.max(viewport.left - bounds.left, bounds.right - (fade?.left ?? viewport.right)));
+          state.overflow.push(Math.max(viewport.left - bounds.left, bounds.right - clearRight));
         }
         requestAnimationFrame(sample);
       };
       requestAnimationFrame(sample);
-    });
+    }, clearRight);
     await results.nth(1).click();
     await expectFittedPage(1);
     await waitForStageMotion();
@@ -2069,9 +2072,9 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
   await expect.poll(async () => {
     const viewport = await mainViewport.boundingBox();
     const paper = await mainPageOne.boundingBox();
-    const fade = await page.locator('.review-overlay-frame__right-fade:visible').boundingBox();
-    if (!viewport || !paper || !fade) return Number.POSITIVE_INFINITY;
-    return Math.max(viewport.x - paper.x, paper.x + paper.width - fade.x);
+    const { clearRight } = await page.locator('[data-review-stage]').evaluate(reviewEdgeGeometry);
+    if (!viewport || !paper) return Number.POSITIVE_INFINITY;
+    return Math.max(viewport.x - paper.x, paper.x + paper.width - clearRight);
   }).toBeLessThan(2);
   await expect.poll(async () => {
     const bounds = await primaryReferencePage.boundingBox();
@@ -2413,6 +2416,7 @@ test("keeps main PDF link hit targets below an open References viewer", async ({
     name: "Open PDF link to Primary result, Page 2",
   });
   await openLinkInReferences(page, primaryLink);
+  await expectReferenceReady(page, page.getByRole("tab", { name: /Primary result/u }));
 
   const referenceWorkspace = page.locator("[data-reference-pdf-viewport]");
   await expect(referenceWorkspace).toBeVisible();
@@ -2428,7 +2432,10 @@ test("keeps main PDF link hit targets below an open References viewer", async ({
     name: "Open PDF link to Target-to-target detail link, Page 3",
   });
   await expect(mainDetailLink).toBeAttached();
-  await mainDetailLink.evaluate((element) => {
+  await page.locator("[data-review-stage]").evaluate(async (stage) => {
+    await Promise.all(stage.getAnimations({ subtree: true }).map(animation => animation.finished.catch(() => undefined)));
+  });
+  const scrollSetup = await mainDetailLink.evaluate((element) => {
     const reference = document.querySelector<HTMLElement>("[data-reference-pdf-viewport]");
     const viewport = element.closest(".pdf-workspace")
       ?.querySelector<HTMLElement>("[data-viewer-framing-viewport]");
@@ -2437,11 +2444,17 @@ test("keeps main PDF link hit targets below an open References viewer", async ({
     const linkBounds = element.getBoundingClientRect();
     const linkCenterY = linkBounds.top + linkBounds.height / 2;
     const referenceCenterY = referenceBounds.top + referenceBounds.height / 2;
-    viewport.scrollTop += linkCenterY - referenceCenterY;
+    const viewportBounds = viewport.getBoundingClientRect();
+    return { delta: linkCenterY - referenceCenterY, x: viewportBounds.left + 32, y: viewportBounds.top + 32 };
   });
-  await page.evaluate(() => new Promise<void>((resolve) => {
-    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
-  }));
+  // Wheel input establishes deliberate reading intent before moving beneath the tray.
+  await page.mouse.move(scrollSetup.x, scrollSetup.y);
+  await page.mouse.wheel(0, scrollSetup.delta);
+  await expect.poll(() => mainDetailLink.evaluate((element) => {
+    const reference = document.querySelector("[data-reference-pdf-viewport]")!.getBoundingClientRect();
+    const link = element.getBoundingClientRect();
+    return Math.abs(link.top + link.height / 2 - reference.top - reference.height / 2);
+  })).toBeLessThan(2);
 
   const hitState = await mainDetailLink.evaluate((element) => {
     const reference = document.querySelector<HTMLElement>("[data-reference-pdf-viewport]");
@@ -2510,7 +2523,7 @@ for (const width of [1280, 760]) {
           let settledFrames = 0;
           const capture = () => {
             const bar = document.querySelector('[data-review-chrome]');
-            const back = bar?.querySelector('[data-main-history="back"]');
+            const back = bar?.querySelector('.review-chrome__main-history-control[data-main-history="back"]');
             if (back) samples.push({
               clipPath: getComputedStyle(back).clipPath,
               revealed: bar!.matches(':hover, :has(:focus-visible)'),
@@ -2529,7 +2542,7 @@ for (const width of [1280, 760]) {
       const pageInput = page.locator('.review-chrome__page-input');
       await expect(pageInput).toHaveValue(targetPage);
       const bar = page.locator('[data-review-chrome]');
-      const back = bar.locator('[data-main-history="back"]');
+      const back = bar.locator('.review-chrome__main-history-control[data-main-history="back"]');
       await bar.hover({ position: { x: 2, y: 2 } });
       await expect(back).toHaveCSS('clip-path', 'none');
       await page.locator('.pdf-workspace:not(.pdf-workspace--reference)').hover({ position: { x: 30, y: 100 } });
@@ -2546,7 +2559,7 @@ for (const width of [1280, 760]) {
       await expect(back).toBeFocused();
       await page.keyboard.press('Enter');
       await expect(pageInput).toHaveValue('1');
-      await expect(bar.locator('[data-main-history="forward"]')).toHaveCSS('clip-path', 'inset(50%)');
+      await expect(bar.locator('.review-chrome__main-history-control[data-main-history="forward"]')).toHaveCSS('clip-path', 'inset(50%)');
       await bar.hover({ position: { x: 2, y: 2 } });
       await page.getByRole('button', { name: 'Forward in document history', exact: true }).click();
       await expect(pageInput).toHaveValue(targetPage);
@@ -2577,6 +2590,7 @@ for (const mobile of [false, true]) {
           );
         },
       );
+      await chooseFreshCopyDestination(page);
       await expect.poll(() => currentPageText(page)).toBe("1 / 4");
       await expect.poll(() => {
         const state = host.broker.state(sessionId);
@@ -2589,11 +2603,12 @@ for (const mobile of [false, true]) {
       if (mobile) {
         const rail = page.locator('.workspace-edge-rail');
         await expect(rail).toBeVisible();
-        await expect.poll(() => page.evaluate(() => {
-          const rail = document.querySelector('.workspace-edge-rail')!.getBoundingClientRect();
-          const backing = document.querySelector('.review-overlay-frame__bottom-backing')!.getBoundingClientRect();
-          return backing.top <= rail.top && backing.bottom >= rail.bottom;
-        })).toBe(true);
+        await expect.poll(async () => {
+          const bounds = (await rail.boundingBox())!;
+          const edge = await page.locator('[data-review-stage]').evaluate(reviewEdgeGeometry);
+          if (edge.display !== 'block' || !edge.background.includes('linear-gradient')) return -Infinity;
+          return Math.min(bounds.y - edge.bottomStart, edge.bottomEnd - bounds.y - bounds.height);
+        }).toBeGreaterThanOrEqual(0);
       }
       await openAnnotationsWorkspace(page);
       const annotationsPanel = page.locator('#workspace-panel-annotations');
@@ -2618,6 +2633,7 @@ for (const mobile of [false, true]) {
       if (!mobile) await page.locator('[data-review-chrome]').hover({ position: { x: 2, y: 2 } });
       await back.click();
       await expect.poll(() => currentPageText(page)).toBe("1 / 4");
+      if (mobile && !await forward.isVisible()) await page.getByRole("button", { name: /Open page navigation/ }).click();
       await expect(forward).toBeEnabled();
 
       if (!mobile) await page.locator('[data-review-chrome]').hover({ position: { x: 2, y: 2 } });
@@ -2855,9 +2871,10 @@ test("switches and sends references from the right-docked workspace", async ({ p
     );
   }).toBeLessThan(2);
 
-  await clickHoverRevealedReferenceTabAction(
-    page.getByRole("button", { name: "Open in main document" }),
-  );
+  const sendToMain = page.getByRole("button", { name: "Open in main document" });
+  await referenceViewport.hover({ position: { x: 32, y: 64 } });
+  await expect(sendToMain).toHaveCSS('opacity', '0');
+  await clickHoverRevealedReferenceTabAction(sendToMain);
   await expect(page.locator(".review-workspace__status")).toHaveText(
     "Reference sent to the main document.",
   );
@@ -3484,6 +3501,12 @@ test("keeps outline and rejected link metadata inert inside the installed local 
   await page.evaluate(() => new Promise<void>((resolve) => {
     requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
   }));
+  // The active fit follows the resized reading area after the layout debounce.
+  await expect.poll(async () => {
+    const before = await captureMainState();
+    await page.waitForTimeout(300);
+    return JSON.stringify(await captureMainState()) === JSON.stringify(before);
+  }).toBe(true);
   const mainStateBeforeNarrowReference = await captureMainState();
   await page.waitForTimeout(200);
   await expectMainStateUnchanged(mainStateBeforeNarrowReference);
@@ -3595,8 +3618,11 @@ test("keeps outline and rejected link metadata inert inside the installed local 
   await expect(back).toBeDisabled();
   await expect(forward).toBeEnabled();
   const unavailable = mainWorkspace.getByRole("button", { name: "PDF link target unavailable" });
-  await expect(unavailable).toHaveCount(6);
-  for (let index = 0; index < 6; index += 1) {
+  await expect(mainWorkspace.getByRole("button", {
+    name: "Open web link: https://example.invalid/reference", exact: true,
+  })).toBeVisible();
+  await expect(unavailable).toHaveCount(5);
+  for (let index = 0; index < 5; index += 1) {
     await unavailable.nth(index).click();
     await expect(page.locator("[data-link-action-popover]")).toHaveCount(0);
   }
@@ -3918,7 +3944,7 @@ test("one installed-style browser tree preserves review state across responsive 
     { x: 76, y: 98 },
     { x: 405, y: 98 },
     async () => {
-      const selectionOverlay = pageCanvas.locator(':scope > div[style*="mix-blend-mode"]');
+      const selectionOverlay = pageCanvas.locator(':scope > [data-pdf-selection-layer] > div[style*="mix-blend-mode"]');
       await expect(selectionOverlay).toBeVisible();
       await expect(selectionOverlay.locator(':scope > div').first())
         .toHaveCSS('background-color', 'rgb(207, 222, 234)');
@@ -3948,7 +3974,7 @@ test("one installed-style browser tree preserves review state across responsive 
   const originalDigest = await sha256(sourcePdfPath);
   await replacementComposer.getByRole("button", { name: "Apply" }).click();
   await expect(replacementComposer).toHaveCount(0);
-  await expect(pageCanvas.locator(':scope > div[style*="mix-blend-mode"]')).toHaveCount(0);
+  await expect(pageCanvas.locator(':scope > [data-pdf-selection-layer] > div[style*="mix-blend-mode"]')).toHaveCount(0);
   await expect(page.getByRole('toolbar', { name: 'Selection review actions' })).toHaveCount(0);
   await expect(page.locator("[data-review-item]")).toHaveCount(initialItems.length + 1);
   await expect.poll(() => host.broker.saveStatus(initialSessionId)?.sync.phase).toBe("clean");
@@ -4982,11 +5008,13 @@ test('adds, reads, and edits a full annotation through the production PDF', asyn
   expect(host.broker.state(launched.sessionId)?.revision).toBeGreaterThan(annotationBaseline.revision);
 });
 
-test('keeps the right workspace inset and PDF runway stable across open and close', async ({ page }) => {
+test('keeps manual PDF scale stable as the right workspace changes reading width', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.setViewportSize({ width: 1280, height: 900 });
   await openFreshProductionFixture(page, pdf, 'Right workspace geometry launch failed');
-  // Manual zoom preserves page scale so opening the tray adds PDF runway.
+  await expect.poll(() => page.locator('[data-viewer-framing-viewport]').evaluate((element) =>
+    element.scrollWidth - element.clientWidth)).toBeLessThanOrEqual(1);
+  // Manual zoom preserves page scale while the dock reduces the reading area.
   await zoomInOnce(page);
 
   const stage = page.locator('[data-review-stage]');
@@ -4994,7 +5022,10 @@ test('keeps the right workspace inset and PDF runway stable across open and clos
   const tray = page.locator('#review-tools-workspace');
   const workspace = page.locator('.pdf-workspace');
   await workspace.evaluate((element) => { element.dataset.workspaceGeometryProbe = 'stable'; });
-  const closedWidth = await viewport.evaluate((element) => element.scrollWidth);
+  const readingArea = page.locator('.review-document');
+  const paper = workspace.locator('.pdf-workspace__page[data-page-index="0"]');
+  const closedWidth = (await readingArea.boundingBox())!.width;
+  const pageWidth = (await paper.boundingBox())!.width;
 
   await openAnnotationsWorkspace(page);
   await expect(tray).toHaveAttribute('data-workspace-presentation', 'right');
@@ -5003,12 +5034,17 @@ test('keeps the right workspace inset and PDF runway stable across open and clos
   expect(trayBox.y - stageBox.y).toBeCloseTo(0, 0);
   expect(stageBox.x + stageBox.width - trayBox.x - trayBox.width).toBeCloseTo(await expectedWorkspaceInset(page), 0);
   expect(stageBox.y + stageBox.height - trayBox.y - trayBox.height).toBeCloseTo(await expectedWorkspaceInset(page), 0);
-  expect(await viewport.evaluate((element) => element.scrollWidth)).toBeGreaterThan(closedWidth);
+  expect((await readingArea.boundingBox())!.width).toBeLessThan(closedWidth);
+  expect((await paper.boundingBox())!.width).toBeCloseTo(pageWidth, 1);
+  const trailingSpace = await viewport.evaluate((element) => Number.parseFloat(getComputedStyle(element).paddingRight));
+  expect(await viewport.locator('[data-viewer-runway]').evaluate((element) => element.getBoundingClientRect().width
+    - element.parentElement!.getBoundingClientRect().width)).toBeCloseTo(trailingSpace, 1);
   await expect(workspace).toHaveAttribute('data-workspace-geometry-probe', 'stable');
 
   await toggleWorkspace(page);
   await expect(tray).toHaveAttribute('data-tools-workspace-open', 'false');
-  await expect.poll(() => viewport.evaluate((element) => element.scrollWidth)).toBe(closedWidth);
+  await expect.poll(async () => (await readingArea.boundingBox())!.width).toBeCloseTo(closedWidth, 1);
+  expect((await paper.boundingBox())!.width).toBeCloseTo(pageWidth, 1);
   await expect(workspace).toHaveAttribute('data-workspace-geometry-probe', 'stable');
 });
 
@@ -5031,12 +5067,12 @@ test('keeps the bottom workspace evenly inset across open and close', async ({ p
   await expect(tray).toHaveAttribute('data-tools-workspace-open', 'false');
 });
 
-test('enables Fit width and shows Horizontal lock only when they are useful', async ({ page }) => {
+test('keeps fit cycling available and shows Horizontal lock only when useful', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   await page.setViewportSize({ width: 1280, height: 900 });
   await openFreshProductionFixture(page, referencePdf, 'Conditional zoom actions launch failed');
   const menu = page.getByRole('menu', { name: 'PDF zoom', exact: true });
-  const fit = page.getByRole('menuitem', { name: 'Fit width', exact: true });
+  const fit = page.locator('[data-review-zoom-action="fit-width"]');
   const lock = page.getByRole('menuitemcheckbox', { name: 'Horizontal lock' });
   const openMenu = async () => {
     await page.locator('[data-review-chrome]').hover({ position: { x: 2, y: 2 } });
@@ -5051,7 +5087,8 @@ test('enables Fit width and shows Horizontal lock only when they are useful', as
     await openMenu();
   };
   await openMenu();
-  await expect(fit).toBeDisabled();
+  await expect(fit).toBeEnabled();
+  await expect(fit).toHaveAttribute('data-fit-active', 'true');
   await expect(lock).toHaveCount(0);
   const trailingPositions = async () => Promise.all(['Zoom out', 'Zoom in'].map(async (name) => (await page.getByRole('menuitem', { name, exact: true }).boundingBox())!.x));
   const originalPositions = await trailingPositions();
@@ -5070,6 +5107,8 @@ test('enables Fit width and shows Horizontal lock only when they are useful', as
       await page.waitForTimeout(250);
       expect(await probe.evaluate((state) => state.appeared)).toBe(false);
       await expect(lock).toHaveCount(0);
+      await expect.poll(() => page.locator('.review-document [data-viewer-framing-viewport]')
+        .evaluate(element => element.scrollWidth - element.clientWidth)).toBe(0);
     } finally {
       await probe.evaluate((state) => state.observer.disconnect());
       await probe.dispose();
@@ -5081,12 +5120,13 @@ test('enables Fit width and shows Horizontal lock only when they are useful', as
   await expect(lock).toBeVisible();
   await expect.poll(trailingPositions).toEqual(originalPositions);
   const actionLabels = await menu.locator('[role=menuitem], [role=menuitemcheckbox]').evaluateAll((elements) => elements.map((element) => element.getAttribute('aria-label')));
-  expect(actionLabels).toEqual(['Horizontal lock', 'Fit width', 'Zoom out', 'Zoom in']);
+  expect(actionLabels).toEqual(['Horizontal lock', await fit.getAttribute('aria-label'), 'Zoom out', 'Zoom in']);
   await lock.click();
   await expect(lock).toHaveAttribute('aria-checked', 'true');
   await expect(page.locator('.review-document [data-viewer-framing-viewport]')).toHaveCSS('overflow-x', 'hidden');
   await fit.click();
-  await expect(fit).toBeDisabled();
+  await expect(fit).toBeEnabled();
+  await expect(fit).toHaveAttribute('data-fit-active', 'true');
   await expect(lock).toHaveCount(0);
   await expect.poll(trailingPositions).toEqual(originalPositions);
   await setZoom('50');
@@ -5164,8 +5204,7 @@ test('keeps native PDF scrollbars exposed without shifting pages', async ({ page
       };
     });
     // Decorative overlays leave the native scrollbar edge unobstructed.
-    expect(geometry.clip).toBe(geometry.rightInset === 0 && geometry.bottomInset === 0
-      ? 'inset(0px)' : `inset(0px ${geometry.rightInset}px ${geometry.bottomInset}px 0px)`);
+    expect(geometry.clip).toBe(`inset(0px ${Math.max(16, geometry.rightInset)}px ${Math.max(16, geometry.bottomInset)}px 0px)`);
     expect(geometry.bottom).toBe(900);
     await expect(viewport).toHaveCSS('scrollbar-width', 'auto');
     await expect(viewport).toHaveCSS('scrollbar-color', await page.evaluate(() =>
@@ -5201,7 +5240,7 @@ test('defaults a real PDF to fit width and refits bottom and resizable right rea
   const mainViewport = mainWorkspace.locator('[data-viewer-framing-viewport]');
   const mainPage = mainWorkspace.locator(".pdf-workspace__page[data-page-index='0']");
   const referenceWorkspace = page.locator('[data-review-workspace]');
-  const fitWidth = page.getByRole('menuitem', { name: 'Fit width' });
+  const fitWidth = page.locator('[data-review-zoom-action="fit-width"]');
   const waitForStageMotion = async () => {
     await page.locator('[data-review-stage]').evaluate(async (element) => {
       await Promise.all(element.getAnimations({ subtree: true })
@@ -5219,11 +5258,16 @@ test('defaults a real PDF to fit width and refits bottom and resizable right rea
     await trigger.press('Enter');
     await expect(page.getByRole('menu', { name: 'PDF zoom', exact: true })).toBeVisible();
     await expect(fitWidth).toBeVisible();
-    await fitWidth.click();
+    await fitWidth.hover();
+    await page.getByRole('menuitemradio', { name: 'Fit width', exact: true }).click();
     await waitForStageMotion();
-    await expect(fitWidth).toBeDisabled();
+    await expect(fitWidth).toHaveAttribute('aria-busy', 'false');
+    await expect(fitWidth).toHaveAttribute('data-fit-active', 'true');
+    await expect(fitWidth).toHaveAttribute('data-fit-mode', 'width');
     await waitForStageMotion();
-    await expect(fitWidth).toBeDisabled();
+    await expect(fitWidth).toHaveAttribute('aria-busy', 'false');
+    await expect(fitWidth).toHaveAttribute('data-fit-active', 'true');
+    await expect(fitWidth).toHaveAttribute('data-fit-mode', 'width');
   };
   const zoomValue = () => page.getByRole('textbox', {
     name: /Current zoom \d+ percent\. Enter a zoom percentage/u,
@@ -5232,32 +5276,30 @@ test('defaults a real PDF to fit width and refits bottom and resizable right rea
   await waitForRenderedPageImage(mainPage);
   await page.locator('[data-review-chrome]').hover({ position: { x: 2, y: 2 } });
   await page.getByRole('button', { name: 'Open zoom controls' }).click();
-  await expect(fitWidth).toBeDisabled();
+  await expect(fitWidth).toHaveAttribute('aria-busy', 'false');
+  await expect(fitWidth).toHaveAttribute('data-fit-active', 'true');
+  await expect(fitWidth).toHaveAttribute('data-fit-mode', 'width');
   await expect(mainViewport).toHaveCSS('scrollbar-gutter', 'stable');
   await mainWorkspace.evaluate((element) => element.setAttribute('data-fit-width-main-mount', 'stable'));
   await expect(page.getByRole('textbox', { name: /Current page 1 of 4/u })).toHaveValue('1');
 
   const horizontalGeometry = async (rightEdge?: number) => {
-    const [viewportBounds, pageBounds, clientBox, runwayRight] = await Promise.all([
+    const [viewportBounds, pageBounds, clientBox] = await Promise.all([
       mainViewport.boundingBox(),
       mainPage.boundingBox(),
       mainViewport.evaluate((element) => ({
         left: element.clientLeft,
         width: element.clientWidth,
       })),
-      mainWorkspace.locator('[data-viewer-runway]').evaluate((element) => {
-        const parent = element.parentElement;
-        return parent === null
-          ? 0
-          : Math.max(0, element.getBoundingClientRect().width - parent.getBoundingClientRect().width);
-      }),
     ]);
     if (!viewportBounds || !pageBounds) throw new Error('Fit Width geometry is unavailable.');
     const intervalLeft = viewportBounds.x + clientBox.left;
     const clientRight = intervalLeft + clientBox.width;
-    const fade = page.locator('.review-overlay-frame__right-fade:visible');
-    const fadeLeft = await fade.count() > 0 ? (await fade.boundingBox())?.x : undefined;
-    const intervalRight = Math.min(rightEdge ?? clientRight, clientRight - runwayRight, rightEdge === undefined ? (fadeLeft ?? clientRight) : clientRight);
+    const readingEdge = await mainWorkspace.evaluate((element) => ({
+      right: element.getBoundingClientRect().right,
+      margin: Number.parseFloat(getComputedStyle(element).getPropertyValue('--review-document-right-gap')),
+    }));
+    const intervalRight = Math.min(rightEdge ?? readingEdge.right - readingEdge.margin, clientRight);
     return {
       pageWidth: pageBounds.width,
       intervalWidth: intervalRight - intervalLeft,
@@ -5288,10 +5330,10 @@ test('defaults a real PDF to fit width and refits bottom and resizable right rea
   const standardGap = 52;
   const closedGeometry = await expectFitted(standardGap);
   const expectScrollbarAtWindowEdge = async () => {
-    if (await fitWidth.isVisible()) {
-      await page.getByRole('button', { name: 'Open zoom controls' }).press('Escape');
-      await expect(fitWidth).toBeHidden();
-    }
+    const zoomTrigger = page.getByRole('button', { name: 'Open zoom controls' });
+    if (await zoomTrigger.getAttribute('aria-expanded') === 'true') await zoomTrigger.click();
+    await page.mouse.move(0, 0);
+    await expect(fitWidth).toBeHidden();
     const stageBounds = (await page.locator('[data-review-stage]').boundingBox())!;
     await expect.poll(async () => {
       const bounds = (await mainViewport.boundingBox())!;
@@ -5960,7 +6002,7 @@ for (const selection of [
     expect(await pasteNativeClipboard(page, pasteTarget)).toBe(expectedText);
     expect(host.broker.state(launched.sessionId)?.revision).toBe(0);
     expect(host.broker.state(launched.sessionId)?.items).toHaveLength(0);
-    await expect(main.locator(':scope .pdf-workspace__page[data-page-index] > div[style*="mix-blend-mode"]'))
+    await expect(main.locator(':scope .pdf-workspace__page[data-page-index] > [data-pdf-selection-layer] > div[style*="mix-blend-mode"]'))
       .not.toHaveCount(0);
   });
 }
@@ -6006,7 +6048,7 @@ test('copies a real Main PDF selection from the selection action popup', async (
   await expect(copyFailure).toContainText('could not copy the selected text');
   expect(host.broker.state(launched.sessionId)?.revision).toBe(0);
   expect(host.broker.state(launched.sessionId)?.items).toHaveLength(0);
-  await expect(main.locator(':scope .pdf-workspace__page[data-page-index] > div[style*="mix-blend-mode"]'))
+  await expect(main.locator(':scope .pdf-workspace__page[data-page-index] > [data-pdf-selection-layer] > div[style*="mix-blend-mode"]'))
     .not.toHaveCount(0);
 });
 
@@ -6032,7 +6074,7 @@ test('keeps prior clipboard text while a real cross-page selection is still pend
   await pasteTarget.fill('');
   expect(await pasteNativeClipboard(page, pasteTarget)).toBe(clipboardSentinel);
   expect(host.broker.state(launched.sessionId)?.revision).toBe(0);
-  await expect(main.locator(':scope .pdf-workspace__page[data-page-index] > div[style*="mix-blend-mode"]'))
+  await expect(main.locator(':scope .pdf-workspace__page[data-page-index] > [data-pdf-selection-layer] > div[style*="mix-blend-mode"]'))
     .not.toHaveCount(0);
 });
 
@@ -6055,7 +6097,7 @@ test('copies exactly 12 selected pages through the platform shortcut and native 
 
   expect(host.broker.state(launched.sessionId)?.revision).toBe(0);
   expect(host.broker.state(launched.sessionId)?.items).toHaveLength(0);
-  await expect(main.locator(':scope .pdf-workspace__page[data-page-index] > div[style*="mix-blend-mode"]'))
+  await expect(main.locator(':scope .pdf-workspace__page[data-page-index] > [data-pdf-selection-layer] > div[style*="mix-blend-mode"]'))
     .not.toHaveCount(0);
 });
 
@@ -6083,7 +6125,7 @@ test('rejects a real 13-page copy without changing the clipboard, selection, or 
   expect(await pasteNativeClipboard(page, pasteTarget)).toBe(clipboardSentinel);
   expect(host.broker.state(launched.sessionId)?.revision).toBe(0);
   expect(host.broker.state(launched.sessionId)?.items).toHaveLength(0);
-  await expect(main.locator(':scope .pdf-workspace__page[data-page-index] > div[style*="mix-blend-mode"]'))
+  await expect(main.locator(':scope .pdf-workspace__page[data-page-index] > [data-pdf-selection-layer] > div[style*="mix-blend-mode"]'))
     .not.toHaveCount(0);
 });
 
@@ -6113,7 +6155,7 @@ test('rejects every review action from a real 13-page selection without changing
   }
 
   await expect(page.getByRole('region', { name: /Replacement|Highlight Comment/u })).toHaveCount(0);
-  await expect(main.locator(':scope .pdf-workspace__page[data-page-index] > div[style*="mix-blend-mode"]'))
+  await expect(main.locator(':scope .pdf-workspace__page[data-page-index] > [data-pdf-selection-layer] > div[style*="mix-blend-mode"]'))
     .not.toHaveCount(0);
 });
 
@@ -6189,9 +6231,9 @@ test('copies only the focused Main or Reference selection and preserves DOM prec
 
   await dragAcrossProductionPdfPages(page, main, 0, 1, { y: 58 });
   await dragAcrossProductionPdfPages(page, reference, 1, 2, { y: 58, endX: 350 });
-  await expect(main.locator(':scope .pdf-workspace__page[data-page-index] > div[style*="mix-blend-mode"]'))
+  await expect(main.locator(':scope .pdf-workspace__page[data-page-index] > [data-pdf-selection-layer] > div[style*="mix-blend-mode"]'))
     .not.toHaveCount(0);
-  await expect(reference.locator(':scope .pdf-workspace__page[data-page-index] > div[style*="mix-blend-mode"]'))
+  await expect(reference.locator(':scope .pdf-workspace__page[data-page-index] > [data-pdf-selection-layer] > div[style*="mix-blend-mode"]'))
     .not.toHaveCount(0);
   const referenceText = [
     'Reference navigation fixture — page 2',
@@ -6276,9 +6318,9 @@ test('copies only the focused Main or Reference selection and preserves DOM prec
   expect(await pasteNativeClipboard(page, pasteTarget)).toBe('native editable text');
   expect(host.broker.state(launched.sessionId)?.revision).toBe(0);
   expect(host.broker.state(launched.sessionId)?.items).toEqual(initialItems);
-  await expect(main.locator(':scope .pdf-workspace__page[data-page-index] > div[style*="mix-blend-mode"]'))
+  await expect(main.locator(':scope .pdf-workspace__page[data-page-index] > [data-pdf-selection-layer] > div[style*="mix-blend-mode"]'))
     .not.toHaveCount(0);
-  await expect(reference.locator(':scope .pdf-workspace__page[data-page-index] > div[style*="mix-blend-mode"]'))
+  await expect(reference.locator(':scope .pdf-workspace__page[data-page-index] > [data-pdf-selection-layer] > div[style*="mix-blend-mode"]'))
     .not.toHaveCount(0);
 });
 
@@ -6290,7 +6332,7 @@ test('clears Main and Reference PDF selections before preserving link actions', 
     'Selected PDF link launch failed',
   );
   const main = page.locator('[data-pdf-copy-surface="main"]');
-  const mainSelection = main.locator(':scope .pdf-workspace__page[data-page-index] > div[style*="mix-blend-mode"]');
+  const mainSelection = main.locator(':scope .pdf-workspace__page[data-page-index] > [data-pdf-selection-layer] > div[style*="mix-blend-mode"]');
   await dragAcrossProductionPdfPages(page, main, 0, 1, { y: 58 });
   await expect(page.getByRole('toolbar', { name: 'Selection review actions' })).toBeVisible();
   await expect(mainSelection).not.toHaveCount(0);
@@ -6317,7 +6359,7 @@ test('clears Main and Reference PDF selections before preserving link actions', 
 
   const reference = page.locator('[data-pdf-copy-surface="reference"]');
   const referenceSelection = reference.locator(
-    ':scope .pdf-workspace__page[data-page-index] > div[style*="mix-blend-mode"]',
+    ':scope .pdf-workspace__page[data-page-index] > [data-pdf-selection-layer] > div[style*="mix-blend-mode"]',
   );
   await dragAcrossProductionPdfPages(page, reference, 1, 2, { y: 58, endX: 350 });
   await expect(referenceSelection).not.toHaveCount(0);
@@ -6485,7 +6527,7 @@ test('keeps PDF drag selection available while the Annotation Tray is open', asy
   const { workspace: workspaceControl } = await openAnnotationsWorkspace(page);
   await expect(page.locator('[data-review-stage]')).toHaveAttribute('data-annotation-presentation', 'bottom');
 
-  const selectionRects = pdfPage.locator(':scope > div[style*="mix-blend-mode"]');
+  const selectionRects = pdfPage.locator(':scope > [data-pdf-selection-layer] > div[style*="mix-blend-mode"]');
   const rectCountBeforeDrag = await selectionRects.count();
   const box = await pdfPage.boundingBox();
   if (!box) throw new Error('Rendered PDF page has no bounds.');
@@ -7309,6 +7351,15 @@ for (const dock of ['closed', 'bottom', 'right'] as const) {
     await page.locator('[data-review-stage]').evaluate(async (element) => {
       await Promise.all(element.getAnimations({ subtree: true }).map((animation) => animation.finished.catch(() => undefined)));
     });
+    // Docking schedules a fit after its CSS transition. Measure the wheel
+    // anchor only once the current reading width owns a completed fit.
+    const zoomMenu = page.getByRole('button', { name: 'Open zoom controls' });
+    await zoomMenu.focus();
+    await zoomMenu.press('Enter');
+    const fit = page.locator('[data-review-zoom-action="fit-width"]');
+    await expect(fit).toHaveAttribute('data-fit-width-current', 'true');
+    await expect(fit).toHaveAttribute('aria-busy', 'false');
+    await page.keyboard.press('Escape');
     const rect = (await sheet.boundingBox())!;
     const reading = (await workspace.boundingBox())!;
     const pointer = { x: Math.round(reading.x + reading.width * 0.65), y: Math.round(rect.y + 200) };
@@ -7388,6 +7439,7 @@ test('keeps page and zoom popups aligned on every painted frame as actions chang
     await trigger.hover();
     const menu = page.getByRole('menu', { name: label, exact: true });
     await expect(menu).toBeVisible();
+    if (action === 'Fit width') await menu.locator('[data-review-zoom-action="fit-width"]').hover();
     const id = await menu.getAttribute('id');
     await expect.poll(async () => {
       const [popup, anchor] = await Promise.all([menu.boundingBox(), trigger.boundingBox()]);
@@ -7413,7 +7465,7 @@ test('keeps page and zoom popups aligned on every painted frame as actions chang
       return frames;
     }, id);
     await expect.poll(() => page.evaluate(() => document.documentElement.dataset.popupSampler)).toBe('ready');
-    await menu.getByRole('menuitem', { name: action, exact: true }).click();
+    await menu.getByRole(action === 'Fit width' ? 'menuitemradio' : 'menuitem', { name: action, exact: true }).click();
     const frames = await samples;
     expect(frames.every((frame) => frame.connected && frame.open)).toBe(true);
     const widthChange = Math.max(...frames.map((frame) => frame.width)) - Math.min(...frames.map((frame) => frame.width));
@@ -7423,6 +7475,8 @@ test('keeps page and zoom popups aligned on every painted frame as actions chang
     else if (resizes === false) expect(widthChange).toBeLessThan(1);
     expect(Math.max(...frames.map((frame) => frame.error))).toBeLessThan(1);
     await page.keyboard.press('Escape');
+    await expect(menu).toBeHidden();
+    await expect(trigger).toBeFocused();
   };
   const zoomTrigger = page.getByRole('button', { name: 'Open zoom controls' });
   await checkResize('PDF zoom', zoomTrigger, 'Zoom in', null);

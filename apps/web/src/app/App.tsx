@@ -1,5 +1,5 @@
 import { fetchSourceAnnotationStyles, type SourceAnnotationStyles } from '../pdf/source-annotation-style.js';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { PluginRegistry } from '@embedpdf/core';
 import { DocumentManagerPlugin } from '@embedpdf/plugin-document-manager';
 import { InteractionManagerPlugin } from '@embedpdf/plugin-interaction-manager';
@@ -299,6 +299,7 @@ export interface AppProps {
   onOutlineDiscovery?: (result: PdfOutlineDiscovery) => void;
   onMainDocumentReady?: (engine: PdfEngine, document: PdfDocumentObject) => void;
   onViewerError?: (error: Error) => void;
+  onViewerReadingAreaChange?: (documentGeneration: number) => void;
   searchResults?: readonly PdfSearchResult[];
   /** Transient main-reader Destination Band (R12); never part of review state. */
   mainDestinationBand?: DestinationBand | null;
@@ -358,6 +359,7 @@ export function App({
   onOutlineDiscovery,
   onMainDocumentReady,
   onViewerError,
+  onViewerReadingAreaChange,
   searchResults = [],
   mainDestinationBand = null,
   referenceDestinationBand = null,
@@ -384,6 +386,7 @@ export function App({
   const registryRef = useRef<PluginRegistry | null>(null);
   const framingControlsRef = useRef<ViewerFramingControls | null>(null);
   const workspaceElementRef = useRef<HTMLDivElement | null>(null);
+  const [workspaceElement, setWorkspaceElementState] = useState<HTMLDivElement | null>(null);
   const referenceWorkspaceElementRef = useRef<HTMLDivElement | null>(null);
   const mainNavigationRef = useRef<PdfViewerNavigation | null>(null);
   const [readingLayout] = useState(createTextFitLayout);
@@ -666,9 +669,26 @@ export function App({
       ? current
       : next);
   }, []);
+  useLayoutEffect(() => {
+    // A changed reading area can select a different page without a PDF scroll event.
+    onViewerReadingAreaChange?.(documentGeneration);
+  }, [documentGeneration, onViewerReadingAreaChange, viewerRunway]);
   const setWorkspaceElement = useCallback((element: HTMLDivElement | null) => {
     workspaceElementRef.current = element;
+    setWorkspaceElementState(element);
   }, []);
+  useLayoutEffect(() => {
+    if (workspaceElement === null) return;
+    let active = true;
+    const observer = new ResizeObserver(() => {
+      if (active) onViewerReadingAreaChange?.(documentGeneration);
+    });
+    observer.observe(workspaceElement);
+    return () => {
+      active = false;
+      observer.disconnect();
+    };
+  }, [documentGeneration, onViewerReadingAreaChange, workspaceElement]);
   const setReferenceWorkspaceElement = useCallback((element: HTMLDivElement | null) => {
     referenceWorkspaceElementRef.current = element;
   }, []);

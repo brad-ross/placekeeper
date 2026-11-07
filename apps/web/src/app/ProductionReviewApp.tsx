@@ -28,7 +28,7 @@ import {
   viewerResourcePoliciesEqual,
 } from "../host/viewer-resource-equivalence.js";
 import { visibleCodexContext } from "../host/context-projection.js";
-import type { ReviewItem, ReviewStateView } from "../../../../packages/core/src/review-model.js";
+import type { ReviewCommand, ReviewItem, ReviewStateView } from "../../../../packages/core/src/review-model.js";
 import type { ReviewAnnotation } from '../../../../packages/core/src/pdf-writer.js';
 import type { SaveStatus } from "../../../../packages/core/src/save-status.js";
 import {
@@ -566,8 +566,10 @@ export function acceptedAuthoringCommandRequiresPersistence(
   state: ReviewStateView,
   status: SaveStatus,
   authoringPersistenceRequired: boolean,
+  commandType: ReviewCommand['type'],
 ): boolean {
-  return authoringPersistenceRequired
+  return commandType !== 'put-draft'
+    && authoringPersistenceRequired
     && status.destination.phase === 'active'
     && !saveStatusIsCleanCurrent(state, status);
 }
@@ -2276,10 +2278,25 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     setOutlineDiscovery(discovery);
     navigationCoordinator.refreshCurrentOutline();
   }, [navigationCoordinator]);
+  const onViewerReadingAreaChange = useCallback((generation: number) => {
+    if (generation !== documentGenerationRef.current
+      || generation !== viewerControlsGenerationRef.current) return;
+    const controls = viewerControlsRef.current;
+    if (controls !== undefined) {
+      const snapshot = controls.snapshot();
+      setViewerState((current) => current.currentPage === snapshot.currentPage ? current : snapshot);
+    }
+  }, []);
   const onViewerInitialized = useCallback(async (registry: PluginRegistry) => {
     viewerRegistry.current = registry;
     viewerControlsRef.current?.dispose();
+    const controlsGeneration = documentGenerationRef.current;
     const controls = createViewerControls(registry, {
+      currentReadingPage: () => {
+        if (documentGenerationRef.current !== controlsGeneration || viewerRegistry.current !== registry) return null;
+        const location = mainNavigationRef.current?.captureLocation();
+        return location ? location.pageIndex + 1 : null;
+      },
       onManualZoom: () => mainNavigationRef.current?.manualZoom?.(),
       viewport: () => productionRootRef.current?.querySelector<HTMLElement>(
         '.pdf-workspace:not(.pdf-workspace--reference) [data-viewer-framing-viewport]',
@@ -2493,6 +2510,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       onViewerNavigationInitialized={onViewerNavigationInitialized}
       onOutlineDiscovery={onOutlineDiscovery}
       onViewerInitialized={onViewerInitialized}
+      onViewerReadingAreaChange={onViewerReadingAreaChange}
       onMainDocumentReady={onMainDocumentReady}
       {...(props.onViewerError === undefined ? {} : { onViewerError: props.onViewerError })}
       onViewerFramingInitialized={onViewerFramingInitialized}
@@ -2710,9 +2728,10 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     : effectiveReferenceLayout.rightWorkspaceOpen || effectiveReferenceLayout.bottomReferencesOpen;
   const onInitialFitComplete = useCallback((generation: number) => {
     if (generation !== documentGenerationRef.current) return;
+    onViewerReadingAreaChange(generation);
     setInitialFitRequest(undefined);
     setInitialViewReady(true);
-  }, []);
+  }, [onViewerReadingAreaChange]);
   const onCommitMainFramingPositionChange = useCallback((commit: (() => void) | null) => {
     commitMainFramingPositionRef.current = commit ?? (() => undefined);
   }, []);
@@ -3083,6 +3102,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
                 authority !== undefined
                   && !exportOnly
                   && state.workflow.mode !== 'generated-output',
+                command.type,
               )) {
                 setCommandError(null);
                 return {

@@ -103,8 +103,12 @@ test('rejected opening keeps a selectable URL and handles clipboard denial', asy
   await expect(url).toHaveText(destination);
   await page.getByRole('button', { name: 'Copy URL', exact: true }).click();
   await expect(page.getByRole('status').filter({ hasText: 'Couldn’t copy link.' })).toHaveText('Couldn’t copy link.');
-  await url.focus();
-  expect(await url.evaluate(el => getComputedStyle(el).userSelect)).toBe('text');
+  await url.dblclick();
+  await expect.poll(() => url.evaluate(element => {
+    const selection = window.getSelection();
+    return selection !== null && selection.toString().trim().length > 0
+      && element.contains(selection.anchorNode) && element.contains(selection.focusNode);
+  })).toBe(true);
   await page.screenshot({ path: '/tmp/placekeeper-link-recovery-desktop.png' });
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(url).toBeVisible();

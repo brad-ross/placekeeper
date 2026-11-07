@@ -107,7 +107,9 @@ describe("production desktop identity", () => {
   it("uses the same production name, bundle id and executable on all platforms", async () => {
     expect(forgeConfig.packagerConfig).toMatchObject({ name: "Placekeeper", executableName: "PlacekeeperDesktop", appBundleId: "local.placekeeper" });
     const pkg = JSON.parse(await readFile(new URL("../../apps/electron/package.json", import.meta.url), "utf8"));
-    expect(pkg).toMatchObject({ productName: "Placekeeper", version: "0.3.0" });
+    expect(pkg).toMatchObject({ productName: "Placekeeper", version: "0.3.1" });
+    const plugin = JSON.parse(await readFile(new URL("../../integrations/codex-plugin/.codex-plugin/plugin.json", import.meta.url), "utf8"));
+    expect(plugin.version).toBe(pkg.version);
   });
 
   it("advertises PDF and Placekeeper URL opening without claiming the default PDF handler", () => {

@@ -62,6 +62,8 @@ export function createViewerControls(
   registry: PluginRegistry,
   options: {
     readonly viewport?: () => HTMLElement | null;
+    /** Current page in the unobscured reading viewport, or null before geometry is ready. */
+    readonly currentReadingPage?: () => number | null;
     /** Return false only when navigation is not ready and native scrolling should handle the jump. */
     readonly jumpToPage?: (pageNumber: number) => Promise<boolean> | false;
     readonly onManualZoom?: () => void;
@@ -93,6 +95,17 @@ export function createViewerControls(
     ...(!pageReady || !zoomReady ? { unavailableReason: UNAVAILABLE } : {}),
   };
 
+  const currentPage = (fallback = state.currentPage, totalPages = state.totalPages): number => {
+    const readingPage = options.currentReadingPage?.();
+    return typeof readingPage === 'number'
+      && Number.isSafeInteger(readingPage) && readingPage >= 1 && readingPage <= totalPages
+      ? readingPage : fallback;
+  };
+
+  let disposed = false;
+  // A scroll subscriber can expose live geometry before the deferred refresh.
+  // Keep that baseline separate from the cached fallback used without geometry.
+  let lastExposedPage = state.currentPage;
   let pendingPage: number | null = null;
   let jumpGeneration = 0;
   const requestPageJump = (pageNumber: number): boolean => {
@@ -108,22 +121,56 @@ export function createViewerControls(
   };
 
   const emit = (event: ViewerInteractionEvent) => {
+    if (disposed) return;
+    if (event.type === 'page') lastExposedPage = event.currentPage;
     for (const listener of listeners) listener(event);
   };
+  let pageRefreshFrame: number | null = null;
+  const schedulePageRefresh = () => {
+    if (disposed || !options.currentReadingPage || pageRefreshFrame !== null || typeof requestAnimationFrame !== 'function') return;
+    pageRefreshFrame = requestAnimationFrame(() => {
+      pageRefreshFrame = null;
+      if (disposed) return;
+      observePageMounts();
+      const page = currentPage();
+      if (page === lastExposedPage) return;
+      state = { ...state, currentPage: page };
+      emit({ type: 'page', currentPage: page, totalPages: state.totalPages });
+    });
+  };
+  // Native page events can precede the virtualized destination's DOM mount.
+  // Observe mounting as well as scrolling, then read geometry after layout.
+  let observedViewport: HTMLElement | null = null;
+  const pageMountObserver = options.currentReadingPage && typeof MutationObserver !== 'undefined'
+    ? new MutationObserver(schedulePageRefresh) : null;
+  const observePageMounts = () => {
+    if (disposed) return;
+    const element = viewport?.() ?? null;
+    if (!pageMountObserver || element === observedViewport) return;
+    if (observedViewport) pageMountObserver.disconnect();
+    observedViewport = element;
+    if (element) pageMountObserver.observe(element, { childList: true, subtree: true });
+  };
+  observePageMounts();
   if (documentId && scrollCapability && scroll) {
-    const updatePage = (currentPage: number, reportedTotalPages: number) => {
+    const updatePage = (reportedPage: number, reportedTotalPages: number) => {
       const loadedPageCount = registry.getStore().getState().core.documents?.[documentId]
         ?.document?.pages.length ?? documentPageCount;
       const totalPages = Math.max(reportedTotalPages, loadedPageCount);
-      state = { ...state, currentPage, totalPages };
-      emit({ type: 'page', currentPage, totalPages });
+      const page = currentPage(reportedPage, totalPages);
+      state = { ...state, currentPage: page, totalPages };
+      emit({ type: 'page', currentPage: page, totalPages });
+      schedulePageRefresh();
     };
     subscriptions.push(
       scrollCapability.onPageChange((event) => {
         if (event.documentId !== documentId) return;
         updatePage(event.pageNumber, event.totalPages);
       }),
-      scroll.onScroll(() => emit({ type: 'scroll' })),
+      scroll.onScroll(() => {
+        emit({ type: 'scroll' });
+        schedulePageRefresh();
+      }),
     );
     if (scrollCapability.onLayoutReady) {
       subscriptions.push(scrollCapability.onLayoutReady((event) => {
@@ -144,16 +191,19 @@ export function createViewerControls(
   }
 
   return {
-    snapshot: () => state,
+    snapshot: () => {
+      lastExposedPage = currentPage();
+      return { ...state, currentPage: lastExposedPage };
+    },
     previousPage: () => {
-      const currentPage = pendingPage ?? state.currentPage;
-      if (currentPage <= 1) return;
-      if (!requestPageJump(currentPage - 1)) scroll?.scrollToPreviousPage('smooth');
+      const page = pendingPage ?? currentPage();
+      if (page <= 1) return;
+      if (!requestPageJump(page - 1)) scroll?.scrollToPreviousPage('smooth');
     },
     nextPage: () => {
-      const currentPage = pendingPage ?? state.currentPage;
-      if (currentPage >= state.totalPages) return;
-      if (!requestPageJump(currentPage + 1)) scroll?.scrollToNextPage('smooth');
+      const page = pendingPage ?? currentPage();
+      if (page >= state.totalPages) return;
+      if (!requestPageJump(page + 1)) scroll?.scrollToNextPage('smooth');
     },
     goToPage: (pageNumber) => {
       if (!scroll || !Number.isSafeInteger(pageNumber) || pageNumber < 1 || pageNumber > state.totalPages) return;
@@ -199,8 +249,12 @@ export function createViewerControls(
       return () => listeners.delete(listener);
     },
     dispose() {
+      disposed = true;
       jumpGeneration += 1;
       pendingPage = null;
+      pageMountObserver?.disconnect();
+      if (pageRefreshFrame !== null) cancelAnimationFrame(pageRefreshFrame);
+      pageRefreshFrame = null;
       for (const unsubscribe of subscriptions.splice(0)) unsubscribe();
       listeners.clear();
     },

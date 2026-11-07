@@ -1,3 +1,4 @@
+import { reviewEdgeGeometry } from '../../scripts/testing/review-edge-geometry.js';
 import { expect, test, type Page } from '@playwright/test';
 import { addStaticKeyboardPageNote, waitForStaticPdf } from '../../scripts/static-browser-journey.js';
 
@@ -334,9 +335,15 @@ test('selection, page notes, and distant destinations follow shifted page geomet
   await goToPage(page, 1);
   const link = page.getByRole('button', { name: /Open PDF link.*Page 12/iu }).first();
   await link.scrollIntoViewIfNeeded();
-  await link.focus();
-  await link.press('Enter');
-  const destinationFrames = await page.getByRole('menuitem', { name: 'Open in main document', exact: true })
+  const openInMain = page.getByRole('menuitem', { name: 'Open in main document', exact: true });
+  await expect(async () => {
+    if (!await openInMain.isVisible()) {
+      await link.focus();
+      await link.press('Enter');
+    }
+    await expect(openInMain).toBeVisible({ timeout: 1_000 });
+  }).toPass({ timeout: 5_000 });
+  const destinationFrames = await openInMain
     .evaluate((button) => new Promise<{ x: number; y: number; width: number; height: number }[]>((resolve) => {
       const samples: { x: number; y: number; width: number; height: number }[] = [];
       let frames = 0;
@@ -410,38 +417,69 @@ test('active text fitting follows right workspace closure while custom zoom stay
   for (const value of samples) expect(value).toBeCloseTo(1.5, 3);
 });
 
-test('balances text margins within the clear reading area beside the workspace rail and tray', async ({ page }) => {
-  await openBook(page);
-  await fit(page, 'text');
-  const expectBalancedMargins = async (index = 0) => {
-    await expect.poll(() => mainPage(page, index).evaluate((element, pageIndex) => {
-      const bounds = element.getBoundingClientRect();
-      const zoom = bounds.width / 600;
-      const textLeft = bounds.left + (pageIndex % 2 === 0 ? 90 : 210) * zoom;
-      const textRight = textLeft + 300 * zoom;
-      const viewport = element.closest('.review-document')!.getBoundingClientRect();
-      const fade = document.querySelector('.review-overlay-frame__right-fade')!;
-      const clearRight = getComputedStyle(fade).display === 'none'
-        ? viewport.right : fade.getBoundingClientRect().left;
-      return Math.abs((textLeft - viewport.left) - (clearRight - textRight));
-    }, index)).toBeLessThan(1);
-  };
-  await expectBalancedMargins();
-  await viewport(page).evaluate((element) => {
-    const next = element.querySelector('[data-page-index="1"]')!.getBoundingClientRect();
-    element.scrollTop += next.top - element.getBoundingClientRect().top;
+for (const scrollbarWidth of [null, 15]) {
+  test(`balances text margins within the clear reading area beside the workspace rail and tray with ${scrollbarWidth === null ? 'native' : `${scrollbarWidth}px`} scrollbars`, async ({ page, browserName }) => {
+    test.skip(scrollbarWidth !== null && browserName !== 'chromium',
+      'Only Chromium reserves native scrollbar space for explicit scrollbar pseudo-element sizes.');
+    await openBook(page);
+    if (scrollbarWidth !== null) {
+      await page.addStyleTag({ content: `
+        .review-document .pdf-workspace__viewport::-webkit-scrollbar { width: ${scrollbarWidth}px; height: ${scrollbarWidth}px; }
+        .review-document .pdf-workspace__viewport::-webkit-scrollbar-thumb { background: #888; }
+      ` });
+      await expect.poll(() => viewport(page).evaluate((element) =>
+        (element as HTMLElement).offsetWidth - element.clientWidth)).toBe(scrollbarWidth);
+    }
+    // Inspect the actual paint, independently of the geometry helper used
+    // below. A classic scrollbar already occupies part of the 40px rail.
+    const occupiedWidth = await viewport(page).evaluate((element) =>
+      (element as HTMLElement).offsetWidth - element.clientWidth);
+    const opaqueWidth = Math.max(0, 40 - occupiedWidth);
+    await expect.poll(() => page.locator('.review-document .pdf-workspace__scrollbar-backing')
+      .evaluate((element) => [...getComputedStyle(element, '::after').backgroundImage
+        .matchAll(/\)\s+([\d.]+)px/gu)].map((match) => Number(match[1]))))
+      .toEqual([opaqueWidth, opaqueWidth + 12]);
+    await fit(page, 'text');
+    const expectBalancedMargins = async (index = 0) => {
+      await expect.poll(async () => {
+        const { clearRight } = await page.locator('[data-review-stage]').evaluate(reviewEdgeGeometry);
+        return mainPage(page, index).evaluate((element, { pageIndex, clearRight }) => {
+          const bounds = element.getBoundingClientRect();
+          const zoom = bounds.width / 600;
+          const textLeft = bounds.left + (pageIndex % 2 === 0 ? 90 : 210) * zoom;
+          const textRight = textLeft + 300 * zoom;
+          const viewport = element.closest('.review-document')!.getBoundingClientRect();
+          // Native horizontal scrolling quantizes to whole CSS pixels; WebKit
+          // truncates fractional offsets. Compare centers, since a margin
+          // difference doubles that subpixel positioning error.
+          return Math.abs((textLeft + textRight) / 2 - (viewport.left + clearRight) / 2);
+        }, { pageIndex: index, clearRight });
+      }).toBeLessThan(1);
+    };
+    await expectBalancedMargins();
+    await viewport(page).evaluate((element) => {
+      const next = element.querySelector('[data-page-index="1"]')!.getBoundingClientRect();
+      element.scrollTop += next.top - element.getBoundingClientRect().top;
+    });
+    await expectBalancedMargins(1);
+    await goToPage(page, 1);
+    await expectBalancedMargins();
+    await goToPage(page, 2);
+    await expectBalancedMargins(1);
+    await page.setViewportSize({ width: 1400, height: 1100 });
+    await expectBalancedMargins(1);
+    // A centered frame can paint before the resize fit has finished owning
+    // its geometry. Do not overlap the next disclosure with that operation.
+    await openZoom(page);
+    await expect(fitButton(page)).toHaveAttribute('aria-busy', 'false');
+    await expect(fitButton(page)).toHaveAttribute('data-fit-active', 'true');
+    await page.keyboard.press('Escape');
+    await page.mouse.move(0, 1090);
+    await page.getByRole('button', { name: 'Show workspace', exact: true }).click();
+    await expect(page.locator('#review-tools-workspace')).toHaveAttribute('data-tools-workspace-open', 'true');
+    await expectBalancedMargins(1);
+    await page.getByRole('button', { name: 'Hide workspace', exact: true }).click();
+    await expect(page.locator('#review-tools-workspace')).toHaveAttribute('data-tools-workspace-open', 'false');
+    await expectBalancedMargins(1);
   });
-  await expectBalancedMargins(1);
-  await goToPage(page, 1);
-  await expectBalancedMargins();
-  await goToPage(page, 2);
-  await expectBalancedMargins(1);
-  await page.setViewportSize({ width: 1400, height: 1100 });
-  await expectBalancedMargins(1);
-  await page.getByRole('button', { name: 'Show workspace', exact: true }).click();
-  await expect(page.locator('#review-tools-workspace')).toHaveAttribute('data-tools-workspace-open', 'true');
-  await expectBalancedMargins(1);
-  await page.getByRole('button', { name: 'Hide workspace', exact: true }).click();
-  await expect(page.locator('#review-tools-workspace')).toHaveAttribute('data-tools-workspace-open', 'false');
-  await expectBalancedMargins(1);
-});
+}

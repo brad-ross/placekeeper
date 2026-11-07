@@ -445,7 +445,7 @@ export function PdfWorkspace({
                         pageIndex={layout.pageIndex}
                         style={{ pointerEvents: 'none' }}
                       />
-                      <div style={selectionLayerStyle(activePdf.pages[layout.pageIndex]!, layout, mainDocument.rotation)}>
+                      <div data-pdf-selection-layer style={selectionLayerStyle(activePdf.pages[layout.pageIndex]!, layout, mainDocument.rotation)}>
                         <SelectionLayer
                           documentId={MAIN_PDF_DOCUMENT_ID}
                           pageIndex={layout.pageIndex}
@@ -527,6 +527,8 @@ export function PdfWorkspace({
                   )}
                 />
                 </MainDocumentPreviewBoundary>
+                {/* Native overflow can omit trailing viewport padding when a wider page
+                    exceeds the content box; reserve it explicitly in the scroll range. */}
                 <div
                   aria-hidden="true"
                   data-viewer-runway
@@ -534,7 +536,7 @@ export function PdfWorkspace({
                     position: 'absolute',
                     left: 0,
                     top: 0,
-                    width: `calc(100% + ${(previewLimit === null ? runway.right : 0)}px)`,
+                    width: `calc(100% + ${(previewLimit === null ? runway.right : 0)}px + var(--review-scrollport-trailing-space, 0px))`,
                     height: `calc(100% + ${(previewLimit === null ? runway.bottom : 0)}px + ${previewLimit === null && runway.bottom > 0 ? 'var(--review-page-bottom-clearance, 64px)' : '0px'})`,
                     pointerEvents: 'none',
                     visibility: 'hidden',

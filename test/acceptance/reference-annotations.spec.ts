@@ -227,7 +227,7 @@ async function dragSelection(page: Page, pdfPage: Locator): Promise<void> {
   } catch {
     const nativeSelection = await page.evaluate(() => window.getSelection()?.toString() ?? '');
     const selectionRectCount = await pdfPage.locator(
-      ':scope > div[style*="mix-blend-mode"]',
+      ':scope > [data-pdf-selection-layer] > div[style*="mix-blend-mode"]',
     ).count();
     const cursor = await pdfPage.evaluate((element) => getComputedStyle(element).cursor);
     await page.mouse.click(box.x + 150 * scale, box.y + 68 * scale);
@@ -246,7 +246,7 @@ async function dragSelection(page: Page, pdfPage: Locator): Promise<void> {
 async function referenceSelectionBounds(page: Page) {
   return page.locator(
     '[data-reference-pdf-viewport] .pdf-workspace__page[data-page-index="1"]'
-      + ' > div[style*="mix-blend-mode"]',
+      + ' > [data-pdf-selection-layer] > div[style*="mix-blend-mode"]',
   ).evaluateAll((elements) => {
     const rects = elements.map((element) => element.getBoundingClientRect())
       .filter(({ width, height }) => width > 0 && height > 0);
@@ -528,7 +528,7 @@ test('creates, edits, reopens, and deletes one shared selection annotation from 
   ).evaluate((element) => {
     const viewport = element.closest<HTMLElement>('.reference-panel__viewport');
     const selectionRects = Array.from(element.querySelectorAll<HTMLElement>(
-      '.pdf-workspace__page[data-page-index="1"] > div[style*="mix-blend-mode"]',
+      '.pdf-workspace__page[data-page-index="1"] > [data-pdf-selection-layer] > div[style*="mix-blend-mode"]',
     )).map((selection) => selection.getBoundingClientRect())
       .filter(({ width, height }) => width > 0 && height > 0);
     if (selectionRects.length === 0 || viewport === null) {
@@ -1175,11 +1175,16 @@ test('keeps long Reference card text and actions reachable in a compact viewport
 
   await page.setViewportSize({ width: 1280, height: 900 });
   await expect(inspection).toBeVisible();
-  await inspection.hover();
   await expect(editAction).toBeVisible();
   await expect(deleteAction).toBeVisible();
-  await editAction.click();
   const composer = page.getByRole('region', { name: 'Edit Page Note' });
+  // Responsive placement can move the card after hover. Re-enter its action
+  // endcap if hit testing loses that hover before the click is delivered.
+  await expect(async () => {
+    if (await composer.isVisible()) return;
+    await inspection.locator('.row-action-group').hover();
+    await editAction.click({ timeout: 1_000 });
+  }).toPass({ timeout: READY_TIMEOUT });
   await expect(composer.getByRole('textbox', { name: 'Comment' }))
     .toHaveValue(LONG_REFERENCE_COMMENT);
   await expect(composer.getByRole('button', { name: 'Apply', exact: true })).toBeVisible();
@@ -1456,6 +1461,7 @@ test('recovers a closed annotation-origin editor and reuses its tab after applyi
       'Annotation-origin recovery target.',
     ));
   });
+  await chooseCopyDestination(page);
   await openAnnotations(page);
   const item = host.broker.state(sessionId)!.items.find(
     (candidate) => candidate.payload.comment === 'Annotation-origin recovery target.',
@@ -1828,6 +1834,8 @@ test('keeps Reference links above marks and creates a keyboard Page Note on the 
   await page.keyboard.press('Enter');
   await expect(openInReferences).toBeFocused();
   await page.keyboard.press('Escape');
+  await expect(openInReferences).toHaveCount(0);
+  await expect(targetLink).toBeFocused();
 
   const pageTwo = reference.locator('.pdf-workspace__page[data-page-index="1"]');
   await pageTwo.focus();

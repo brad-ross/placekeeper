@@ -136,6 +136,10 @@
 }
 
 @media (hover: none), (pointer: coarse) {
+  .review-layout {
+    --review-edge-rail-size: var(--review-control-touch, 44px);
+  }
+
   .review-layout[data-right-overlay="false"][data-right-rail-present="true"]
     .review-overlay-frame__right-backing {
     width: calc(56px - var(--review-main-scrollbar-width));

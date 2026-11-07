@@ -294,9 +294,15 @@ test("omits destination copy controls and reopens canonical links without source
     "button",
     { name: "Open PDF link to Primary result, Page 2" },
   );
-  await primaryLink.focus();
-  await primaryLink.press("Enter");
   const linkMenu = page.getByRole("menu", { name: "Open Primary result, Page 2" });
+  // Closing the workspace refits the PDF and can replace its portaled links.
+  await expect(async () => {
+    if (!await linkMenu.isVisible()) {
+      await primaryLink.focus();
+      await primaryLink.press("Enter");
+    }
+    await expect(linkMenu).toBeVisible({ timeout: 1_000 });
+  }).toPass({ timeout: 5_000 });
   await expect(linkMenu.getByRole('menuitem')).toHaveCount(2);
   await expect(linkMenu.locator('.copy-link-control')).toHaveCount(0);
 
