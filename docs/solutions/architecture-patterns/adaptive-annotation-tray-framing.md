@@ -1,7 +1,7 @@
 ---
 title: "Adaptive annotation tray framing without resizing the PDF viewer"
 date: "2026-08-08"
-last_updated: 2026-09-18
+last_updated: 2026-11-07
 category: "architecture-patterns"
 module: "PDF review annotation tray framing"
 problem_type: "architecture_pattern"
@@ -18,7 +18,7 @@ tags: ["pdf-review", "annotation-tray", "viewer-framing", "scroll-runway", "resp
 
 ## Context
 
-The right workspace now reserves actual layout space beside the stateful PDF reader. Its left edge bounds the reading frame, and Fit width leaves a 24 px margin on each side of that frame, matching the right tray’s 12 px solid backing plus 12 px fade. This September 7 revision supersedes the right-overlay portion of the [earlier layout contract](../../plans/2026-09-05-neutral-soft-design-contract.md#accepted-overlay-layout-and-zoom-behavior). Bottom surfaces still overlay the full-height viewport and use runway; the collapsed rail reserves 40 px of layout width, with its 12 px fade inside the remaining viewport. Fit width uses 52 px on the left and 12 px on the right of that viewport, keeping the page centered across the full stage without synthetic horizontal runway. Horizontal scrolling is available only when the page content exceeds the scrollport. Opening bottom References alone does not refit the main document.
+The right workspace reserves layout space beside the stateful PDF reader when open. Its left edge bounds the reading frame, and Fit width leaves a 24 px margin on each side of that frame. Bottom trays overlay the full-height viewport and use runway. In the checkout for [PR #164](https://github.com/brad-ross/placekeeper/pull/164), closed trays reserve no space or paint. The closed reading frame spans the stage and uses 10 px document gaps on both sides. Horizontal scrolling is available when the page content exceeds the scrollport. Opening bottom References alone does not refit the main document (`apps/web/src/app/review-viewer-framing.css`).
 
 Workspace opening re-fits only when the PDF already matches Fit width in the closed reading frame. Other zoom levels remain unchanged as the workspace opens; closing, resizing, and docking remain passive. This September 8 policy supersedes both the September 7 always-fit-on-opening rule and the earlier no-fit-on-opening rule. The change is present in this checkout through [PR #90](https://github.com/brad-ross/placekeeper/pull/90), open and unmerged as of September 8, 2026. An eligible opening still waits for committed geometry and runway settlement; it does not establish continuous automatic fitting.
 
@@ -32,6 +32,8 @@ Keep one native scrollport mounted at full stage width, including the rightmost 
 
 For bottom overlays, add runway with an invisible, pointer-transparent, absolutely positioned element that extends scroll extent without entering page layout (`apps/web/src/pdf/PdfWorkspace.tsx`).
 
+For Fit width verification, bound the available width by the reading frame and the native viewport client edge, then subtract the applicable document gaps. The full stage width includes space reserved for an open right tray, and the scrollport bounds can include its scrollbar gutter. A fixed percentage can therefore differ across browsers for the same correct fit. The static demo check compares rendered page width with the measured reading width and verifies that the explicit fit restores the same scale (`test/acceptance/static-web.spec.ts`).
+
 ### Capture fit eligibility before disclosure
 
 Checking whether the page is fitted after opening asks the wrong question: the narrower reading frame has already changed the fit target. Capture the predicate at the layout-action boundary before dispatch, then consume it once in the opening effect (`apps/web/src/app/ReviewShell.tsx`). Use the current geometric fit predicate, not the rounded toolbar percentage or a sticky “last command was Fit width” mode. The adapter compares numeric scale with the width target for the visible page and its rotation, allowing one rendered page-width pixel of difference (`apps/web/src/pdf/viewer-navigation-adapter.ts`).
@@ -40,13 +42,13 @@ The animation investigation originally exercised automatic opening fits from low
 
 ### Commit resting occupancy, not animation frames
 
-A right dock contributes zero horizontal runway because CSS already reserves its width and outside inset. Derive remaining overlay runway from each logically open surface's untransformed offset geometry. The collapsed right rail also uses actual layout space and contributes no horizontal runway. Share these constants with the painted overlay geometry so Fit width and the visible boundary agree. Current occupancy includes the outer backing and fade: the clear boundary is the surface's resting start minus the framing policy's backing and fade allowances, and the runway extends from that boundary to the stage edge. Combine same-edge surfaces by maximum extent, not sum (`apps/web/src/review/use-annotation-tray-framing.ts`). This is more precise than treating runway as the tray width alone, especially for inset overlays.
+A right dock contributes zero horizontal runway because CSS already reserves its width and outside inset. Derive remaining overlay runway from each logically open surface's untransformed offset geometry. Share these constants with the painted overlay geometry so Fit width and the visible boundary agree. Current occupancy includes the outer backing and fade: the clear boundary is the surface's resting start minus the framing policy's backing and fade allowances, and the runway extends from that boundary to the stage edge. Combine same-edge surfaces by maximum extent, not sum (`apps/web/src/review/use-annotation-tray-framing.ts`). This is more precise than treating runway as the tray width alone, especially for inset overlays.
 
 Record the requested runway before awaiting its DOM settlement. Otherwise a superseding effect can encounter already-mutated DOM with an old committed-runway reference and begin another transition from a stale position. Retain a matching transition's original position across replacement effects (`apps/web/src/review/use-annotation-tray-framing.ts`, `apps/web/src/pdf/viewer-framing.ts`).
 
 ### Keep hidden tray dimensions ready for motion
 
-A hidden mounted tray still needs its eventual dimensions. Preserve the configured reference width and bottom height independently of open state; logical visibility determines occupancy, not whether those sizes exist (`apps/web/src/review/reference-workspace-layout.ts`). When bottom References is open, apply the shorter right-workspace bottom inset in `wide-bottom` as well as `wide-split`, so the workspace already has the correct height before it slides in (`apps/web/src/app/review-layout-annotations.css`). Animating `bottom` alone merely animates an unnecessary resize if the hidden starting dimensions are wrong.
+A hidden mounted tray still needs its eventual dimensions. Preserve the configured reference width and bottom height independently of open state; logical visibility determines occupancy, not whether those sizes exist (`apps/web/src/review/reference-workspace-layout.ts`). When bottom References is open, apply the shorter right-workspace bottom inset in `wide-bottom` as well as `wide-split`, so the workspace already has the correct height before it slides in (`apps/web/src/app/review-workspace-surfaces.css`). Animating `bottom` alone merely animates an unnecessary resize if the hidden starting dimensions are wrong.
 
 ### Preserve user intent through temporary clamps
 
