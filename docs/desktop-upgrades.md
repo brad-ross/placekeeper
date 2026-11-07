@@ -1,6 +1,6 @@
 # Manual upgrades and recovery
 
-Download the intended version from [published releases](https://github.com/brad-ross/placekeeper/releases/latest), read its notes and verify its checksum. The public 0.2.4 is source-only for Apple Silicon macOS; the new Electron installer set is not yet qualified for publication. Browser-downloaded OS approval, Windows/Linux native lifecycle tests and actual public 0.2.4 migration remain outstanding. Local or historical test success does not qualify those routes.
+Download the intended version from [published releases](https://github.com/brad-ross/placekeeper/releases/latest), read its notes and verify its checksum. The release page lists published Electron installers. Version 0.2.4 was a source-only release for Apple Silicon macOS. For help with a macOS approval prompt, see [Unsigned approval](installation.md#unsigned-approval-provisional).
 
 ## Upgrade through the supported entrypoint
 
@@ -8,7 +8,7 @@ Open **Install Placekeeper.app** inside the Mac DMG, run Windows **Setup.exe**, 
 
 The coordinator previews active work and asks before closing reviews. Declining leaves the installed app usable. Allow pending writes to finish; recoverable drafts are protected before replacement. If a renderer cannot settle, a task remains bound, an old service cannot prove idle retirement, or recovery backup fails, installation stops. Follow its specific save/close/retry action. It does not force-kill unknown processes. A noninteractive source invocation cannot approve active-work closure: rerun interactively or save and close the work yourself.
 
-Before committing activation, the installer verifies the exact candidate service and renderer/PDF readiness. A failed startup attempts to restore the retained previous installation only after proving candidate retirement. If that proof is ambiguous, both versions and recovery remain for manual attention. Do not delete journals or force-close broadly matched processes to get past a blocked upgrade.
+On macOS, the installer checks that the staged runtime can start before it moves the current app. Before committing activation, the installer verifies the exact candidate service and renderer/PDF readiness. A failed startup attempts to restore the retained previous installation only after proving candidate retirement. If that proof is ambiguous, both versions and recovery remain for manual attention. Do not delete journals or force-close broadly matched processes to get past a blocked upgrade.
 
 The Debian package stages immutable root-owned versions. Each user switches on their next explicit launch, with the same preparation/consent checks. Other users may keep using earlier versions. The stable `/usr/bin/placekeeper` dispatcher keeps integrations independent of a version directory. Sandbox/mount errors block activation with guidance; they do not authorize disabling the sandbox.
 
@@ -28,7 +28,7 @@ After installation, revisit **Help → Set Up Integrations**. Reload the Chrome 
 
 The support root is `~/Library/Application Support/Placekeeper` on macOS, `%LOCALAPPDATA%\Placekeeper` on Windows, and `${XDG_STATE_HOME:-~/.local/state}/placekeeper` on Linux. Protected drafts live under `recovery`; installer backups live under `installer/recovery-backup-<timestamp>`. Settings and integration ownership records are separate from app files. See [Privacy and recovery](privacy-and-recovery.md) before removing any of them.
 
-For copied installs, the app's parent contains `.placekeeper-install-transactions/<destination-hash>/journal.json`. Each attempt retains `previous.app` on macOS or `previous` on other platforms, plus staged/failed candidate resources and startup receipts. The journal names the exact destination, attempt, previous version and backup location. Complete transactions retain the previous version for recovery.
+For copied installs, the app's parent contains `.placekeeper-install-transactions/<destination-hash>/journal.json`. During an upgrade the installer moves the previous app to `previous.app` on macOS or `previous` on other platforms. The journal names the exact destination, attempt, previous version and backup location. On macOS, after the new app passes its startup checks and the installer records success, it removes the old app bundle if its signature verifies. Modified bundles, recovery backups and journals remain available. Failed upgrades preserve any app copy still needed for recovery.
 
 For the Debian route, retain `/opt/placekeeper/runtimes/<artifact-identity>`, the available marker, and the per-user `installer/selected-runtime.json` and `installer/runtime-activation/journal.json` under the support root. Package removal **and purge** leave potentially active runtimes intact. There is no automatic runtime garbage collection. An administrator may remove explicitly identified unused runtime directories only after every Placekeeper session is closed and recovery is no longer needed; never traverse users' state to clean them.
 

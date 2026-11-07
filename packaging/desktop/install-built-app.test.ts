@@ -22,6 +22,29 @@ async function app(path: string) {
   await writeFile(join(root, "runtime-manifest.json"), JSON.stringify({ schemaVersion: 1, target: { platform: process.platform, arch: process.arch }, daemonIdentity: "a".repeat(64), installArtifactIdentity: "b".repeat(64), node: { path: node, sha256: hash("node") }, service: { path: "service/main.js", sha256: hash("service") }, webAssets: { path: "web", files: [{ path: "pdfium.wasm", sha256: hash("wasm") }] } }));
 }
 describe("desktop replacement transaction", () => {
+  it.runIf(process.platform === "darwin")("keeps the current app in place if macOS blocks the staged runtime", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pk-install-preflight-"));
+    const lease = await acquireLifecycleLock(join(root, "lifecycle.lock"));
+    try {
+      const built = join(root, "candidate.app"), destination = join(root, "Placekeeper.app");
+      await app(built);
+      await app(destination);
+      await writeFile(join(destination, "old"), "previous app");
+      const calls: string[][] = [];
+      await expect(installBuiltApp(built, destination, join(destination, "Contents/MacOS/placekeeper"), undefined,
+        async (_executable: string, args: string[]) => {
+          calls.push(args);
+          throw Error("Gatekeeper rejected the launch");
+        }, root, { lockPath: join(root, "lifecycle.lock"), lockToken: lease.token, backupRoot: join(root, "backup") },
+      )).rejects.toThrow(/Privacy & Security.*Gatekeeper rejected/);
+      expect(calls).toEqual([["--version"]]);
+      expect(await readFile(join(destination, "old"), "utf8")).toBe("previous app");
+    } finally {
+      await lease.release();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("commits a complete installation only after exact readiness succeeds", async () => {
     const root = await mkdtemp(join(tmpdir(), "pk-install-success-"));
     await establishPrivateDirectory(root);
@@ -34,7 +57,7 @@ describe("desktop replacement transaction", () => {
       const calls: string[][] = [];
       await installBuiltApp(built, installed, readiness, undefined, async (_executable: string, args: string[], options: {env:NodeJS.ProcessEnv}) => { calls.push(args); if(options.env.PLACEKEEPER_STARTUP_REQUEST){const request=JSON.parse(options.env.PLACEKEEPER_STARTUP_REQUEST);await writeFile(request.receipt,JSON.stringify({...request,pid:2147483647,rendererReady:true}));await writeFile(`${request.receipt}.started`,JSON.stringify({...request,pid:2147483647}));} }, undefined, context);
       await lease.release();
-      expect(calls.map(args => args[1])).toEqual(["ensure-ready", undefined]);
+      expect(calls.map(args => args[1])).toEqual([...(process.platform === "darwin" ? [undefined] : []), "ensure-ready", undefined]);
       expect(await readFile(desktopExecutable(runtimeRoot(installed)), "utf8")).toBe("Electron");
     } finally { await rm(root, { recursive: true, force: true }); }
   });
@@ -54,7 +77,7 @@ describe("desktop replacement transaction", () => {
         if (args[1] === "ensure-ready") { await writeFile(args[3]!, JSON.stringify({pid:2147483647})); throw new Error("readiness failure"); }
       }, undefined, context)).rejects.toThrow("readiness failure");
       await lease.release();
-      expect(calls.map(args => args[1])).toEqual(["ensure-ready", "stop-ready"]);
+      expect(calls.map(args => args[1])).toEqual([...(process.platform === "darwin" ? [undefined] : []), "ensure-ready", "stop-ready"]);
       expect(await readFile(join(installed, "old"), "utf8")).toBe("prior installation");
     } finally { await rm(root, { recursive: true, force: true }); }
   });

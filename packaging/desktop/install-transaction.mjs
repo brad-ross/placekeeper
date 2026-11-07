@@ -1,8 +1,9 @@
 import { randomBytes } from 'node:crypto';
-import { cp, lstat, mkdir, open, readFile, rename } from 'node:fs/promises';
+import { cp, lstat, mkdir, open, readFile, rename, rm } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 const previousName = process.platform === 'darwin' ? 'previous.app' : 'previous';
 const exists = path => lstat(path).then(() => true, error => { if (error.code === 'ENOENT') return false; throw error; });
+const directoryExists = path => lstat(path).then(info => info.isDirectory(), error => { if (error.code === 'ENOENT') return false; throw error; });
 const within = (parent, child) => { const suffix = relative(parent, child); return suffix === '' || (suffix !== '..' && !suffix.startsWith(`..${sep}`) && !isAbsolute(suffix)); };
 async function atomicJournal(root, record) {
   await mkdir(root, { recursive: true, mode: 0o700 });
@@ -23,6 +24,22 @@ async function journal(options) {
   return record;
 }
 async function transition(options, record, phase) { record.phase = phase; await atomicJournal(options.transactionRoot, record); await options.checkpoint?.(phase, record); }
+async function removePreviousApp(options, record) {
+  if (!options.removePrevious || record?.phase !== 'complete' || !record.hadPrevious) return;
+  // A missing destination could still need the retained copy for manual recovery.
+  if (!await directoryExists(record.destination) || !await directoryExists(dirname(record.previous)) ||
+      !await directoryExists(record.previous) || !await options.removePrevious(record.previous)) return;
+  await rm(record.previous, { recursive: true, force: true });
+}
+
+async function recoverAfterFailure(recover, options, error) {
+  if (error.interrupted) throw error;
+  try { await recover({ ...options, checkpoint: undefined }); }
+  catch (recoveryError) {
+    throw new AggregateError([error, recoveryError], `${error.message}\n\nRecovery also stopped: ${recoveryError.message}`);
+  }
+  throw error;
+}
 /** Caller owns the lifecycle lease and proves the exact candidate retired.
  * Recovery never copies an old recovery backup over canonical user data. */
 export async function recoverInstallation(options) {
@@ -47,17 +64,28 @@ export async function recoverInstallation(options) {
 }
 export async function activateInstallation(options) {
   if (![options.built, options.destination, options.transactionRoot, options.backupRoot].every(isAbsolute) || within(options.destination, options.transactionRoot) || within(options.transactionRoot, options.destination)) throw new Error('Installation journal must be outside the application');
-  await recoverInstallation(options);
-  const attempt = randomBytes(24).toString('hex');
+  const previousAttempt = await recoverInstallation(options);
+  // Reuse the exact copy macOS assessed, with a fresh backup and lease.
+  const resumePreflight = options.preflight && previousAttempt?.phase === 'restored' &&
+    previousAttempt.preflightPending === true && previousAttempt.candidateIdentity === options.candidateIdentity &&
+    await directoryExists(dirname(previousAttempt.staged)) && await directoryExists(previousAttempt.staged);
+  const attempt = resumePreflight ? previousAttempt.attempt : randomBytes(24).toString('hex');
   const base = join(options.transactionRoot, attempt);
   const record = { version: 1, attempt, destination: resolve(options.destination), candidateIdentity: options.candidateIdentity, backupRoot: options.backupRoot,
     previousLocation: options.previousLocation ?? null, hadPrevious: await exists(options.destination), staged: join(base,'staged'), previous: join(base,previousName), failed: join(base,'failed'), receipt: join(base,'service-ready.json'), shellReceipt: join(base,'shell-ready.json'), phase: 'staging' };
   await mkdir(base, { recursive: true, mode: 0o700 });
   try {
     await transition(options, record, 'staging');
-    if (options.copy) await options.copy(options.built, record.staged);
+    if (resumePreflight) await options.verifyPreflightCopy(record.staged);
+    else if (options.copy) await options.copy(options.built, record.staged);
     else await cp(options.built, record.staged, { recursive: true, verbatimSymlinks: true });
-    await options.validate(record.staged);
+    const validated = await options.validate(record.staged);
+    if (options.preflight) {
+      record.preflightPending = true;
+      await atomicJournal(options.transactionRoot, record);
+      await options.preflight(record.staged, validated);
+      delete record.preflightPending;
+    }
     await transition(options, record, 'retaining');
     if (record.hadPrevious) await rename(record.destination, record.previous);
     await transition(options, record, 'activating');
@@ -67,11 +95,17 @@ export async function activateInstallation(options) {
     await options.ready(record, () => atomicJournal(options.transactionRoot, record));
     await transition(options, record, 'committing');
     await transition(options, record, 'complete');
-    return record;
   } catch (error) {
-    if (!error.interrupted) await recoverInstallation({ ...options, checkpoint: undefined });
-    throw error;
+    const discardStage = record.phase === 'staging' && !record.preflightPending && !resumePreflight;
+    return recoverAfterFailure(async recoveryOptions => {
+      await recoverInstallation(recoveryOptions);
+      if (discardStage) await rm(record.staged, { recursive: true, force: true });
+    }, options, error);
   }
+  for (const completed of [record, previousAttempt]) {
+    await removePreviousApp(options, completed).catch(error => console.error('Placekeeper was installed, but an old app copy could not be removed:', error.message));
+  }
+  return record;
 }
 
 async function atomicSelection(path, value) {
@@ -97,7 +131,7 @@ export async function activateRuntimeSelection(options) {
     await atomicSelection(selectionPath,{version:1,resources,installArtifactIdentity:candidateIdentity,attempt});
     await transition(options,record,'starting');await options.ready(record, () => atomicJournal(options.transactionRoot, record));
     await transition(options,record,'committing');await transition(options,record,'complete');return record;
-  }catch(error){if(!error.interrupted)await recoverRuntimeSelection({...options,checkpoint:undefined});throw error;}
+  }catch(error){return recoverAfterFailure(recoverRuntimeSelection, options, error);}
 }
 export async function recoverRuntimeSelection(options) {
   const record=await readFile(join(options.transactionRoot,'journal.json'),'utf8').then(JSON.parse,error=>{if(error.code==='ENOENT')return undefined;throw error;});

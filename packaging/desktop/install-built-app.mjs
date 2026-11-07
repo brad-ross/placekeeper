@@ -78,9 +78,31 @@ export async function installBuiltApp(built, destination, readiness, port, invok
   await mkdir(dirname(destination),{recursive:true});
   const isolation=port===undefined?[]:['--isolated-installed-smoke','--http-port',port,...(isolatedRoot===undefined?[]:['--isolated-test-root',isolatedRoot])];
   const leaseEnvironment={PLACEKEEPER_LIFECYCLE_LOCK_PATH:context.lockPath,PLACEKEEPER_LIFECYCLE_LOCK_TOKEN:context.lockToken};
-  const run=(executable,args,env={...process.env,...leaseEnvironment})=>invoke(executable,args,{env,timeout:30_000,maxBuffer:65_536});
+  const run=(executable,args,env={...process.env,...leaseEnvironment},timeout=30_000)=>invoke(executable,args,{env,timeout,maxBuffer:65_536});
   return activateInstallation({ built,destination,transactionRoot,copy:process.platform==='darwin' ? async (source,target)=>{await execute('/usr/bin/ditto',['--rsrc','--extattr','--acl','--qtn',source,target]);} : undefined,previousLocation,backupRoot:context.backupRoot,candidateIdentity:candidate.environment.PLACEKEEPER_INSTALL_ARTIFACT_IDENTITY,
-    validate:async staged=>{await verifyLease(context);await assertSafeInstallDestinationOnDisk(destination,guardOptions);await validateExistingInstallation(destination);const runtime=await resolveLauncherRuntime(runtimeRoot(staged));if(runtime.environment.PLACEKEEPER_INSTALL_ARTIFACT_IDENTITY!==candidate.environment.PLACEKEEPER_INSTALL_ARTIFACT_IDENTITY)throw Error('Staged candidate changed');},
+    validate:async staged=>{
+      await verifyLease(context);
+      await assertSafeInstallDestinationOnDisk(destination,guardOptions);
+      await validateExistingInstallation(destination);
+      const runtime=await resolveLauncherRuntime(runtimeRoot(staged));
+      if(runtime.environment.PLACEKEEPER_INSTALL_ARTIFACT_IDENTITY!==candidate.environment.PLACEKEEPER_INSTALL_ARTIFACT_IDENTITY)throw Error('Staged candidate changed');
+      return runtime;
+    },
+    ...(process.platform==='darwin' ? {
+      verifyPreflightCopy:async staged=>{await execute('/usr/bin/codesign',['--verify','--deep','--strict',staged]);},
+      preflight:async (_staged,runtime)=>{
+        // Gatekeeper may ask about the copied runtime. Check it while the
+        // incumbent is still at its original path and before starting a daemon.
+        try { await run(runtime.node,['--version'],undefined,90_000); }
+        catch(error) {
+          throw Error(`The new Placekeeper runtime could not start. If macOS blocked it, review the notice in System Settings → Privacy & Security, then retry this installer. ${error.message}`,{cause:error});
+        }
+      },
+    } : {}),
+    removePrevious:process.platform==='darwin' ? async previous=>{
+      // Unsealed bundles can contain user-added files. Keep those for inspection.
+      return execute('/usr/bin/codesign',['--verify','--deep','--strict',previous]).then(()=>true,()=>false);
+    } : undefined,
     ...readinessCallbacks({ app:destination, readiness, context, isolation, run }),
   });
 }
