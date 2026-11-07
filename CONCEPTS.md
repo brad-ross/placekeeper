@@ -77,7 +77,7 @@ Text-centered alignment can remain after manual zoom, even though the zoom perce
 The composition of the single-row review toolbar, determining which controls appear directly and which are reached through menus for the available space and input method.
 *Avoid:* Responsive Toolbar Presentation, toolbar mode
 
-Moving controls into a menu preserves their actions, availability, and keyboard access. Unavailable actions retain their slots or menu entries in a disabled state, so availability alone never changes the composition.
+Moving controls into a menu preserves their actions, availability, and keyboard access. History actions retain disabled slots or menu entries when unavailable. Optional groups, such as the separate References toggle, enter the width budget only when the current layout exposes them.
 
 ## Annotation authoring and recovery
 

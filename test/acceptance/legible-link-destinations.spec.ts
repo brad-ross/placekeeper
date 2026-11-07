@@ -506,7 +506,7 @@ test("Covers AE6. a banded destination is neither listed as an annotation nor ex
   });
 
   const annotationsTab = page.getByRole("tab", { name: "Annotations", exact: true });
-  if (!(await annotationsTab.isVisible())) await page.getByRole("button", { name: "Show workspace" }).click();
+  if (!(await annotationsTab.isVisible())) await page.getByRole("button", { name: "Show Workspace" }).click();
   await annotationsTab.click();
   const list = page.getByRole("region", { name: "Annotations", exact: true });
   await expect(list.locator("li[data-annotation-origin]")).toHaveCount(1);

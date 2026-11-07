@@ -408,7 +408,7 @@ export function ReferenceWorkspace({
       data-workspace-open={open ? 'true' : 'false'}
       data-list-open={open ? 'true' : 'false'}
       data-authoring-takeover={authoringTakeover ? 'true' : undefined}
-      aria-label={headerVariant === 'references' ? 'References' : 'Review workspace'}
+      aria-label={headerVariant === 'references' ? 'References' : 'Review Workspace'}
       aria-hidden={!open}
       inert={!open}
     >

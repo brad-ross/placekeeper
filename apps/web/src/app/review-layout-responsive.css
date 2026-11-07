@@ -136,30 +136,6 @@
 }
 
 @media (hover: none), (pointer: coarse) {
-  .review-layout {
-    --review-edge-rail-size: var(--review-control-touch, 44px);
-  }
-
-  .review-layout[data-right-overlay="false"][data-right-rail-present="true"]
-    .review-overlay-frame__right-backing {
-    width: calc(56px - var(--review-main-scrollbar-width));
-  }
-
-  .review-layout[data-right-overlay="false"][data-right-rail-present="true"]
-    .review-overlay-frame__right-fade {
-    right: 56px;
-  }
-
-  .review-layout[data-bottom-overlay="false"][data-bottom-rail-present="true"]
-    .review-overlay-frame__bottom-backing {
-    height: calc(max(56px, var(--review-overlay-inset, 12px) + var(--review-control-touch)) - var(--review-main-scrollbar-height));
-  }
-
-  .review-layout[data-bottom-overlay="false"][data-bottom-rail-present="true"]
-    .review-overlay-frame__bottom-fade {
-    bottom: max(56px, var(--review-overlay-inset, 12px) + var(--review-control-touch));
-  }
-
   .comment-composer {
     --comment-composer-anchor-size: var(--review-control-touch);
   }
@@ -290,12 +266,6 @@
     height: var(--review-control-touch);
   }
 
-  .workspace-edge-rail {
-    width: var(--review-control-touch);
-    min-width: var(--review-control-touch);
-    height: var(--review-control-touch);
-  }
-
   .reference-resize-handle[data-reference-resize-handle="right"] {
     right: calc(var(--reference-right-width) - 10px);
     width: 44px;
@@ -331,7 +301,6 @@
 
 @media (prefers-reduced-motion: reduce) {
   .review-document .pdf-workspace__viewport,
-  .workspace-edge-rail,
   .review-workspace,
   .review-tools-workspace,
   .review-context-palette,

@@ -137,7 +137,7 @@ async function openSharedAnnotationFixture(
   }
   await chooseCopyDestination(owner);
   for (const page of [owner, peer]) {
-    const showWorkspace = page.getByRole('button', { name: 'Show workspace' });
+    const showWorkspace = page.getByRole('button', { name: 'Show Workspace' });
     if (await showWorkspace.count()) await showWorkspace.click();
     await page.getByRole('tab', { name: 'Annotations', exact: true }).click();
     await expect(page.getByRole('tab', { name: 'Annotations', exact: true }))
@@ -403,7 +403,7 @@ async function closeSelectedMainCardAfterWorkspaceSettles(
     `[data-owned-mark][data-review-id="${options.itemId}"]`,
     '#review-tools-workspace',
   );
-  await options.tools.getByRole('button', { name: 'Hide workspace', exact: true }).click();
+  await options.tools.getByRole('button', { name: 'Hide Workspace', exact: true }).click();
   if (options.resizeTo !== undefined) await page.setViewportSize(options.resizeTo);
   await expect(options.tools).toHaveAttribute('data-tools-workspace-open', 'false');
   await expectWorkspaceAnimationsSettled(options.tools);
@@ -432,7 +432,7 @@ async function openAndSelectAnnotationWorkspace(
   itemId: string,
   selectRow: boolean,
 ): Promise<{ annotations: Locator; navigation: Locator; row: Locator; tools: Locator }> {
-  await page.getByRole('button', { name: 'Show workspace', exact: true }).click();
+  await page.getByRole('button', { name: 'Show Workspace', exact: true }).click();
   const tools = page.locator('#review-tools-workspace');
   const annotations = tools.getByRole('tab', { name: 'Annotations', exact: true });
   if (await annotations.getAttribute('aria-selected') !== 'true') await annotations.click();
@@ -998,7 +998,7 @@ test('does not repaint stale compact annotation content while real lifecycle req
   const changedFrames = await finishCompactEditFrameAudit(page);
 
   const afterInTray = 'Compact after tray edit marker.';
-  await page.getByRole('button', { name: 'Show workspace' }).click();
+  await page.getByRole('button', { name: 'Show Workspace' }).click();
   await page.getByRole('tab', { name: 'Annotations', exact: true }).click();
   const row = page.locator(`#review-annotation-list [data-review-item="${itemId}"]`);
   await expect(row).toContainText(after);
@@ -1242,7 +1242,7 @@ test('keeps compact card paint stable through pointer and keyboard Edit and Canc
     body: await page.screenshot(), contentType: 'image/png',
   });
 
-  await page.getByRole('button', { name: 'Show workspace' }).click();
+  await page.getByRole('button', { name: 'Show Workspace' }).click();
   await page.getByRole('tab', { name: 'Annotations', exact: true }).click();
   const row = page.locator(`#review-annotation-list [data-review-item="${itemId}"]`);
   const rowEdit = row.getByRole('button', { name: 'Edit Page Note annotation on page 1' });
@@ -1362,7 +1362,7 @@ const editContinuityLayouts = [
         await moveBottom.locator('xpath=..').hover();
         await moveBottom.click();
       }
-      await page.getByRole('button', { name: 'Show workspace' }).click();
+      await page.getByRole('button', { name: 'Show Workspace' }).click();
     },
   },
   {
@@ -1761,11 +1761,11 @@ test('waits for the closing Annotations tray before first painting the selected 
     `[data-owned-mark][data-review-id="${itemId}"]`,
     '#review-tools-workspace',
   );
-  await reopened.tools.getByRole('button', { name: 'Hide workspace', exact: true }).click();
+  await reopened.tools.getByRole('button', { name: 'Hide Workspace', exact: true }).click();
   expect(await reopened.tools.evaluate((element) => element.getAnimations().some(
     ({ pending, playState }) => pending || playState === 'running',
   ))).toBe(true);
-  await page.getByRole('button', { name: 'Show workspace', exact: true }).click();
+  await page.getByRole('button', { name: 'Show Workspace', exact: true }).click();
   await expect(reopened.tools).toHaveAttribute('data-tools-workspace-open', 'true');
   await expectWorkspaceAnimationsSettled(reopened.tools);
   await expect.poll(() => reopened.tools.evaluate((element) => getComputedStyle(element).transform))
@@ -1848,18 +1848,19 @@ test('keeps the initial Mac workspace toggle above the PDF viewport', async ({ p
   await page.locator('[data-launch-surface]').first().evaluate((element) => {
     element.setAttribute('data-launch-surface', 'macos');
   });
-  const rail = page.locator('[data-workspace-edge-rail="right"]');
-  await expect(rail).toBeVisible();
-  await expect(rail).toBeInViewport();
-  const ownsHitTarget = () => rail.evaluate((element) => {
+  const toggle = page.locator('[data-workspace-tray-toggle="right"]');
+  await expect(toggle).toBeVisible();
+  await expect(toggle).toBeInViewport();
+  const ownsHitTarget = () => toggle.evaluate((element) => {
     const bounds = element.getBoundingClientRect();
     const hit = document.elementFromPoint(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
     return hit === element || (hit !== null && element.contains(hit));
   });
   expect(await ownsHitTarget()).toBe(true);
-  await rail.click();
+  await toggle.click();
   await expect(page.getByRole('tab', { name: 'Outline', exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Hide workspace', exact: true }).click();
-  await expect(rail).toBeVisible();
+  await page.locator('#review-tools-workspace').getByRole('button', { name: 'Hide Workspace', exact: true }).click();
+  await expect(toggle).toBeFocused();
+  await expect(toggle).toBeVisible();
   expect(await ownsHitTarget()).toBe(true);
 });

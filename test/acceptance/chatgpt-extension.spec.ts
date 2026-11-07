@@ -289,7 +289,7 @@ for (const width of [1440, 1120, 375]) test(`extension reader and bot note layou
     await expect(page.getByRole('button', { name: 'Close review', exact: true })).toHaveCount(0);
     await expect(page.locator('.review-discussion-actions')).toHaveCount(0);
     const initial=await page.locator('#root').boundingBox();expect(initial!.y).toBeLessThan(2);
-    await page.getByRole('button', { name: 'Show workspace', exact: true }).click({ trial: true });
+    await page.getByRole('button', { name: 'Show Workspace', exact: true }).click({ trial: true });
     await info.attach(`extension-${width}px-reader`, { body: await page.screenshot({ fullPage: true }), contentType: 'image/png' });
     const snapshot=await reader.tool('inspect_review',{});await openAnnotationContext(page,snapshot.annotations[0].id);
     await page.getByRole('textbox',{name:'Note (optional)',exact:true}).fill('Why does this matter?');

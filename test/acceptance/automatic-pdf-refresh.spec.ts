@@ -205,7 +205,7 @@ test.describe('automatic PDF refresh annotation lifecycle', () => {
   test('finalizes manual reattachment through a protected draft and cannot reuse predecessor geometry', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 760 });
     await page.goto('/test/acceptance/review-harness/index.html?reconciliation=default&interaction-lifecycle=1');
-    await page.getByRole('button', { name: 'Show workspace' }).click();
+    await page.getByRole('button', { name: 'Show Workspace' }).click();
     const annotations = page.getByRole('tab', { name: 'Annotations', exact: true });
     if (await annotations.getAttribute('aria-selected') !== 'true') await annotations.click();
     await page.getByRole('button', {
@@ -227,7 +227,7 @@ test.describe('automatic PDF refresh annotation lifecycle', () => {
   test('reacquires a manual reattachment before replacement can publish after reconnect', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 760 });
     await page.goto('/test/acceptance/review-harness/index.html?reconciliation=default&interaction-lifecycle=1&interaction-reconnect=1');
-    await page.getByRole('button', { name: 'Show workspace' }).click();
+    await page.getByRole('button', { name: 'Show Workspace' }).click();
     const annotations = page.getByRole('tab', { name: 'Annotations', exact: true });
     if (await annotations.getAttribute('aria-selected') !== 'true') await annotations.click();
     await page.getByRole('button', {
@@ -256,7 +256,7 @@ test.describe('automatic PDF refresh annotation lifecycle', () => {
   test('releases a manual reattachment when its selected record vanishes elsewhere', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 760 });
     await page.goto('/test/acceptance/review-harness/index.html?reconciliation=default&interaction-lifecycle=1&external-reconciliation-removal=1');
-    await page.getByRole('button', { name: 'Show workspace' }).click();
+    await page.getByRole('button', { name: 'Show Workspace' }).click();
     const annotations = page.getByRole('tab', { name: 'Annotations', exact: true });
     if (await annotations.getAttribute('aria-selected') !== 'true') await annotations.click();
     await page.getByRole('button', {
@@ -280,7 +280,7 @@ test.describe('automatic PDF refresh annotation lifecycle', () => {
   test('reconciles an uncertain manual reattachment before cancel can orphan its hold', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 760 });
     await page.goto('/test/acceptance/review-harness/index.html?reconciliation=default&interaction-lifecycle=1&finalize-response-lost=1');
-    await page.getByRole('button', { name: 'Show workspace' }).click();
+    await page.getByRole('button', { name: 'Show Workspace' }).click();
     const annotations = page.getByRole('tab', { name: 'Annotations', exact: true });
     if (await annotations.getAttribute('aria-selected') !== 'true') await annotations.click();
     await page.getByRole('button', {

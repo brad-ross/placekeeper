@@ -18,7 +18,7 @@ async function openAnnotationsWorkspace(page: Page) {
     ? 'data-tools-workspace-open'
     : 'data-workspace-open';
   if (await workspace.getAttribute(openAttribute) !== 'true') {
-    await page.getByRole('button', { name: 'Show workspace' }).click();
+    await page.getByRole('button', { name: 'Show Workspace' }).click();
   }
   await expect(workspace).toHaveAttribute(openAttribute, 'true');
   await expect(workspace).toBeVisible();
@@ -50,27 +50,23 @@ async function closeWorkspace(page: Page) {
     ? 'data-tools-workspace-open'
     : 'data-workspace-open';
   if (await surface.getAttribute(openAttribute) === 'true') {
-    await page.getByRole('button', {
-      name: expectedPresentation === 'right' ? 'Hide workspace' : 'Hide workspace',
-    }).click();
+    await surface.getByRole('button', { name: 'Hide Workspace', exact: true }).click();
   }
   await expect(surface).toHaveAttribute(openAttribute, 'false');
-  const rail = page.getByRole('button', {
-    name: 'Show workspace',
-  });
-  await expect(rail).toHaveAttribute('aria-expanded', 'false');
-  return rail;
+  const toggle = page.locator(`[data-workspace-tray-toggle="${expectedPresentation}"]`);
+  await expect(toggle).toHaveAccessibleName('Show Workspace');
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  await expect(toggle).toBeFocused();
+  return toggle;
 }
 
-async function currentWorkspaceRail(page: Page) {
+async function currentWorkspaceToggle(page: Page) {
   const expectedPresentation = (page.viewportSize()?.width ?? 1280) < 900 ? 'bottom' : 'right';
   await expect(page.locator('[data-review-stage]')).toHaveAttribute(
     'data-workspace-presentation',
     expectedPresentation,
   );
-  return expectedPresentation === 'right'
-    ? page.getByRole('button', { name: 'Show workspace' })
-    : page.getByRole('button', { name: 'Show workspace' });
+  return page.locator(`[data-workspace-tray-toggle="${expectedPresentation}"]`);
 }
 
 function outlineDisclosure(page: Page, itemId: string) {
@@ -680,7 +676,7 @@ test.describe('canonical review workflow', () => {
   test('keeps focus and References coherent when a live outline disappears and returns', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 900 });
     await page.getByRole('button', { name: 'Set outline tree' }).click();
-    await page.getByRole('button', { name: 'Show workspace' }).click();
+    await page.getByRole('button', { name: 'Show Workspace' }).click();
     const outlineDestination = page.getByRole('button', {
       name: 'Harness section, Page 1',
       exact: true,
@@ -747,7 +743,7 @@ test.describe('canonical review workflow', () => {
   test('restores the exact branch set through the wired outline expansion control', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 900 });
     await page.getByRole('button', { name: 'Set outline tree' }).click();
-    await page.getByRole('button', { name: 'Show workspace' }).click();
+    await page.getByRole('button', { name: 'Show Workspace' }).click();
 
     const harness = outlineDisclosure(page, 'harness-outline');
     const nested = outlineDisclosure(page, 'harness-outline-nested');
@@ -782,7 +778,7 @@ test.describe('canonical review workflow', () => {
   test('resets a pending outline restore when the document generation changes', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 900 });
     await page.getByRole('button', { name: 'Set outline tree' }).click();
-    await page.getByRole('button', { name: 'Show workspace' }).click();
+    await page.getByRole('button', { name: 'Show Workspace' }).click();
     await page.locator('.review-workspace__header').hover();
     await page.getByRole('button', { name: 'Collapse all outline entries' }).click();
     await expect(page.getByRole('button', {
@@ -938,7 +934,7 @@ test.describe('canonical review workflow', () => {
     expect(await viewport.boundingBox()).toEqual(initialViewport);
 
     await page.getByRole('button', { name: 'Open harness reference' }).click();
-    await page.getByRole('button', { name: 'Show workspace' }).click();
+    await page.getByRole('button', { name: 'Show Workspace' }).click();
     await page.setViewportSize({ width: 760, height: 720 });
     await page.locator('[data-review-stage]').evaluate(async element => {
       await Promise.all(element.getAnimations({ subtree: true }).filter(animation => animation.effect?.getComputedTiming().iterations !== Infinity).map(animation => animation.finished.catch(() => undefined)));
@@ -999,12 +995,26 @@ test.describe('canonical review workflow', () => {
     await expect(page.locator('[data-review-stage]')).not.toHaveAttribute('data-horizontal-scroll-locked', 'true');
   });
 
-  test('keeps the gap above bottom References equal to the outside tray inset', async ({ page }) => {
+  test('keeps Workspace rightmost and preserves the inset between split trays', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 800 });
     await installRuntimeClassicScrollport(page);
     await page.getByRole('button', { name: 'Open harness reference' }).press('Enter');
-    await page.getByRole('button', { name: 'Show References' }).click();
-    await page.getByRole('button', { name: 'Show workspace' }).click();
+    const showReferences = page.getByRole('button', { name: 'Show References', exact: true });
+    await showReferences.hover();
+    await expect(page.getByRole('tooltip')).toHaveText(/^Show References (?:⌃⌘R|Ctrl\+Alt\+R)$/u);
+    await expect(showReferences.locator('svg path[fill="currentColor"]')).toHaveCount(0);
+    await showReferences.click();
+    await page.getByRole('button', { name: 'Show Workspace' }).click();
+    const trayToggles = page.getByRole('group', { name: 'Workspace trays' }).getByRole('button');
+    await expect(trayToggles).toHaveCount(2);
+    await expect(trayToggles.nth(0)).toHaveAccessibleName('Hide References');
+    await expect(trayToggles.nth(1)).toHaveAccessibleName('Hide Workspace');
+    await expect(trayToggles.locator('svg path[fill="currentColor"]')).toHaveCount(2);
+    await trayToggles.nth(0).hover();
+    await expect(page.getByRole('tooltip')).toHaveText('Hide References');
+    await trayToggles.nth(1).hover();
+    await expect(page.getByRole('tooltip')).toHaveText('Hide Workspace');
+
     const stage = page.locator('[data-review-stage]');
     await expect(stage).toHaveAttribute('data-reference-layout', 'wide-split');
     await expect.poll(async () => stage.evaluate((element) => {
@@ -1022,7 +1032,7 @@ test.describe('canonical review workflow', () => {
       element.firstElementChild?.setAttribute('style', 'width: 100%; height: 1600px; background: white');
     });
     await page.getByRole('button', { name: 'Open harness reference' }).press('Enter');
-    await page.getByRole('button', { name: 'Show workspace' }).click();
+    await page.getByRole('button', { name: 'Show Workspace' }).click();
     await expect.poll(() => viewport.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
     const backing = page.locator('.review-overlay-frame');
     const expectedClip = () => viewport.evaluate((element) => {
@@ -1069,7 +1079,7 @@ test.describe('canonical review workflow', () => {
     ))).toBe(`${Math.max(tracks.vertical, tracks.horizontal)}px`);
 
     await page.getByRole('button', { name: 'Open harness reference' }).press('Enter');
-    await page.getByRole('button', { name: 'Show workspace' }).click();
+    await page.getByRole('button', { name: 'Show Workspace' }).click();
     const [stageBounds, surfaceBounds, viewportBounds] = await Promise.all([
       page.locator('[data-review-stage]').boundingBox(),
       page.locator('#review-workspace').boundingBox(),
@@ -1086,9 +1096,10 @@ test.describe('canonical review workflow', () => {
     const documentBounds = await page.locator('.review-document').boundingBox();
     expect(viewportBounds).toEqual(documentBounds);
     expect(await canvas.boundingBox()).toEqual(initialCanvas);
-    await expect(page.getByRole('button', { name: 'Hide workspace' })).toBeVisible();
-    await page.getByRole('button', { name: 'Hide workspace' }).focus();
-    await expect(page.getByRole('button', { name: 'Hide workspace' })).toBeFocused();
+    const hide = page.locator('#review-workspace').getByRole('button', { name: 'Hide Workspace', exact: true });
+    await expect(hide).toBeVisible();
+    await hide.focus();
+    await expect(hide).toBeFocused();
   });
 
   test('keeps enlarged review text and fixed workspace actions reachable at compact and desktop widths', async ({ page }) => {
@@ -1121,7 +1132,7 @@ test.describe('canonical review workflow', () => {
         ? 'data-tools-workspace-open'
         : 'data-workspace-open';
       if (await surface.getAttribute(openAttribute) !== 'true') {
-        await page.getByRole('button', { name: 'Show workspace' }).click();
+        await page.getByRole('button', { name: 'Show Workspace' }).click();
         await expect(surface).toHaveAttribute(openAttribute, 'true');
       }
       await expect.poll(() => page.locator('[data-review-stage]').evaluate((element) => (
@@ -1138,7 +1149,7 @@ test.describe('canonical review workflow', () => {
       await scroller.evaluate((element) => { element.scrollTop = element.scrollHeight; });
       const headerAfter = await header.boundingBox();
       expect(headerAfter).toEqual(headerBefore);
-      const hide = page.getByRole('button', { name: 'Hide workspace' });
+      const hide = surface.getByRole('button', { name: 'Hide Workspace', exact: true });
       await expect(hide).toBeVisible();
       await hide.focus();
       await expect(hide).toBeFocused();
@@ -1194,11 +1205,15 @@ test.describe('canonical review workflow', () => {
     );
   });
 
-  test('keeps direct page and zoom controls usable while the neutral toolbar wraps', async ({ page }) => {
+  test('keeps direct page and zoom controls usable in the compact toolbar', async ({ page }) => {
     await page.goto('/test/acceptance/review-harness/index.html?responsive=full');
     await page.setViewportSize({ width: 320, height: 720 });
     const chrome = page.locator('[data-review-chrome]');
-    await expect(chrome).toHaveAttribute('data-review-chrome-presentation', 'expanded');
+    await expect(chrome).toHaveAttribute('data-review-chrome-title', 'icon');
+    await expect(chrome.getByRole('button', { name: 'Open edit history' })).toBeVisible();
+    await page.evaluate(() => new Promise<void>((resolve) => {
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+    }));
 
     const pageInput = page.getByRole('textbox', {
       name: 'Current page 3 of 12. Enter a page number',
@@ -1383,6 +1398,33 @@ test.describe('canonical review workflow', () => {
     await expect(zoomSuffix).toBeVisible();
   });
 
+  test('keeps the right workspace hidden when widening a narrow References tray', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto('/test/acceptance/review-harness/index.html?visual=reference-layout');
+    await page.getByRole('button', { name: 'Show References' }).click();
+    const stage = page.locator('[data-review-stage]');
+    await expect(stage).toHaveAttribute('data-reference-layout', 'wide-bottom');
+    await page.setViewportSize({ width: 760, height: 900 });
+    await expect(stage).toHaveAttribute('data-reference-layout', 'narrow-unified');
+    const references = page.getByRole('tab', { name: 'References', exact: true });
+    await expect(references).toHaveAttribute('aria-selected', 'true');
+    const tools = page.locator('#review-tools-workspace');
+    await tools.evaluate(element => {
+      const observer = new MutationObserver(() => {
+        if (element.getAttribute('data-workspace-presentation') !== 'right') return;
+        observer.disconnect();
+        element.setAttribute('data-test-first-wide-visibility', getComputedStyle(element).visibility);
+      });
+      observer.observe(element, { attributes: true, attributeFilter: ['data-workspace-presentation'] });
+    });
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await expect(tools).toHaveAttribute('data-test-first-wide-visibility', 'hidden');
+    await expect(page.locator('#review-workspace')).toHaveAttribute('data-workspace-open', 'true');
+    await expect(tools).toHaveAttribute('data-tools-workspace-open', 'false');
+    await page.mouse.move(12, 120);
+    await expect(page.getByRole('group', { name: 'Workspace trays' })).toHaveCSS('opacity', '1');
+  });
+
   test('reveals right-side controls on bar hover and dismisses hover menus outside their trigger and popup', async ({ page }) => {
     const bar = page.locator('[data-review-chrome]');
     const rightControls = bar.locator(':scope > .review-chrome__viewer-controls');
@@ -1400,6 +1442,12 @@ test.describe('canonical review workflow', () => {
     const canvas = page.getByRole('application', { name: 'PDF review canvas' });
     await canvas.hover();
     await expect(rightControls).toHaveCSS('opacity', '0');
+    const trayControls = bar.getByRole('group', { name: 'Workspace trays' });
+    await expect(trayControls).toHaveCSS('opacity', '0');
+    await bar.hover();
+    await expect(trayControls).toHaveCSS('opacity', '1');
+    await canvas.hover();
+    await expect(trayControls).toHaveCSS('opacity', '0');
     for (const control of await bar.locator('[data-review-copy-link], [data-main-history]').all()) {
       await expect(control).toHaveCSS('opacity', '0');
     }
@@ -1472,6 +1520,14 @@ test.describe('canonical review workflow', () => {
     await page.keyboard.press('Escape');
     await expect(zoomMenu).toHaveCount(0);
     await expect(zoomTrigger).toBeFocused();
+
+    const toggle = trayControls.locator('[data-workspace-tray-toggle]');
+    await toggle.click();
+    await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    await page.mouse.move(12, 120);
+    await canvas.focus();
+    await expect(trayControls).toHaveCSS('opacity', '1');
+    await expect(rightControls).toHaveCSS('opacity', '0');
   });
 
   test('keeps the top bar to one contained 50px row across supported widths', async ({ page }) => {
@@ -1490,7 +1546,8 @@ test.describe('canonical review workflow', () => {
         const identity = element.querySelector<HTMLElement>(':scope > .review-chrome__identity');
         const controls = element.querySelector<HTMLElement>(':scope > .review-chrome__viewer-controls');
         const navigation = element.querySelector<HTMLElement>(':scope > .review-chrome__left-controls');
-        if (!identity || !controls || !navigation) throw new Error('Review chrome geometry is incomplete.');
+        const trays = element.querySelector<HTMLElement>(':scope > .review-chrome__tray-controls');
+        if (!identity || !controls || !navigation || !trays) throw new Error('Review chrome geometry is incomplete.');
         const chromeBounds = element.getBoundingClientRect();
         const identityBounds = identity.getBoundingClientRect();
         const controlsBounds = controls.getBoundingClientRect();
@@ -1501,9 +1558,12 @@ test.describe('canonical review workflow', () => {
           clientWidth: element.clientWidth,
           scrollWidth: element.scrollWidth,
           height: chromeBounds.height,
+          left: chromeBounds.left,
+          right: chromeBounds.right,
           identity: identityBounds.toJSON(),
           controls: controlsBounds.toJSON(),
           navigation: navigation.getBoundingClientRect().toJSON(),
+          trays: trays.getBoundingClientRect().toJSON(),
           identityChildren: visibleBounds(':scope > .review-chrome__identity > *'),
           saveChildren: visibleBounds(':scope > .review-chrome__identity .review-chrome__save-identity > :not(.sr-only)'),
           filename: element.querySelector<HTMLElement>(':scope > .review-chrome__identity .review-chrome__filename')?.getBoundingClientRect().toJSON(),
@@ -1516,8 +1576,10 @@ test.describe('canonical review workflow', () => {
         expect((await documentAction.boundingBox())!.width).toBeGreaterThanOrEqual(32);
       }
       expect(geometry.height).toBe(50);
+      expect(geometry.left).toBeGreaterThanOrEqual(-0.5);
+      expect(geometry.right).toBeLessThanOrEqual(width + 0.5);
       expect(geometry.scrollWidth).toBeLessThanOrEqual(geometry.clientWidth + 1);
-      const visibleColumns = [geometry.identity, geometry.navigation, geometry.controls]
+      const visibleColumns = [geometry.identity, geometry.navigation, geometry.controls, geometry.trays]
         .filter((item) => item.width > 0.5);
       for (let index = 1; index < visibleColumns.length; index += 1) {
         expect(visibleColumns[index - 1]!.x + visibleColumns[index - 1]!.width)
@@ -1530,9 +1592,9 @@ test.describe('canonical review workflow', () => {
         }
       }
       if ((geometry.filename?.width ?? 0) > 0) {
-        expect(geometry.filename!.width).toBeGreaterThanOrEqual(40);
+        expect(geometry.filename!.width, `Readable title at ${width}px`).toBeGreaterThanOrEqual(40);
       }
-      for (const item of [geometry.identity, geometry.navigation, geometry.controls]) {
+      for (const item of [geometry.identity, geometry.navigation, geometry.controls, geometry.trays]) {
         expect(item.y).toBeGreaterThanOrEqual(-0.5);
         expect(item.y + item.height).toBeLessThanOrEqual(50.5);
       }
@@ -1543,12 +1605,15 @@ test.describe('canonical review workflow', () => {
     const chrome = page.locator('[data-review-chrome]');
     const history = chrome.locator(':scope > .review-chrome__left-controls [data-main-history], :scope > .review-chrome__viewer-controls .review-chrome__history-control');
     await expect(history).toHaveCount(4);
-    for (const width of [760, 759, 640, 480, 320]) {
+    for (const width of [760, 759, 640, 480]) {
       await page.setViewportSize({ width, height: 720 });
-      await expect.poll(() => history.evaluateAll((buttons) => buttons.every((button) => button.getBoundingClientRect().width >= 32)), { message: `History slots retain their width at ${width}px` }).toBe(true);
+      await expect.poll(() => history.evaluateAll((buttons) => buttons.length === 4
+        && buttons.every((button) => button.getBoundingClientRect().width >= 32)),
+      { message: `History slots retain their width at ${width}px` }).toBe(true);
     }
 
     await page.setViewportSize({ width: 640, height: 720 });
+    await expect(chrome).toHaveAttribute('data-review-chrome-title', 'title');
     const positions = async () => ({
       history: await history.evaluateAll((buttons) => buttons.map((button) => ({
         x: button.getBoundingClientRect().x,
@@ -1577,6 +1642,19 @@ test.describe('canonical review workflow', () => {
     await expect(undo).toBeEnabled();
     await expect(redo).toBeDisabled();
     expect(await positions()).toEqual(initialPositions);
+
+    await undo.focus();
+    await page.setViewportSize({ width: 320, height: 720 });
+    await expect(history).toHaveCount(0);
+    const historyTrigger = chrome.getByRole('button', { name: 'Open edit history' });
+    await expect(historyTrigger).toBeFocused();
+    await historyTrigger.press('Enter');
+    const menu = page.getByRole('menu', { name: 'Edit history' });
+    await expect(menu.getByRole('menuitem', { name: 'Undo' })).toBeFocused();
+    await expect(menu.getByRole('menuitem', { name: 'Redo' })).toBeDisabled();
+    await page.setViewportSize({ width: 640, height: 720 });
+    await expect(menu).toHaveCount(0);
+    await expect(undo).toBeFocused();
   });
 
   test('keeps narrow touch history in stable menus within the viewport', async ({ browser }) => {
@@ -1721,7 +1799,7 @@ test.describe('canonical review workflow', () => {
         await touchPage.evaluate(() => new Promise<void>((resolve) => {
           requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
         }));
-        const chromeButtons = chrome.locator(':scope > .review-chrome__identity button, :scope > .review-chrome__left-controls button, :scope > .review-chrome__viewer-controls button');
+        const chromeButtons = chrome.locator(':scope > .review-chrome__identity button, :scope > .review-chrome__left-controls button, :scope > .review-chrome__viewer-controls button, :scope > .review-chrome__tray-controls button');
         // Unavailable history actions keep their touch-sized slots.
         const chromeButtonHeights = await chromeButtons.evaluateAll((buttons) => (
           buttons.filter((button) => button.getClientRects().length > 0)
@@ -1729,6 +1807,13 @@ test.describe('canonical review workflow', () => {
         ));
         expect(chromeButtonHeights.length).toBeGreaterThan(0);
         expect(chromeButtonHeights.every((height) => height >= 44)).toBe(true);
+        const trayControls = chrome.getByRole('group', { name: 'Workspace trays' });
+        await expect(trayControls).toHaveCSS('opacity', '1');
+        const trayToggle = trayControls.getByRole('button');
+        await expect(trayToggle).toBeVisible();
+        const trayBounds = (await trayToggle.boundingBox())!;
+        expect(trayBounds.width).toBeGreaterThanOrEqual(44);
+        expect(trayBounds.x + trayBounds.width).toBeLessThanOrEqual(width + 0.5);
         const sizingIconWidths = await chrome.locator(
           '[data-review-chrome-sizing-rack] .review-chrome__icon-control',
         ).evaluateAll((buttons) => buttons.map((button) => button.getBoundingClientRect().width));
@@ -2259,7 +2344,7 @@ test.describe('canonical review workflow', () => {
     await expect(references).toHaveAttribute('aria-hidden', 'true');
     await expect(workspace).toBeVisible();
     await expect(references).not.toBeVisible();
-    await expect(page.locator('[data-workspace-edge-rail]')).toHaveCount(0);
+    await expect(page.locator('[data-workspace-tray-toggle]')).toHaveCount(0);
     await expect(page.locator('[data-reference-resize-handle]')).toHaveCount(0);
     await expect(origin).toHaveAttribute('data-active', 'true');
 
@@ -2657,7 +2742,7 @@ test.describe('canonical review workflow', () => {
 
   test('keeps a closed tray closed and gives Save Destination Escape precedence', async ({ page }) => {
     await page.getByRole('button', { name: 'Seed annotations' }).click();
-    const workspace = await currentWorkspaceRail(page);
+    const workspace = await currentWorkspaceToggle(page);
     await expect(workspace).toHaveAttribute('aria-expanded', 'false');
     await page.getByRole('button', { name: 'Replace', exact: true }).click();
     const composer = page.getByRole('region', { name: 'Replacement' });
@@ -2880,11 +2965,13 @@ test.describe('canonical review workflow', () => {
     expect(inputBounds!.x + inputBounds!.width).toBeLessThanOrEqual(320);
     await page.getByRole('button', { name: 'Apply' }).click();
     await page.locator('[data-review-chrome]').hover({ position: { x: 2, y: 2 } });
-    await page.getByRole('button', { name: 'Undo' }).click();
+    await page.getByRole('button', { name: 'Open edit history' }).click();
+    const historyMenu = page.getByRole('menu', { name: 'Edit history' });
+    await historyMenu.getByRole('menuitem', { name: 'Undo' }).click();
     await expect(page.locator('[data-owned-mark]')).toHaveCount(0);
-    await page.locator('[data-review-chrome]').hover({ position: { x: 2, y: 2 } });
-    await page.getByRole('button', { name: 'Redo' }).click();
+    await historyMenu.getByRole('menuitem', { name: 'Redo' }).click();
     await expect(page.locator('[data-owned-mark="replace"]')).toHaveCount(1);
+    await page.keyboard.press('Escape');
 
     await openAnnotationsWorkspace(page);
     await expect(page.locator('#review-tools-workspace')).toBeVisible();
@@ -3001,12 +3088,13 @@ test.describe('canonical review workflow', () => {
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await openAnnotationsWorkspace(page);
     const drawer = page.locator('#review-tools-workspace');
-    const rail = page.locator('[data-workspace-edge-rail]');
     await expect(drawer).toBeVisible();
     await expect(drawer).toHaveCSS('transition-duration', '0s');
     await expect(drawer).toHaveCSS('animation-duration', '0s');
-    await closeWorkspace(page);
-    await expect(rail).toHaveCSS('transition-duration', '0s');
+    const toggle = await closeWorkspace(page);
+    await expect.poll(() => toggle.evaluate((element) => Math.max(
+      ...getComputedStyle(element).transitionDuration.split(',').map((duration) => Number.parseFloat(duration)),
+    ))).toBeLessThanOrEqual(0.00001);
   });
 
   test('keeps native editors and composer fields outside semantic command capture', async ({ page }) => {
@@ -3067,7 +3155,7 @@ test.describe('canonical review workflow', () => {
     await replacementComposer.getByRole('button', { name: 'Cancel' }).click();
     await expect(canvas).toBeFocused();
 
-    const workspace = await currentWorkspaceRail(page);
+    const workspace = await currentWorkspaceToggle(page);
     await workspace.press('Space');
 
     await expect(page.locator('#review-tools-workspace')).toHaveAttribute('data-tools-workspace-open', 'true');
@@ -3160,7 +3248,7 @@ test.describe('canonical review workflow', () => {
       await page.getByRole('button', { name: 'Highlight', exact: true }).click();
       await page.getByRole('button', { name: 'Save', exact: true }).click();
       if (workspace === 'outline') {
-        await page.getByRole('button', { name: 'Show workspace' }).click();
+        await page.getByRole('button', { name: 'Show Workspace' }).click();
         await page.getByRole('tab', { name: 'Outline', exact: true }).click();
       }
       const mark = page.locator('[data-owned-focus-id]').first();
@@ -3222,7 +3310,7 @@ test.describe('canonical review workflow', () => {
     await expect(source.getByRole('button', { name: /^Edit/ })).toHaveCount(0);
     await expect(source.getByRole('button', { name: /^Delete/ })).toHaveCount(0);
     await page.keyboard.press('Escape');
-    await expect(await currentWorkspaceRail(page)).toBeFocused();
+    await expect(await currentWorkspaceToggle(page)).toBeFocused();
     await expect(page.locator('[data-owned-mark]').first()).toHaveAttribute('data-active', 'true');
     await expect(row).toHaveAttribute('data-active', 'true');
   });

@@ -66,7 +66,7 @@ test('test MCP bridge retains nested references and returns to the main reading 
     await page.keyboard.press('Enter');
     await page.getByRole('menuitem', { name: /Open in References/u }).click();
     await expect(page.locator('[data-reference-tab]')).toHaveCount(2);
-    await page.getByRole('button', { name: 'Hide References' }).click();
+    await page.locator('#review-workspace').getByRole('button', { name: 'Hide References', exact: true }).click();
     await expect(main).toBeVisible();
     expect(await main.locator('.pdf-workspace__viewport').evaluate(element => ({ top: element.scrollTop, left: element.scrollLeft }))).toEqual(before);
   } finally { await bridge.dispose(); }
@@ -91,7 +91,7 @@ for (const deferRemovalReply of [false, true]) test('test MCP bridge production 
     await expect.poll(() => bridge.broker.state(bridge.sessionId)?.items.length).toBe(1);
     expect(bridge.broker.state(bridge.sessionId)?.pendingDrafts).toEqual([]);
     const id = bridge.broker.state(bridge.sessionId)!.items[0]!.id;
-    await page.getByRole('button', { name: 'Show workspace' }).click();
+    await page.getByRole('button', { name: 'Show Workspace' }).click();
     await page.getByRole('tab', { name: 'Annotations', exact: true }).click();
     const row = page.locator(`[data-review-item="${id}"]`);
     await row.hover(); await row.getByRole('button', { name: 'Edit Page Note annotation on page 1' }).click();
@@ -184,7 +184,7 @@ test('test MCP bridge imported comment inspection and Cancel leave original byte
     const before = await bridge.sourceBytes();
     const items = structuredClone(bridge.broker.state(bridge.sessionId)!.items);
     let writes = 0; bridge.setBeforeWrite(async () => { writes++; });
-    await page.getByRole('button', { name: 'Show workspace' }).click();
+    await page.getByRole('button', { name: 'Show Workspace' }).click();
     await page.getByRole('tab', { name: 'Annotations', exact: true }).click();
     for (const item of items) {
       const row = page.locator(`[data-review-item="${item.id}"]`);

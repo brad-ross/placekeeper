@@ -24,7 +24,7 @@ Open Placekeeper and choose a local PDF. Click a citation or another internal PD
 
 The default save creates a reviewed copy. **Replace Original** is a separate, explicit action. If another app rewrites an open PDF, Placekeeper waits for a valid file and refreshes the review. It waits until active annotation edits finish, then carries over your reading position and annotations where it can. If Placekeeper cannot confidently reattach an annotation, it leaves it available for manual reattachment. See [Privacy and recovery](docs/privacy-and-recovery.md) for what stays local and how to recover drafts.
 
-In the current source tree, you can pan across pages and zoom in link previews. The References tray also detects when the original target scrolls out of view more reliably. Hover the tab or move keyboard focus into it to reveal **Return to reference**. The preview controls and improved scroll detection landed after 0.3.1.
+In the current source tree, you can pan across pages and zoom in link previews. The References tray also detects when the original target scrolls out of view more reliably. Hover the tab or move keyboard focus into it to reveal **Return to reference**. The toolbar also has buttons for opening References and the Annotations Workspace. These changes landed after 0.3.1.
 
 ## Optional integrations
 

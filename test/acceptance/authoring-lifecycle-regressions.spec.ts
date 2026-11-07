@@ -4,7 +4,7 @@ test('releases a concurrently deleted edited item before closing its editor', as
   await page.goto('/test/acceptance/review-harness/index.html?interaction-lifecycle=1');
   await page.getByRole('button', { name: 'Highlight', exact: true }).click();
   await page.getByRole('button', { name: 'Save', exact: true }).click();
-  await page.getByRole('button', { name: 'Show workspace' }).click();
+  await page.getByRole('button', { name: 'Show Workspace' }).click();
   const annotations = page.getByRole('tab', { name: 'Annotations', exact: true });
   if (await annotations.getAttribute('aria-selected') !== 'true') await annotations.click();
   const row = page.locator('[data-review-item]').filter({

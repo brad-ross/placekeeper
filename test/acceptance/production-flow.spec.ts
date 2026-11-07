@@ -462,7 +462,7 @@ async function chooseFreshCopyDestination(page: Page): Promise<void> {
 }
 
 async function openAnnotationsWorkspace(page: Page) {
-  const workspace = await currentWorkspaceRail(page);
+  const workspace = await currentWorkspaceToggle(page);
   if (await workspace.getAttribute("aria-expanded") !== "true") await workspace.click();
   await expect(workspace).toHaveAttribute("aria-expanded", "true");
   const annotations = page.getByRole("tab", { name: "Annotations", exact: true });
@@ -472,14 +472,15 @@ async function openAnnotationsWorkspace(page: Page) {
   return { annotations, workspace };
 }
 
-async function currentWorkspaceRail(page: Page) {
-  return page.getByRole('button', { name: /^(?:Show|Hide) workspace$/u });
+async function currentWorkspaceToggle(page: Page) {
+  return page.getByRole('group', { name: 'Workspace trays', exact: true })
+    .getByRole('button', { name: /^(?:Show|Hide) Workspace$/u });
 }
 
 async function toggleWorkspace(page: Page) {
-  const rail = await currentWorkspaceRail(page);
-  await rail.click();
-  return rail;
+  const toggle = await currentWorkspaceToggle(page);
+  await toggle.click();
+  return toggle;
 }
 
 test.beforeAll(async () => {
@@ -1111,7 +1112,8 @@ test("searches extracted PDF text with variants, history, references, and retain
     "aria-selected",
     "true",
   );
-  await expect(page.getByRole("button", { name: "Hide workspace" })).toBeVisible();
+  await expect(page.getByRole("group", { name: "Workspace trays", exact: true })
+    .getByRole("button", { name: "Hide Workspace", exact: true })).toBeVisible();
   await query.click();
   await expect(query).toBeFocused();
   await expect.poll(() => query.evaluate((element) => getComputedStyle(element).backgroundColor))
@@ -1477,8 +1479,9 @@ for (const { label, width } of [
     await expect(query).not.toBeFocused();
     await expect(suggestions).toBeHidden();
 
-    await page.getByRole('button', { name: 'Hide workspace' }).click();
-    await page.getByRole('button', { name: 'Show workspace' }).click();
+    const workspaceToggle = await toggleWorkspace(page);
+    await expect(workspaceToggle).toHaveAttribute('aria-expanded', 'false');
+    await workspaceToggle.click();
     await expect(searchPanel).toBeFocused();
     await expect(query).not.toBeFocused();
     await expect(suggestions).toBeHidden();
@@ -1776,8 +1779,15 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
     .toBeGreaterThan(initialBottomValue);
   const rememberedBottomValue = Number(await bottomSplitter.getAttribute("aria-valuenow"));
 
-  const rightRail = page.getByRole("button", { name: "Show workspace" });
-  await rightRail.click();
+  const trayToggles = page.getByRole("group", { name: "Workspace trays", exact: true });
+  const rightToggle = trayToggles.locator('[data-workspace-tray-toggle="right"]');
+  const bottomToggle = trayToggles.locator('[data-workspace-tray-toggle="bottom"]');
+  await expect(trayToggles.getByRole("button")).toHaveCount(2);
+  await expect(rightToggle).toHaveAccessibleName("Show Workspace");
+  await expect(rightToggle).toHaveAttribute("aria-expanded", "false");
+  await expect(bottomToggle).toHaveAccessibleName("Hide References");
+  await expect(bottomToggle).toHaveAttribute("aria-expanded", "true");
+  await rightToggle.click();
   const toolsWorkspace = page.locator("#review-tools-workspace");
   await expect(toolsWorkspace).toHaveAttribute("data-tools-workspace-open", "true");
   await expect.poll(() => toolsWorkspace.evaluate((element) => getComputedStyle(element).transform))
@@ -1789,16 +1799,35 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
   ]);
   if (!toolsBounds || !bottomBounds) throw new Error("Coordinated tray geometry is unavailable.");
   expect(bottomBounds.y - (toolsBounds.y + toolsBounds.height)).toBeCloseTo(await expectedWorkspaceInset(page), 0);
-  await expect(toolsWorkspace.getByRole("button", { name: "Hide workspace" })).toBeVisible();
+  await expect(toolsWorkspace.getByRole("button", { name: "Hide Workspace" })).toBeVisible();
   await mainPageOne.click({ position: { x: 24, y: 24 } });
   await expect(toolsWorkspace).toHaveAttribute("data-tools-workspace-open", "true");
   await expect(workspace).toHaveAttribute("data-workspace-open", "true");
+
+  await expect(rightToggle).toHaveAccessibleName("Hide Workspace");
+  await expect(rightToggle).toHaveAttribute("aria-expanded", "true");
+  await rightToggle.click();
+  await expect(rightToggle).toHaveAccessibleName("Show Workspace");
+  await expect(rightToggle).toHaveAttribute("aria-expanded", "false");
+  await expect(bottomToggle).toHaveAttribute("aria-expanded", "true");
+  await rightToggle.click();
+  await expect(rightToggle).toHaveAttribute("aria-expanded", "true");
+
+  await bottomToggle.click();
+  await expect(bottomToggle).toHaveAccessibleName("Show References");
+  await expect(bottomToggle).toHaveAttribute("aria-expanded", "false");
+  await expect(rightToggle).toHaveAttribute("aria-expanded", "true");
+  await bottomToggle.click();
+  await expect(bottomToggle).toHaveAttribute("aria-expanded", "true");
 
   await clickHoverRevealedReferenceDockAction(
     page.getByRole("button", { name: "Move References to right" }),
   );
   await expect(workspace).toHaveAttribute("data-workspace-presentation", "right");
-  await expect(page.getByRole("button", { name: "Open References tray" })).toHaveCount(0);
+  await expect(trayToggles.getByRole("button")).toHaveCount(1);
+  await expect(bottomToggle).toHaveCount(0);
+  await expect(rightToggle).toHaveAccessibleName("Hide Workspace");
+  await expect(rightToggle).toHaveAttribute("aria-expanded", "true");
   await expect(workspace.getByRole("button", { name: "Hide References" })).toHaveAttribute(
     "aria-expanded", "true",
   );
@@ -2049,11 +2078,15 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
   await bottomReferencesMode.focus();
   await bottomReferencesMode.press(workspaceForwardTab);
   await expect(page.getByRole("button", { name: "Move References to right" })).toBeFocused();
-  await page.getByRole("button", { name: "Show workspace" }).click();
+  await page.getByRole("button", { name: "Show Workspace" }).click();
   await primaryTab.click();
 
   await page.setViewportSize({ width: 760, height: 900 });
   await expect(page.locator("[data-review-stage]")).toHaveAttribute("data-reference-layout", "narrow-unified");
+  await expect(trayToggles.getByRole("button")).toHaveCount(1);
+  await expect(rightToggle).toHaveCount(0);
+  await expect(bottomToggle).toHaveAccessibleName("Hide Workspace");
+  await expect(bottomToggle).toHaveAttribute("aria-expanded", "true");
   await expect(page.getByRole("tab", { name: "References", exact: true })).toHaveAttribute(
     "aria-selected",
     "true",
@@ -2062,6 +2095,9 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
   await expect(referenceWorkspace).toHaveAttribute("data-reference-mount", "stable");
   await page.setViewportSize({ width: 1280, height: 900 });
   await expect(page.locator("[data-review-stage]")).toHaveAttribute("data-reference-layout", "wide-split");
+  await expect(trayToggles.getByRole("button")).toHaveCount(2);
+  await expect(rightToggle).toHaveAccessibleName("Hide Workspace");
+  await expect(bottomToggle).toHaveAccessibleName("Hide References");
   await expect(toolsWorkspace).toHaveAttribute("data-tools-workspace-open", "true");
   await expect(workspace).toHaveAttribute("data-workspace-presentation", "bottom");
   // The default fit-width scale refits when the tools tray occupies reading
@@ -2600,14 +2636,17 @@ for (const mobile of [false, true]) {
       }).toBe(true);
 
       if (mobile) {
-        const rail = page.locator('.workspace-edge-rail');
-        await expect(rail).toBeVisible();
-        await expect.poll(async () => {
-          const bounds = (await rail.boundingBox())!;
-          const edge = await page.locator('[data-review-stage]').evaluate(reviewEdgeGeometry);
-          if (edge.display !== 'block' || !edge.background.includes('linear-gradient')) return -Infinity;
-          return Math.min(bounds.y - edge.bottomStart, edge.bottomEnd - bounds.y - bounds.height);
-        }).toBeGreaterThanOrEqual(0);
+        const chrome = page.locator('[data-review-chrome]');
+        const toggle = chrome.locator('[data-workspace-tray-toggle="bottom"]');
+        await expect(toggle).toBeVisible();
+        await expect(toggle).toHaveAccessibleName('Show Workspace');
+        const toolbarBounds = (await chrome.boundingBox())!;
+        const toggleBounds = (await toggle.boundingBox())!;
+        expect(toolbarBounds.height).toBe(50);
+        expect(toggleBounds.x).toBeGreaterThanOrEqual(toolbarBounds.x);
+        expect(toggleBounds.x + toggleBounds.width).toBeLessThanOrEqual(toolbarBounds.x + toolbarBounds.width);
+        expect(toggleBounds.y).toBeGreaterThanOrEqual(toolbarBounds.y);
+        expect(toggleBounds.y + toggleBounds.height).toBeLessThanOrEqual(toolbarBounds.y + toolbarBounds.height);
       }
       await openAnnotationsWorkspace(page);
       const annotationsPanel = page.locator('#workspace-panel-annotations');
@@ -2698,7 +2737,7 @@ for (const seededAnnotation of [false, true]) {
         : undefined,
     );
 
-    const workspace = await currentWorkspaceRail(page);
+    const workspace = await currentWorkspaceToggle(page);
     await workspace.click();
     await page.getByRole('tab', { name: 'Search', exact: true }).click();
     await expect(page.getByRole('tab', { name: 'Search', exact: true })).toHaveAttribute(
@@ -2968,7 +3007,7 @@ test("keeps compound reference actions in narrow keyboard order through survivor
 
   await expect(page.getByRole("tablist", { name: "Open references", includeHidden: true })).toHaveCount(0);
   await expect(workspace).toHaveAttribute("data-workspace-open", "false");
-  const reopenTools = page.getByRole("button", { name: "Show workspace" });
+  const reopenTools = page.getByRole("button", { name: "Show Workspace" });
   await expect(reopenTools).toBeFocused();
   await reopenTools.click();
   await expect(page.getByRole("tab", { name: "References", exact: true })).toHaveCount(0);
@@ -2984,7 +3023,7 @@ test("keeps compound reference actions touch sized for coarse pointers", async (
     await openFreshProductionFixture(page, referencePdf, "Coarse-pointer reference launch failed");
     const mainWorkspace = page.locator(".pdf-workspace:not(.pdf-workspace--reference)");
     await expect(mainWorkspace.locator(".pdf-workspace__page[data-page-index='0']")).toBeVisible();
-    await (await currentWorkspaceRail(page)).click();
+    await (await currentWorkspaceToggle(page)).click();
     const outline = page.getByRole("navigation", { name: "Document outline" });
     const outlineActions = outline.getByRole("button", {
       name: "Secondary actions for Details, Page 3",
@@ -3112,7 +3151,7 @@ test("keeps outline and rejected link metadata inert inside the installed local 
   await expect(mainWorkspace.locator(".pdf-workspace__page[data-page-index='0']")).toBeVisible();
   await mainWorkspace.evaluate((element) => element.setAttribute("data-safety-main-mount", "stable"));
 
-  const workspaceControl = await currentWorkspaceRail(page);
+  const workspaceControl = await currentWorkspaceToggle(page);
   await workspaceControl.click();
   const workspace = page.locator("#review-tools-workspace");
   await expect(workspace).toHaveAttribute("data-tools-workspace-open", "true");
@@ -3643,7 +3682,7 @@ test("collapses an outline-free PDF with source annotations to Search and restor
   const mainWorkspace = page.locator(".pdf-workspace:not(.pdf-workspace--reference)");
   await expect(mainWorkspace.locator(".pdf-workspace__page[data-page-index='0']")).toBeVisible();
   await mainWorkspace.evaluate((element) => element.setAttribute("data-empty-outline-main-mount", "stable"));
-  const workspaceControl = await currentWorkspaceRail(page);
+  const workspaceControl = await currentWorkspaceToggle(page);
   await workspaceControl.click();
   const workspace = page.locator('#review-tools-workspace');
   const modes = page.getByRole('tablist', { name: 'Workspace modes' });
@@ -3861,7 +3900,7 @@ test('keeps the insertion caret visible beside an open workspace', async ({ page
   const pdfPage = page.locator(".pdf-workspace__page[data-page-index='0']").first();
   await expect(pdfPage).toBeVisible();
   await waitForRenderedPageImage(pdfPage);
-  const workspaceControl = await currentWorkspaceRail(page);
+  const workspaceControl = await currentWorkspaceToggle(page);
   if (await workspaceControl.getAttribute('aria-expanded') !== 'true') {
     await workspaceControl.click();
   }
@@ -4082,7 +4121,7 @@ test('edits the current page and preserves real viewer state through responsive 
   await expect.poll(() => host.broker.state(launched.sessionId)?.items.length).toBe(1);
   await expect.poll(() => host.broker.saveStatus(launched.sessionId)?.sync.phase).toBe('clean');
 
-  const { annotations, workspace: workspaceRail } = await openAnnotationsWorkspace(page);
+  const { annotations, workspace: workspaceToggle } = await openAnnotationsWorkspace(page);
   const noteRow = page.getByRole('button', {
     name: /Page Note · Page 1 · Keep this surrounding review state\./u,
   });
@@ -4114,7 +4153,7 @@ test('edits the current page and preserves real viewer state through responsive 
   await expect(secondPage).toHaveCount(1);
   await expect(workspace).toHaveAttribute('data-page-navigation-mount-probe', 'stable');
   expect(await currentZoomText(page)).toBe(zoomBeforeNavigation);
-  await expect(workspaceRail).toHaveAttribute('aria-expanded', 'true');
+  await expect(workspaceToggle).toHaveAttribute('aria-expanded', 'true');
   await expect(annotations).toHaveAttribute('aria-selected', 'true');
   await expect(noteRow).toBeVisible();
   expect(host.broker.state(launched.sessionId)?.revision).toBeGreaterThan(navigationRevisionBaseline);
@@ -4140,10 +4179,10 @@ test('edits the current page and preserves real viewer state through responsive 
     )).toBeGreaterThan(5);
   };
   await toggleWorkspace(page);
-  await expect(workspaceRail).toHaveAttribute('aria-expanded', 'false');
+  await expect(workspaceToggle).toHaveAttribute('aria-expanded', 'false');
   await expectNavigationTarget();
   await toggleWorkspace(page);
-  await expect(workspaceRail).toHaveAttribute('aria-expanded', 'true');
+  await expect(workspaceToggle).toHaveAttribute('aria-expanded', 'true');
   await expectNavigationTarget();
 
   await workspace.evaluate((element) => {
@@ -5248,14 +5287,18 @@ test('keeps native PDF scrollbars exposed without shifting pages', async ({ page
 
 test('defaults a real PDF to fit width and refits bottom and resizable right reading widths', async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 1280, height: 900 });
+  // Set native scrollbar occupancy before the initial fit without changing the host's preferences.
+  await page.route('**/assets/app.css', async (route) => {
+    const response = await route.fetch();
+    const stylesheet = await response.text();
+    await route.fulfill({
+      response,
+      body: `${stylesheet}
+        .review-document .pdf-workspace__viewport::-webkit-scrollbar { width: 12px; height: 12px; }
+        .review-document .pdf-workspace__viewport::-webkit-scrollbar-thumb { background: #888; }`,
+    });
+  });
   await openFreshProductionFixture(page, referencePdf, 'Fit Width production launch failed');
-  // Exercise native scrollbar occupancy without changing the host's preferences.
-  await page.route('**/__test-scrollbar.css', (route) => route.fulfill({
-    contentType: 'text/css',
-    body: `.review-document .pdf-workspace__viewport::-webkit-scrollbar { width: 12px; height: 12px; }
-      .review-document .pdf-workspace__viewport::-webkit-scrollbar-thumb { background: #888; }`,
-  }));
-  await page.addStyleTag({ url: new URL('/__test-scrollbar.css', page.url()).href });
 
   const mainWorkspace = page.locator('.pdf-workspace:not(.pdf-workspace--reference)');
   const mainViewport = mainWorkspace.locator('[data-viewer-framing-viewport]');
@@ -5316,11 +5359,8 @@ test('defaults a real PDF to fit width and refits bottom and resizable right rea
     if (!viewportBounds || !pageBounds) throw new Error('Fit Width geometry is unavailable.');
     const intervalLeft = viewportBounds.x + clientBox.left;
     const clientRight = intervalLeft + clientBox.width;
-    const readingEdge = await mainWorkspace.evaluate((element) => ({
-      right: element.getBoundingClientRect().right,
-      margin: Number.parseFloat(getComputedStyle(element).getPropertyValue('--review-document-right-gap')),
-    }));
-    const intervalRight = Math.min(rightEdge ?? readingEdge.right - readingEdge.margin, clientRight);
+    const readingRight = await mainWorkspace.evaluate((element) => element.getBoundingClientRect().right);
+    const intervalRight = Math.min(rightEdge ?? readingRight, clientRight);
     return {
       pageWidth: pageBounds.width,
       intervalWidth: intervalRight - intervalLeft,
@@ -5333,7 +5373,7 @@ test('defaults a real PDF to fit width and refits bottom and resizable right rea
     };
   };
   const expectFitted = async (standardGap: number, rightEdge?: number) => {
-    const rightGap = rightEdge === undefined ? 0 : standardGap;
+    const rightGap = standardGap;
     await expect.poll(async () => {
       const geometry = await horizontalGeometry(rightEdge);
       return Math.max(
@@ -5348,7 +5388,7 @@ test('defaults a real PDF to fit width and refits bottom and resizable right rea
     return geometry;
   };
 
-  const standardGap = 52;
+  const standardGap = 10;
   const closedGeometry = await expectFitted(standardGap);
   const expectScrollbarAtWindowEdge = async () => {
     const zoomTrigger = page.getByRole('button', { name: 'Open zoom controls' });
@@ -5470,7 +5510,7 @@ test('defaults a real PDF to fit width and refits bottom and resizable right rea
   await openFreshProductionFixture(page, pdf, 'Annotation tray Fit Width launch failed');
   await expect(mainPage).toBeVisible();
   await waitForRenderedPageImage(mainPage);
-  await page.getByRole('button', { name: 'Show workspace' }).click();
+  await page.getByRole('button', { name: 'Show Workspace' }).click();
   const toolsWorkspace = page.locator('#review-tools-workspace');
   await expect(toolsWorkspace).toHaveAttribute('data-tools-workspace-open', 'true');
   await expect.poll(() => toolsWorkspace.evaluate((element) => getComputedStyle(element).transform))
@@ -5648,7 +5688,7 @@ test('refits opening workspaces only from fit width and preserves manual reading
   await expect(notePeek).toBeVisible();
   await expect(drawer).toBeHidden();
   expect(await viewport.evaluate((element) => element.scrollTop)).toBeCloseTo(markScrollBefore, 0);
-  await page.getByRole('button', { name: 'Show workspace' }).click();
+  await page.getByRole('button', { name: 'Show Workspace' }).click();
   await expect(drawer).toBeVisible();
   await expect(drawer).toHaveAttribute('data-workspace-presentation', 'bottom');
   await expect(notePeek).toHaveCount(0);
@@ -5751,14 +5791,14 @@ test('uses the same expanded review tree for a narrow VS Code embed launch', asy
     expect(bounds.y + bounds.height).toBeLessThanOrEqual(720);
   };
 
-  const undo = page.getByRole('button', { name: 'Undo' });
-  await expect(undo).toBeEnabled();
+  const historyTrigger = chrome.getByRole('button', { name: 'Open edit history' });
+  const historyMenu = page.getByRole('menu', { name: 'Edit history' });
   await chrome.hover({ position: { x: 2, y: 2 } });
-  await undo.click();
-  const redo = page.getByRole('button', { name: 'Redo' });
-  await expect(redo).toBeEnabled();
-  await chrome.hover({ position: { x: 2, y: 2 } });
-  await redo.click();
+  await historyTrigger.click();
+  await expectMenuInsideViewport(historyMenu);
+  await historyMenu.getByRole('menuitem', { name: 'Undo' }).click();
+  await historyMenu.getByRole('menuitem', { name: 'Redo' }).click();
+  await page.keyboard.press('Escape');
 
   const pageInput = page.getByRole('textbox', {
     name: 'Current page 1 of 4. Enter a page number',
@@ -6275,7 +6315,8 @@ test('copies only the focused Main or Reference selection and preserves DOM prec
   expect(await pasteNativeClipboard(page, pasteTarget)).toBe(referenceText);
 
   await reference.locator('.pdf-workspace__page[data-page-index="1"]').focus();
-  const closeReferences = page.getByRole('button', { name: 'Hide References' });
+  const closeReferences = page.locator('#review-workspace')
+    .getByRole('button', { name: 'Hide References', exact: true });
   await closeReferences.click();
   const openReferences = page.getByRole('button', { name: 'Show References' });
   await expect(openReferences).toHaveAttribute('aria-expanded', 'false');
@@ -6522,7 +6563,7 @@ test('revokes Reference copy authority across tab switch, Send to Main, and fina
     page.getByRole('button', { name: 'Close active reference' }),
   );
   await expect(page.locator('[data-reference-tab]')).toHaveCount(0);
-  const openReferences = page.getByRole('button', { name: 'Show workspace' });
+  const openReferences = page.getByRole('button', { name: 'Show Workspace' });
   await expect(openReferences).toBeFocused();
   expect(await dispatchClipboardCopy(openReferences)).toEqual({
     defaultPrevented: false,
@@ -6711,7 +6752,7 @@ test("selects Page Notes only until the next click outside annotations", async (
   });
   await expect(page.getByRole("menu", { name: "Page actions" })).toHaveCount(0);
   await expect(mark).toHaveAttribute("data-active", "false");
-  await expect(page.locator('[data-workspace-edge-rail][aria-expanded="true"]')).toHaveCount(0);
+  await expect(page.locator('[data-workspace-tray-toggle][aria-expanded="true"]')).toHaveCount(0);
 
   const markFocus = page.locator(`[data-owned-focus-id="${note!.id}"]`);
   if (browserName === "webkit") {
@@ -6723,7 +6764,7 @@ test("selects Page Notes only until the next click outside annotations", async (
     await page.mouse.click(markBox.x + markBox.width / 2, markBox.y + markBox.height / 2);
   }
   const row = page.locator(`[data-review-item="${note!.id}"]`);
-  const workspace = await currentWorkspaceRail(page);
+  const workspace = await currentWorkspaceToggle(page);
   await expect(mark).toHaveAttribute("data-active", "true");
   await expect(row).toHaveAttribute("data-active", "true");
   await expect(workspace).toHaveAttribute("aria-expanded", "false");

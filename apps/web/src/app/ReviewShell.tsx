@@ -96,7 +96,7 @@ import {
   type ReferenceReturnControlState,
   type ReferenceWorkspaceTab,
 } from '../review/ReferenceWorkspace.js';
-import { ReviewChrome } from '../review/ReviewChrome.js';
+import { ReviewChrome, type ReviewChromeTrayToggle } from '../review/ReviewChrome.js';
 import type { DocumentContextButtonProps } from '../review/DocumentContextButton.js';
 import { ReviewIcon } from '../review/ReviewIcon.js';
 import { OutlineAnnotationsWorkspace } from '../review/OutlineAnnotationsWorkspace.js';
@@ -105,7 +105,6 @@ import {
   OutlineExpansionToggleSlot,
 } from '../review/OutlineExpansionController.js';
 import { ReferenceResizeHandle } from '../review/ReferenceResizeHandle.js';
-import { WorkspaceEdgeRail } from '../review/WorkspaceEdgeRail.js';
 import {
   BOTTOM_REFERENCES_RAIL_FOCUS_TOKEN,
   MIN_BOTTOM_REFERENCE_HEIGHT,
@@ -446,16 +445,12 @@ export function referenceAccessAvailable(input: {
   return input.referencesAvailable && (!input.nestedLayerOpen || input.authoringActive);
 }
 
-export function shouldShowRightWorkspaceRail(input: {
-  readonly rightSurfaceOpen: boolean;
+export function shouldShowRightWorkspaceToggle(input: {
   readonly authoringActive: boolean;
   readonly referencesAvailable: boolean;
   readonly referenceDock: 'right' | 'bottom';
 }): boolean {
-  return !input.rightSurfaceOpen && (
-    !input.authoringActive
-    || (input.referencesAvailable && input.referenceDock === 'right')
-  );
+  return !input.authoringActive || (input.referencesAvailable && input.referenceDock === 'right');
 }
 
 export function ReviewShell(props: ReviewShellProps) {
@@ -588,8 +583,8 @@ export function ReviewShell(props: ReviewShellProps) {
     : authoringSession.workspace.activeItemId;
   const pageNoteTriggerRef = useRef<HTMLButtonElement>(null);
   const surfaceTriggersRef = useRef(new Map<ReviewBaseSurface, HTMLElement>());
-  const rightWorkspaceRailRef = useRef<HTMLButtonElement>(null);
-  const bottomWorkspaceRailRef = useRef<HTMLButtonElement>(null);
+  const rightWorkspaceToggleRef = useRef<HTMLButtonElement>(null);
+  const bottomWorkspaceToggleRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     const shell = shellRef.current;
     if (!horizontalScrollLocked || !shell) return;
@@ -712,9 +707,12 @@ export function ReviewShell(props: ReviewShellProps) {
       const willOpen = nextLayout.regime === 'narrow'
         ? nextLayout.narrowOpen : nextLayout.rightWorkspaceOpen;
       if (willOpen) {
-        // Read the closed reading frame before the disclosure changes its width.
-        openingWasFitToWidthRef.current = props.viewer.viewerNavigation?.getFitState?.().active
-          ?? props.viewer.viewerNavigation?.isFitToWidth?.() ?? false;
+        // Carry an in-flight fit over to the new reading width even if it
+        // has already zoomed away from the last completed fit.
+        const fitState = props.viewer.viewerNavigation?.getFitState?.();
+        openingWasFitToWidthRef.current = fitState
+          ? fitState.active || fitState.pending
+          : props.viewer.viewerNavigation?.isFitToWidth?.() ?? false;
       }
     }
 
@@ -1427,6 +1425,8 @@ export function ReviewShell(props: ReviewShellProps) {
       }
     }
     if (authoringSessionRef.current !== null && !editable) {
+      if (event.key === ' ' && event.target instanceof Element
+        && event.target.closest('button[data-workspace-tray-toggle]:enabled') !== null) return;
       inputController.clearDraft();
       if (
         event.key === 'Backspace'
@@ -1742,26 +1742,30 @@ export function ReviewShell(props: ReviewShellProps) {
     });
     return () => cancelAnimationFrame(frame);
   }, [props.accessibilityTransition?.token]);
+  const narrowWorkspace = effectiveReferenceLayout.kind === 'narrow-unified';
+  const referenceTraySurface = narrowWorkspace || effectiveReferenceLayout.referenceDock === 'bottom'
+    ? 'bottom' : 'right';
+  const workspaceTrayFocusToken = (tray: ReviewChromeTrayToggle['surface']) => tray === 'right'
+    ? RIGHT_WORKSPACE_RAIL_FOCUS_TOKEN : BOTTOM_REFERENCES_RAIL_FOCUS_TOKEN;
+  const focusWorkspaceTrayToggle = (tray: ReviewChromeTrayToggle['surface']) => {
+    const buttonRef = tray === 'right' ? rightWorkspaceToggleRef : bottomWorkspaceToggleRef;
+    requestAnimationFrame(() => buttonRef.current?.focus({ preventScroll: true }));
+  };
   const closeWorkspace = () => {
     workspaceFraming.commitUserPosition();
     cancelAnnotationRestoration();
     cancelReaderResume();
     dismissPageNoteAuthority();
     const closingReferences = effectiveWorkspaceMode === 'references';
-    const bottomRail = effectiveReferenceLayout.kind === 'narrow-unified'
-      || (closingReferences && effectiveReferenceLayout.referenceDock === 'bottom');
-    const focusReturnToken = bottomRail
-      ? BOTTOM_REFERENCES_RAIL_FOCUS_TOKEN
-      : RIGHT_WORKSPACE_RAIL_FOCUS_TOKEN;
-    dispatchSurface({ type: 'hide-workspace', focusReturnToken });
+    const tray = narrowWorkspace || closingReferences ? referenceTraySurface : 'right';
+    dispatchSurface({ type: 'hide-workspace', focusReturnToken: workspaceTrayFocusToken(tray) });
     dispatchReferenceLayout(effectiveReferenceLayout.kind === 'narrow-unified'
       ? { type: 'toggle-narrow-workspace' }
       : closingReferences
         ? { type: 'hide-references' }
         : { type: 'hide-right-workspace' });
     if (closingReferences) props.workspace.onWorkspaceDismiss?.();
-    requestAnimationFrame(() => (bottomRail ? bottomWorkspaceRailRef : rightWorkspaceRailRef)
-      .current?.focus({ preventScroll: true }));
+    focusWorkspaceTrayToggle(tray);
   };
   const workspaceFocusRequest = useRef(0);
   const focusWorkspaceModeAfterLayout = (mode: WorkspaceMode) => {
@@ -1785,6 +1789,73 @@ export function ReviewShell(props: ReviewShellProps) {
       if (target && isVisibleFocusTarget(target)) target.focus({ preventScroll: true });
     }));
   };
+  const hideWorkspaceTray = (tray: ReviewChromeTrayToggle['surface']) => {
+    workspaceFraming.commitUserPosition();
+    dismissPageNoteAuthority();
+    dispatchReferenceLayout(narrowWorkspace
+      ? { type: 'toggle-narrow-workspace' }
+      : tray === 'right' ? { type: 'hide-right-workspace' } : { type: 'hide-references' });
+    const otherTrayOpen = !narrowWorkspace && (tray === 'right'
+      ? effectiveReferenceLayout.bottomReferencesOpen : rightSurfaceOpen);
+    if (props.workspace.workspaceOpen === undefined && !otherTrayOpen) {
+      dispatchSurface({
+        type: 'hide-workspace',
+        focusReturnToken: workspaceTrayFocusToken(tray),
+      });
+    }
+    focusWorkspaceTrayToggle(tray);
+  };
+  const openWorkspaceTray = (action: ReferenceWorkspaceLayoutAction, mode: WorkspaceMode, selectMode = true) => {
+    workspaceFraming.commitUserPosition();
+    dismissPageNoteAuthority();
+    dispatchReferenceLayout(action);
+    if (selectMode) selectWorkspaceMode(mode);
+    focusWorkspaceModeAfterLayout(mode);
+  };
+  const authoringActive = authoringSession !== null;
+  const workspaceTrayTarget = authoringActive ? 'References' : 'Workspace';
+  const workspaceTrayMode = authoringActive ? 'references' : effectiveWorkspaceMode;
+  const sharedTrayShowsTarget = !authoringActive || effectiveWorkspaceMode === 'references';
+  const workspaceTrayToggles: ReviewChromeTrayToggle[] = [];
+  if (narrowWorkspace ? !authoringActive || referencesAvailable
+    : referencesAvailable && effectiveReferenceLayout.referenceDock === 'bottom') {
+    const open = referenceSurfaceOpen && (!narrowWorkspace || sharedTrayShowsTarget);
+    workspaceTrayToggles.push({
+      surface: 'bottom',
+      target: narrowWorkspace ? workspaceTrayTarget : 'References',
+      open,
+      controls: narrowWorkspace ? 'review-workspace review-tools-workspace' : 'review-workspace',
+      buttonRef: bottomWorkspaceToggleRef,
+      onToggle: open
+        ? () => hideWorkspaceTray('bottom')
+        : narrowWorkspace
+          ? () => openWorkspaceTray(
+            { type: authoringActive ? 'show-references' : 'toggle-narrow-workspace' }, workspaceTrayMode,
+          )
+          : () => openWorkspaceTray({ type: 'toggle-references' }, 'references', false),
+    });
+  }
+  if (!narrowWorkspace && shouldShowRightWorkspaceToggle({
+    authoringActive,
+    referencesAvailable,
+    referenceDock: effectiveReferenceLayout.referenceDock,
+  })) {
+    const open = rightSurfaceOpen && sharedTrayShowsTarget;
+    workspaceTrayToggles.push({
+      surface: 'right',
+      target: workspaceTrayTarget,
+      open,
+      controls: effectiveReferenceLayout.referenceDock === 'right' && referencesAvailable
+        ? 'review-workspace review-tools-workspace'
+        : 'review-tools-workspace',
+      buttonRef: rightWorkspaceToggleRef,
+      onToggle: open
+        ? () => hideWorkspaceTray('right')
+        : () => openWorkspaceTray(
+          { type: authoringActive ? 'show-references' : 'show-right-workspace' }, workspaceTrayMode,
+        ),
+    });
+  }
   const rememberWorkspaceModeFocus = (mode: WorkspaceMode, token: string) => {
     if (props.workspace.navigationState === undefined) {
       dispatchSurface({
@@ -2035,6 +2106,10 @@ export function ReviewShell(props: ReviewShellProps) {
         {...(props.save.savePhase === undefined ? {} : { savePhase: props.save.savePhase })}
         savePendingDestination={props.save.savePendingDestination ?? false}
         saveOptionsOpen={props.save.saveOptionsOpen ?? false}
+        workspaceTrayToggles={workspaceTrayToggles}
+        showReferencesShortcut={!authoringActive && commandSurface.snapshot.commands.some(
+          ({ id, enabled }) => id === 'open-references' && enabled,
+        )}
         onSaveOptions={() => commandSurface.invoke('save-options')}
         saveOptionsAvailable={props.save.onSaveOptions !== undefined}
         {...(documentActionsPresentation === undefined ? {} : {
@@ -2091,11 +2166,6 @@ export function ReviewShell(props: ReviewShellProps) {
         data-right-surface-open={rightSurfaceOpen ? 'true' : 'false'}
         data-bottom-surface-open={effectiveReferenceLayout.kind !== 'narrow-unified'
           && effectiveReferenceLayout.bottomReferencesOpen ? 'true' : 'false'}
-        data-right-rail-present={effectiveReferenceLayout.kind === 'narrow-unified' ? 'false' : 'true'}
-        data-bottom-rail-present={(
-          effectiveReferenceLayout.kind === 'narrow-unified'
-          || (referencesAvailable && effectiveReferenceLayout.referenceDock === 'bottom')
-        ) ? 'true' : 'false'}
         data-right-overlay={overlayFrame.geometry.rightStart === null ? 'false' : 'true'}
         data-bottom-overlay={overlayFrame.geometry.bottomStart === null ? 'false' : 'true'}
         data-scroll-top-fade={overlayFrame.geometry.fadeTop ? 'true' : 'false'}
@@ -2387,76 +2457,6 @@ export function ReviewShell(props: ReviewShellProps) {
           aria-hidden={props.save.saveOptionsOpen === true ? 'true' : undefined}
         >
           {authoringComposer}
-          {effectiveReferenceLayout.kind === 'narrow-unified' ? (
-            !referenceSurfaceOpen ? <WorkspaceEdgeRail
-              buttonRef={bottomWorkspaceRailRef}
-              surface="bottom"
-              target={authoringSession === null ? 'workspace' : 'References'}
-              open={referenceSurfaceOpen}
-              controls="review-workspace"
-              onToggle={() => {
-                workspaceFraming.commitUserPosition();
-                dismissPageNoteAuthority();
-                const opening = !effectiveReferenceLayout.open;
-                dispatchReferenceLayout({ type: 'toggle-narrow-workspace' });
-                if (opening) {
-                  const mode = authoringSessionRef.current === null
-                    ? effectiveWorkspaceMode
-                    : 'references';
-                  selectWorkspaceMode(mode);
-                  focusWorkspaceModeAfterLayout(mode);
-                }
-              }}
-            /> : null
-          ) : (
-            <>
-              {shouldShowRightWorkspaceRail({
-                rightSurfaceOpen,
-                authoringActive: authoringSession !== null,
-                referencesAvailable,
-                referenceDock: effectiveReferenceLayout.referenceDock,
-              }) ? <WorkspaceEdgeRail
-                buttonRef={rightWorkspaceRailRef}
-                surface="right"
-                target={authoringSession === null ? 'workspace' : 'References'}
-                open={rightSurfaceOpen}
-                controls={effectiveReferenceLayout.referenceDock === 'right' && referencesAvailable
-                  ? 'review-workspace review-tools-workspace'
-                  : 'review-tools-workspace'}
-                onToggle={() => {
-                  workspaceFraming.commitUserPosition();
-                  dismissPageNoteAuthority();
-                  const opening = !rightSurfaceOpen;
-                  dispatchReferenceLayout(authoringSessionRef.current === null
-                    ? { type: 'toggle-right-workspace' }
-                    : { type: 'show-references' });
-                  if (opening) {
-                    const mode = authoringSessionRef.current === null
-                      ? effectiveWorkspaceMode
-                      : 'references';
-                    selectWorkspaceMode(mode);
-                    focusWorkspaceModeAfterLayout(mode);
-                  }
-                }}
-              /> : null}
-              {referencesAvailable
-                && effectiveReferenceLayout.referenceDock === 'bottom'
-                && !effectiveReferenceLayout.bottomReferencesOpen ? <WorkspaceEdgeRail
-                buttonRef={bottomWorkspaceRailRef}
-                surface="bottom"
-                target="References"
-                open={effectiveReferenceLayout.bottomReferencesOpen}
-                controls="review-workspace"
-                onToggle={() => {
-                  workspaceFraming.commitUserPosition();
-                  dismissPageNoteAuthority();
-                  const opening = !effectiveReferenceLayout.bottomReferencesOpen;
-                  dispatchReferenceLayout({ type: 'toggle-references' });
-                  if (opening) focusWorkspaceModeAfterLayout('references');
-                }}
-              /> : null}
-            </>
-          )}
           <OutlineExpansionProvider discovery={visibleOutlineDiscovery}>
           <ReferenceWorkspace
             workspaceRef={workspaceFraming.referenceSurfaceRef}
@@ -2490,21 +2490,9 @@ export function ReviewShell(props: ReviewShellProps) {
             {...(props.workspace.referenceReturn === undefined ? {} : { referenceReturn: props.workspace.referenceReturn })}
             announcement={props.workspace.navigationAnnouncement ?? announcement}
             onModeChange={selectWorkspaceMode}
-            onHide={() => {
-              workspaceFraming.commitUserPosition();
-              if (effectiveReferenceLayout.kind === 'narrow-unified') {
-                dispatchReferenceLayout({ type: 'toggle-narrow-workspace' });
-                requestAnimationFrame(() => bottomWorkspaceRailRef.current?.focus({ preventScroll: true }));
-              } else if (effectiveReferenceLayout.referenceDock === 'bottom') {
-                dispatchReferenceLayout({ type: 'hide-references' });
-                requestAnimationFrame(() => bottomWorkspaceRailRef.current?.focus({ preventScroll: true }));
-              } else {
-                dispatchReferenceLayout({ type: 'hide-right-workspace' });
-                requestAnimationFrame(() => rightWorkspaceRailRef.current?.focus({ preventScroll: true }));
-              }
-            }}
+            onHide={() => hideWorkspaceTray(referenceTraySurface)}
             hideLabel={effectiveReferenceLayout.kind === 'narrow-unified'
-              ? 'Hide workspace'
+              ? 'Hide Workspace'
               : 'Hide References'}
             onReferenceTabActivate={(identity) => {
               props.workspace.onReferenceTabActivate?.(identity);
@@ -2517,10 +2505,7 @@ export function ReviewShell(props: ReviewShellProps) {
                   action: {
                     type: 'close-reference',
                     targetIdentity: identity,
-                    focusReturnToken: effectiveReferenceLayout.kind === 'narrow-unified'
-                      || effectiveReferenceLayout.referenceDock === 'bottom'
-                      ? BOTTOM_REFERENCES_RAIL_FOCUS_TOKEN
-                      : RIGHT_WORKSPACE_RAIL_FOCUS_TOKEN,
+                    focusReturnToken: workspaceTrayFocusToken(referenceTraySurface),
                   },
                 });
               }
@@ -2562,12 +2547,8 @@ export function ReviewShell(props: ReviewShellProps) {
               </>
             )}
             onModeChange={selectWorkspaceMode}
-            onHide={() => {
-              workspaceFraming.commitUserPosition();
-              dispatchReferenceLayout({ type: 'hide-right-workspace' });
-              requestAnimationFrame(() => rightWorkspaceRailRef.current?.focus({ preventScroll: true }));
-            }}
-            hideLabel="Hide workspace"
+            onHide={() => hideWorkspaceTray(effectiveReferenceLayout.kind === 'narrow-unified' ? 'bottom' : 'right')}
+            hideLabel="Hide Workspace"
             onOutlineActivate={(item) => {
               if (authoringSessionRef.current === null) props.workspace.onOutlineActivate?.(item);
             }}

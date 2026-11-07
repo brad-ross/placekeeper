@@ -345,7 +345,7 @@ test('clicked PDF popup persists and discloses actions over its page number only
 
 test('PDF hover gives the matching workspace card its normal hover appearance', async ({ page }) => {
   const { pdfPage } = await fixture(page);
-  await page.getByRole('button', { name: 'Show workspace', exact: true }).click();
+  await page.getByRole('button', { name: 'Show Workspace', exact: true }).click();
   await page.getByRole('tab', { name: 'Annotations', exact: true }).click();
   const mark = pdfPage.locator('[data-owned-mark="highlight"][data-has-attached-text="true"]');
   const id = await mark.getAttribute('data-review-id');
@@ -366,7 +366,7 @@ for (const width of [1280, 620]) {
   test(`hover preview avoids a non-annotation workspace at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 950 });
     const { pdfPage } = await fixture(page);
-    await page.getByRole('button', { name: 'Show workspace', exact: true }).click();
+    await page.getByRole('button', { name: 'Show Workspace', exact: true }).click();
     await page.getByRole('tab', { name: 'Search', exact: true }).click();
     const mark = pdfPage.locator('[data-owned-mark="highlight"][data-has-attached-text="true"]');
     await mark.scrollIntoViewIfNeeded();

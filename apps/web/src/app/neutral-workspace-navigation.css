@@ -114,21 +114,6 @@
   margin-bottom: 12px;
 }
 
-.workspace-edge-rail {
-  width: 32px;
-  min-width: 32px;
-  min-height: 32px;
-  padding: 0;
-  border: 0;
-  border-radius: 10px;
-  color: var(--pk-ink);
-  background: transparent;
-  box-shadow: none;
-}
-
-.workspace-edge-rail:hover { color: var(--pk-ink); background: var(--pk-hover); }
-.workspace-edge-rail__glyph { border: 0; background: transparent; box-shadow: none; }
-
 .reference-resize-handle::after {
   border-radius: 999px;
   background: #aaa;

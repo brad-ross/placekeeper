@@ -23,6 +23,7 @@ import {
   referenceReturnForActiveTab,
 } from "../review/reference-presentation.js";
 import { firstUnresolvedReviewItemId, canonicalStateSupersedes } from "../review/canonical-state.js";
+import { isVisibleFocusTarget } from '../review/focus-target.js';
 import {
   viewerAssetUrlsEqual,
   viewerResourcePoliciesEqual,
@@ -1132,9 +1133,19 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
               layout,
               navigationStateRef.current.tabs.length > 0,
             );
-            productionRootRef.current
-              ?.querySelector<HTMLButtonElement>(`[data-workspace-edge-rail="${surface}"]`)
-              ?.focus({ preventScroll: true });
+            const root = productionRootRef.current;
+            const toggle = root?.querySelector<HTMLButtonElement>(`[data-workspace-tray-toggle="${surface}"]`);
+            if (isVisibleFocusTarget(toggle)) {
+              toggle.focus({ preventScroll: true });
+              return;
+            }
+            if (!authoringActiveRef.current) return;
+            const composer = root?.querySelector<HTMLElement>('[data-comment-composer]');
+            const editor = composer?.querySelector<HTMLElement>('textarea');
+            const target = isVisibleFocusTarget(editor)
+              ? editor
+              : composer?.querySelector<HTMLElement>('.comment-composer__resume');
+            if (isVisibleFocusTarget(target)) target.focus({ preventScroll: true });
           });
           return true;
         },

@@ -64,7 +64,7 @@ async function openFocusedReattachment(
   const openAttribute = viewport.width < 900 ? 'data-workspace-open' : 'data-tools-workspace-open';
   if (await workspace.getAttribute(openAttribute) !== 'true') {
     await page.getByRole('button', {
-      name: 'Show workspace',
+      name: 'Show Workspace',
     }).click();
   }
   const annotations = page.getByRole('tab', { name: 'Annotations', exact: true });
@@ -393,7 +393,7 @@ async function openOutlineScene(
   const product = await openScene(page, 'outline', viewport);
   const workspace = page.locator('#review-tools-workspace');
   if (viewport.width <= 760 && await page.locator('#review-workspace').getAttribute('data-workspace-open') !== 'true') {
-    await page.getByRole('button', { name: 'Show workspace' }).click();
+    await page.getByRole('button', { name: 'Show Workspace' }).click();
   }
   const outlineTab = page.getByRole('tab', { name: 'Outline', exact: true });
   if (await outlineTab.getAttribute('aria-selected') !== 'true') await outlineTab.click();
@@ -556,7 +556,7 @@ test('narrow responsive top-bar menu', async ({ page }) => {
   await openScene(page, 'reading', { width: 390, height: 720 });
   const chrome = page.locator('[data-review-chrome]');
   await expect(chrome).toHaveCSS('height', '50px');
-  await expect(chrome).toHaveAttribute('data-review-chrome-presentation', 'expanded');
+  await expect(chrome.getByRole('group', { name: 'Workspace trays' })).toBeVisible();
   await page.getByRole('button', {
     name: 'Page 4 of 128. Open page navigation',
   }).click();
@@ -613,15 +613,16 @@ test('installed real PDF reading', async ({ page }) => {
 test('wide Annotation Tray', async ({ page }) => {
   const product = await openScene(page, 'tray');
   await expect(page.locator('#review-tools-workspace')).toHaveAttribute('data-workspace-presentation', 'right');
-  const railBox = await page.getByRole('button', { name: 'Hide workspace' }).boundingBox();
+  const hideBox = await page.locator('#review-tools-workspace')
+    .getByRole('button', { name: 'Hide Workspace', exact: true }).boundingBox();
   const modesBox = await page.getByRole('tablist', { name: 'Workspace modes' }).boundingBox();
   const headerBox = await page.locator('.review-workspace__header').boundingBox();
   const stripBox = await page.locator('.review-workspace__activity-strip').boundingBox();
-  if (!railBox || !modesBox || !headerBox || !stripBox) {
+  if (!hideBox || !modesBox || !headerBox || !stripBox) {
     throw new Error('Workspace navigation geometry is unavailable.');
   }
   expect(Math.abs(
-    railBox.y + railBox.height / 2 - (modesBox.y + modesBox.height / 2),
+    hideBox.y + hideBox.height / 2 - (modesBox.y + modesBox.height / 2),
   )).toBeLessThanOrEqual(8);
   expect(stripBox.x).toBeGreaterThanOrEqual(headerBox.x);
   expect(stripBox.y).toBeGreaterThanOrEqual(headerBox.y);
@@ -719,6 +720,15 @@ test('task-first generated Annotation Tray and blocked document menu', async ({ 
 test('height-constrained generated Annotation Tray stays contained', async ({ page }) => {
   const viewport = { width: 320, height: 560 };
   const product = await openScene(page, 'tray&reconciliation=mixed', viewport);
+  expect(await page.evaluate(() => matchMedia('(pointer: fine)').matches)).toBe(true);
+  for (const surface of ['[data-review-chrome]', '[data-review-stage]']) {
+    const { left, right } = await page.locator(surface).evaluate((element) => {
+      const bounds = element.getBoundingClientRect();
+      return { left: bounds.left, right: bounds.right };
+    });
+    expect(left).toBeGreaterThanOrEqual(0);
+    expect(right).toBeLessThanOrEqual(viewport.width);
+  }
   await expect(page.locator('#review-workspace')).toHaveAttribute('data-workspace-open', 'true');
   const annotations = page.getByRole('tab', { name: 'Annotations', exact: true });
   if (await annotations.getAttribute('aria-selected') !== 'true') await annotations.click();
@@ -975,7 +985,7 @@ test('wide bottom References tray', async ({ page }) => {
 test('wide coordinated References and tools trays', async ({ page }) => {
   const product = await openScene(page, 'reference-layout');
   await page.getByRole('button', { name: 'Show References' }).click();
-  await page.getByRole('button', { name: 'Show workspace' }).click();
+  await page.getByRole('button', { name: 'Show Workspace' }).click();
   await expect(page.locator('[data-review-stage]')).toHaveAttribute('data-reference-layout', 'wide-split');
   await expect(page.locator('#review-tools-workspace')).toBeVisible();
   await expectCompoundReferenceTabs(page, 'vertical');
@@ -1040,7 +1050,7 @@ test('reference-layout reference tab selectors remain interactive', async ({ pag
 
 test('narrow unified References tray', async ({ page }) => {
   const product = await openScene(page, 'reference-layout', { width: 760, height: 900 });
-  await page.getByRole('button', { name: 'Show workspace' }).click();
+  await page.getByRole('button', { name: 'Show Workspace' }).click();
   await page.getByRole('tab', { name: 'References', exact: true }).click();
   await expect(page.locator('[data-review-stage]')).toHaveAttribute('data-reference-layout', 'narrow-unified');
   await expect(page.getByRole('tab', { name: 'References', exact: true })).toHaveAttribute('aria-selected', 'true');
@@ -1077,7 +1087,7 @@ for (const scene of [
     snapshot: 'narrow-reference-return.png',
     viewport: { width: 760, height: 900 },
     prepare: async (page: Page) => {
-      await page.getByRole('button', { name: 'Show workspace' }).click();
+      await page.getByRole('button', { name: 'Show Workspace' }).click();
       await page.getByRole('tab', { name: 'References', exact: true }).click();
       await expect(page.locator('[data-review-stage]'))
         .toHaveAttribute('data-reference-layout', 'narrow-unified');

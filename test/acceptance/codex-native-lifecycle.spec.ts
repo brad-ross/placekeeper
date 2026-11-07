@@ -22,7 +22,7 @@ test('test MCP bridge composes protected work, delayed save, peer replacement, r
   };
   try {
     const owner = await bridge.panel(page), peer = await bridge.panel(peerPage);
-    await peerPage.getByRole('button', { name: 'Show workspace' }).click();
+    await peerPage.getByRole('button', { name: 'Show Workspace' }).click();
     await peerPage.getByRole('tab', { name: 'Annotations', exact: true }).click();
     await page.getByRole('button', { name: /Open automatic save options$/u }).click();
     const destination = page.getByRole('dialog', { name: 'Choose Where to Save Annotations' });
