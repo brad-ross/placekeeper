@@ -15,6 +15,9 @@ test('packaged candidate renders and activates a real PDF without system Node', 
       } }).windowControlsOverlay;
       const chrome = document.querySelector<HTMLElement>('[data-review-chrome]')!;
       const bounds = chrome.getBoundingClientRect();
+      const shell = chrome.closest<HTMLElement>('.electron-review-shell')!;
+      const macOS = shell.dataset.nativePlatform === 'darwin';
+      const interfaceScale = Number(getComputedStyle(shell).getPropertyValue('--electron-interface-scale')) || 1;
       const safe = overlay?.getTitlebarAreaRect();
       const identity = chrome.querySelector<HTMLElement>('.review-chrome__identity')!.getBoundingClientRect();
       const navigation = chrome.querySelector<HTMLElement>('.review-chrome__left-controls')!.getBoundingClientRect();
@@ -23,10 +26,10 @@ test('packaged candidate renders and activates a real PDF without system Node', 
       return {
         nativeControlsVisible: overlay?.visible === true,
         top: bounds.top, height: bounds.height,
-        nativeHeight: safe?.height ?? 0,
+        expectedHeight: macOS ? 52 : Math.max(52, safe?.height ?? 0),
         filenameGap: navigation.left - identity.right,
         leadingInset: identity.left,
-        expectedLeadingInset: Math.max(16, safe?.left ?? 0),
+        expectedLeadingInset: macOS ? 32 + 60 / interfaceScale : Math.max(16, safe?.left ?? 0),
         controlsInsideSafeArea: Boolean(safe) && controls.every(element => {
           const rect = element.getBoundingClientRect();
           return rect.left >= safe!.left && rect.right <= safe!.right;
@@ -42,7 +45,7 @@ test('packaged candidate renders and activates a real PDF without system Node', 
     await expect.poll(titlebarGeometry).toMatchObject({ nativeControlsVisible: true, top: 0,
       filenameGap: 10, controlsInsideSafeArea: true, drag: 'drag', inputsClickable: true });
     const spacing = await titlebarGeometry();
-    expect(spacing.height).toBe(Math.max(52, spacing.nativeHeight));
+    expect(spacing.height).toBe(spacing.expectedHeight);
     expect(spacing.leadingInset).toBe(spacing.expectedLeadingInset);
     // Native hit testing includes the spaces between controls in each group.
     expect(spacing.controlGroups).toEqual([

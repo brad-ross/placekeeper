@@ -57,7 +57,10 @@ test('packaged consented upgrade exits naturally with the final composer input a
     credentials = { attemptId: preview.attemptId, token: preview.token, candidate: preview.candidate };
     expect(preview.participants.some(p => p.id.startsWith('app:'))).toBe(true);
     await prepare({ operation: 'begin', credentials, consent: true });
-    await expect.poll(async () => (await prepare({ operation: 'status', credentials: credentials! })).phase, { timeout: 20_000 }).toBe('ready');
+    await expect.poll(async () => {
+      const { phase, reason } = await prepare({ operation: 'status', credentials: credentials! });
+      return { phase, reason };
+    }, { timeout: 20_000 }).toMatchObject({ phase: 'ready' });
     const ready = await prepare({ operation: 'status', credentials });
     expect(ready.participants.every(p => p.acknowledged)).toBe(true);
     const snapshot = await inspectProtectedDraft(join(candidate.root, 'recovery', sessionId));
