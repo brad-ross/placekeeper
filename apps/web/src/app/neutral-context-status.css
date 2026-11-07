@@ -143,12 +143,32 @@
 }
 
 .destination-snippet[data-snippet-status="ready"] {
-  background: #fff;
+  background: var(--pk-canvas);
+  overflow: auto;
+  overflow-anchor: none;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+  pointer-events: auto;
+  cursor: grab;
+}
+
+.destination-snippet[data-snippet-status="ready"]:active {
+  cursor: grabbing;
+}
+
+.destination-snippet:focus-visible {
+  outline: 2px solid var(--pk-focus);
+  outline-offset: -2px;
+}
+
+.destination-snippet__stack {
+  position: relative;
 }
 
 .destination-snippet__canvas {
-  position: relative;
-  width: 100%;
+  position: absolute;
+  left: 0;
+  background: #fff;
 }
 
 .destination-snippet__image {

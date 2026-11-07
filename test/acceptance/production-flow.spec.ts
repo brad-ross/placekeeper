@@ -1541,10 +1541,9 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
   await expect(primaryMenu).toBeVisible();
   await expect(primaryMenu.getByRole("menuitem", { name: /Open in References/u })).toBeFocused();
   await expect(primaryMenu.getByRole("menuitem")).toHaveCount(2);
-  // R3/R4: a fixed-height destination snippet sits above text-labeled actions.
+  // A fixed-height destination preview sits above the action row.
   const primarySnippet = primaryMenu.locator("[data-destination-snippet]");
   await expect(primarySnippet).toHaveCount(1);
-  await expect(primarySnippet).toHaveAttribute("aria-hidden", "true");
   await expect(primaryMenu.locator("[role='menuitem'] svg")).toHaveCount(2);
   await expect(primaryMenu.getByRole("menuitem").first()).toHaveAttribute("aria-label", "Open in References");
   await expect(primaryMenu.getByRole("menuitem").nth(1)).toHaveAttribute("aria-label", "Open in main document");
@@ -1573,6 +1572,7 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
   await expect(primarySnippet).toHaveAttribute("data-snippet-status", "ready", {
     timeout: REFERENCE_READY_TIMEOUT_MS,
   });
+  await expect(primaryMenu.getByRole("region", { name: "Reference preview" })).toBeVisible();
   expect((await page.locator("[data-link-action-popover]").boundingBox())!.height)
     .toBe(popoverBounds!.height);
   expect(menuBounds!.x).toBeGreaterThanOrEqual(0);

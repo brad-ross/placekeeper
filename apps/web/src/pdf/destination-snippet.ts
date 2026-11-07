@@ -12,7 +12,7 @@ import { subscribeNativeImage } from './HostRenderLayer.js';
 /*
  * Link-menu destination snippet (R3, R6; KTD3, KTD11).
  *
- * The snippet is a region render of the destination page, not a second viewer.
+ * The snippet renders page rasters as the reader scrolls.
  * Regions and extents are in page device space (top-left origin, crop-relative
  * PDF points), the same space as the destination description.
  */
@@ -32,17 +32,22 @@ const LEADING_MARGIN = 8;
 /** Share of the strip kept above the extent as leading context. */
 const LEADING_CONTEXT = 0.3;
 const MAX_DEVICE_PIXEL_RATIO = 2;
+const MAX_RASTER_EDGE = 2048;
 
 export interface DestinationSnippetImage {
   readonly nativeImage?: true;
   readonly blob: Blob;
   /** The page region the image shows. */
   readonly region: Rect;
+  /** The crop shown before the reader pans. */
+  readonly initialRegion: Rect;
+  readonly pageSizes: readonly Size[];
 }
 
 export type DestinationSnippetRenderer = (
   description: PdfDestinationDescription,
   signal: AbortSignal,
+  pageIndex?: number,
 ) => Promise<DestinationSnippetImage | null>;
 
 function clamp(value: number, minimum: number, maximum: number): number {
@@ -118,7 +123,7 @@ export function destinationSnippetOverlay(
   return boxes;
 }
 
-/** Region-renders destination strips from the main document's engine. */
+/** Renders one preview page at the destination's scale. */
 export function createEngineDestinationSnippetRenderer(options: {
   readonly resourceHost?: import('./embedpdf-viewer.js').ViewerResourcePolicy['host'];
   readonly engine: PdfEngine;
@@ -128,25 +133,34 @@ export function createEngineDestinationSnippetRenderer(options: {
   readonly devicePixelRatio?: number;
 }): DestinationSnippetRenderer {
   const cssWidth = options.cssWidth ?? DESTINATION_SNIPPET_CSS_WIDTH;
-  return async (description, signal) => {
+  const pageSizes = options.document.pages.map(({ size }) => size);
+  return async (description, signal, pageIndex = description.pageIndex) => {
     if (signal.aborted || description.documentGeneration !== options.documentGeneration) return null;
-    const page = options.document.pages[description.pageIndex];
-    if (page === undefined || page.size.width <= 0 || page.size.height <= 0) return null;
-    const region = destinationSnippetRegion(description, page.size, DESTINATION_SNIPPET_ASPECT, cssWidth);
+    const page = options.document.pages[pageIndex];
+    const target = pageSizes[description.pageIndex];
+    if (!page || page.size.width <= 0 || page.size.height <= 0 || !target || target.width <= 0 || target.height <= 0) return null;
+    const initialRegion = destinationSnippetRegion(description, target, DESTINATION_SNIPPET_ASPECT, cssWidth);
+    const region = { origin: { x: 0, y: 0 }, size: page.size };
     const dpr = clamp(
       options.devicePixelRatio ?? globalThis.devicePixelRatio ?? 1,
       1,
       MAX_DEVICE_PIXEL_RATIO,
     );
     const task = options.engine.renderPageRect(options.document, page, region, {
-      scaleFactor: cssWidth / region.size.width,
+      scaleFactor: Math.min(
+        cssWidth / initialRegion.size.width,
+        MAX_RASTER_EDGE / (Math.max(page.size.width, page.size.height) * dpr),
+      ),
       dpr,
     });
     const abort = () => task.abort({ code: PdfErrorCode.Cancelled, message: 'Destination snippet cancelled' });
     signal.addEventListener('abort', abort, { once: true });
     try {
       const blob = await task.toPromise();
-      return signal.aborted ? null : { blob, region, ...(options.resourceHost === 'codex' ? { nativeImage: true as const } : {}) };
+      return signal.aborted ? null : {
+        blob, region, initialRegion, pageSizes,
+        ...(options.resourceHost === 'codex' ? { nativeImage: true as const } : {}),
+      };
     } catch {
       return null;
     } finally {
@@ -157,16 +171,17 @@ export function createEngineDestinationSnippetRenderer(options: {
 
 export type DestinationSnippetImageState =
   | { readonly status: 'idle' | 'loading' | 'failed' }
-  | { readonly status: 'ready'; readonly url: string; readonly region: Rect };
+  | ({ readonly status: 'ready'; readonly url: string }
+    & Pick<DestinationSnippetImage, 'region' | 'initialRegion' | 'pageSizes'>);
 
 export interface DestinationSnippetSession {
   /** Starts rendering a description, cancelling and revoking any previous one. */
-  load(description: PdfDestinationDescription | null): void;
+  load(description: PdfDestinationDescription | null, pageIndex?: number): void;
   /** Cancels any render and revokes the current object URL. */
   dispose(): void;
 }
 
-/** Owns one menu's snippet render and object URL lifetime. */
+/** Owns one preview page's render and object URL lifetime. */
 export function createDestinationSnippetSession(options: {
   readonly render: DestinationSnippetRenderer;
   readonly onChange: (state: DestinationSnippetImageState) => void;
@@ -187,7 +202,7 @@ export function createDestinationSnippetSession(options: {
     url = null;
   };
   return {
-    load(description) {
+    load(description, pageIndex) {
       release();
       if (description === null) {
         options.onChange({ status: 'idle' });
@@ -198,7 +213,7 @@ export function createDestinationSnippetSession(options: {
       options.onChange({ status: 'loading' });
       let rendered: Promise<DestinationSnippetImage | null>;
       try {
-        rendered = options.render(description, current.signal);
+        rendered = options.render(description, current.signal, pageIndex);
       } catch {
         rendered = Promise.resolve(null);
       }
@@ -211,7 +226,8 @@ export function createDestinationSnippetSession(options: {
         const publish = (imageUrl: string) => {
           if (current.signal.aborted || controller !== current) return;
           url = imageUrl;
-          options.onChange({ status: 'ready', url, region: image.region });
+          const { region, initialRegion, pageSizes } = image;
+          options.onChange({ status: 'ready', url, region, initialRegion, pageSizes });
         };
         if (image.nativeImage) releaseImage = subscribeNativeImage(image.blob, publish, undefined, () => {
           if (!current.signal.aborted && controller === current) options.onChange({ status: 'failed' });

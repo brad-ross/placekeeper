@@ -15,6 +15,7 @@ import { createPortal } from 'react-dom';
 
 export const REVIEW_TOOLTIP_HOVER_DELAY_MS = 600;
 const TOOLTIP_MARGIN = 6;
+const MENU_SURFACE_SELECTOR = '.top-bar-menu__surface, .link-action-popover__surface';
 
 // Programmatic menu focus inherits the input that opened the menu. WebKit can
 // report :focus-visible for that focus even after a pointer click.
@@ -118,7 +119,7 @@ export const ReviewTooltipButton = forwardRef<HTMLButtonElement, ReviewTooltipBu
       surface.showPopover?.();
       const anchor = button.getBoundingClientRect();
       // Menus keep tooltips below them so a tip never covers the menu's content.
-      const menu = button.closest('.top-bar-menu__surface, .link-action-popover__surface');
+      const menu = button.closest(MENU_SURFACE_SELECTOR);
       const placementAnchor = menu?.getBoundingClientRect() ?? anchor;
       const bounds = surface.getBoundingClientRect();
       const viewportWidth = globalThis.visualViewport?.width ?? document.documentElement.clientWidth;
@@ -139,13 +140,22 @@ export const ReviewTooltipButton = forwardRef<HTMLButtonElement, ReviewTooltipBu
     useEffect(() => {
       if (!visible) return;
       const dismissForViewportChange = () => setVisible(false);
+      const dismissForScroll = (event: Event) => {
+        const button = buttonRef.current;
+        const scroller = event.target;
+        // A sibling scroll inside a menu (such as the reference preview)
+        // leaves the tooltip anchor in place.
+        if (button && scroller instanceof Element && !scroller.contains(button)
+          && button.closest(MENU_SURFACE_SELECTOR)?.contains(scroller)) return;
+        dismissForViewportChange();
+      };
       window.addEventListener('resize', dismissForViewportChange);
-      document.addEventListener('scroll', dismissForViewportChange, true);
+      document.addEventListener('scroll', dismissForScroll, true);
       globalThis.visualViewport?.addEventListener('resize', dismissForViewportChange);
       globalThis.visualViewport?.addEventListener('scroll', dismissForViewportChange);
       return () => {
         window.removeEventListener('resize', dismissForViewportChange);
-        document.removeEventListener('scroll', dismissForViewportChange, true);
+        document.removeEventListener('scroll', dismissForScroll, true);
         globalThis.visualViewport?.removeEventListener('resize', dismissForViewportChange);
         globalThis.visualViewport?.removeEventListener('scroll', dismissForViewportChange);
       };

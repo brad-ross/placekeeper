@@ -68,9 +68,13 @@ async function freshCopy(source: string): Promise<string> {
 async function openFixture(
   page: Page,
   source: string,
-  options: { readonly generatedOutput?: boolean; readonly pageNote?: boolean } = {},
+  options: {
+    readonly generatedOutput?: boolean;
+    readonly pageNote?: boolean;
+    readonly viewport?: { readonly width: number; readonly height: number };
+  } = {},
 ): Promise<{ readonly sessionId: string }> {
-  await page.setViewportSize(WIDE);
+  await page.setViewportSize(options.viewport ?? WIDE);
   const launched = await host.open({
     pdfPath: await freshCopy(source),
     sourceRootPath: sourceRoot,
@@ -237,6 +241,58 @@ test("Covers AE1. a split citation previews its bibliography entry, names its ta
     animations: "disabled",
   });
 
+  const returnToReference = menu.getByRole("menuitem", { name: "Return to reference" });
+  const previewOffset = () => snippet.evaluate((element) => [element.scrollLeft, element.scrollTop]);
+  const initialOffset = await previewOffset();
+  const mainViewport = mainWorkspace(page).locator("[data-viewer-framing-viewport]");
+  const mainScrollTop = await mainViewport.evaluate((element) => element.scrollTop);
+  await expect(returnToReference).toHaveCount(0);
+  await snippet.hover();
+  await page.mouse.wheel(60, 90);
+  await expect(returnToReference).toBeVisible();
+  expect((await previewOffset())[0]).toBeGreaterThan(initialOffset[0]!);
+  expect((await previewOffset())[1]).toBeGreaterThan(initialOffset[1]!);
+  expect((await returnToReference.boundingBox())!.y).toBeGreaterThan(snippetBox!.y + snippetBox!.height);
+  await returnToReference.press("Enter");
+  await expect(returnToReference).toHaveCount(0);
+  await expect.poll(previewOffset).toEqual(initialOffset);
+  await expect(items.first()).toBeFocused();
+  expect(await mainViewport.evaluate((element) => element.scrollTop)).toBe(mainScrollTop);
+
+  const center = { x: snippetBox!.x + snippetBox!.width / 2, y: snippetBox!.y + snippetBox!.height / 2 };
+  await page.mouse.move(center.x, center.y);
+  await page.mouse.down();
+  await page.mouse.move(center.x - 40, center.y - 40);
+  await page.mouse.up();
+  await expect(returnToReference).toBeVisible();
+  await page.mouse.move(center.x - 40, center.y - 40);
+  await page.mouse.down();
+  await page.mouse.move(center.x, center.y);
+  await page.mouse.up();
+  await expect(returnToReference).toHaveCount(0);
+  await expect.poll(previewOffset).toEqual(initialOffset);
+
+  const targetPage = snippet.locator('[data-snippet-page-index="3"]');
+  const distanceToNextPage = await targetPage.evaluate((element) =>
+    element.getBoundingClientRect().bottom - element.closest('[data-destination-snippet]')!.getBoundingClientRect().top);
+  await snippet.hover();
+  await page.mouse.wheel(0, distanceToNextPage + 24);
+  await expect(snippet.locator('[data-snippet-page-index="4"] img')).toBeInViewport();
+  await snippet.press("End");
+  const lastPageImage = snippet.locator('[data-snippet-page-index="5"] img');
+  await expect(lastPageImage).toBeInViewport();
+  await expect.poll(() => lastPageImage.evaluate((image: HTMLImageElement) => image.naturalWidth)).toBeGreaterThan(0);
+  await expect(returnToReference).toBeVisible();
+  await snippet.press("Home");
+  const firstPageImage = snippet.locator('[data-snippet-page-index="0"] img');
+  await expect(firstPageImage).toBeInViewport();
+  await expect.poll(() => firstPageImage.evaluate((image: HTMLImageElement) => image.naturalWidth)).toBeGreaterThan(0);
+  await returnToReference.press("Enter");
+  await expect(returnToReference).toHaveCount(0);
+  await expect.poll(previewOffset).toEqual(initialOffset);
+  await expect(extent.first()).toBeInViewport();
+  expect(await mainViewport.evaluate((element) => element.scrollTop)).toBe(mainScrollTop);
+
   const tab = await chooseOpenInReferences(page, menu, `${AGARWAL}, Page 4`);
   await expect(tab).toHaveAttribute("aria-label", `${AGARWAL}, Page 4`);
 
@@ -307,11 +363,25 @@ test("Covers AE4. the main-reader band clears once scrolled fully out of view an
 });
 
 test("Covers AE5. a null-top link previews the top of its page with no highlight and no band", async ({ page }) => {
-  await openFixture(page, outlinedPdf);
+  await openFixture(page, outlinedPdf, { viewport: { width: 480, height: 800 } });
   const menu = await openLinkMenu(page, bodyLink(page, 5), 5);
   const snippet = await expectSnippetReady(menu);
   await expect(menu.locator(".link-action-popover__page")).toHaveText("5");
   await expect(snippet.locator("[data-destination-snippet-extent]")).toHaveCount(0);
+  const scrollTop = () => snippet.evaluate((element) => element.scrollTop);
+  const initialScrollTop = await scrollTop();
+  const targetPage = snippet.locator('[data-snippet-page-index="4"]');
+  await expect.poll(async () => {
+    const [targetBounds, previewBounds] = await Promise.all([targetPage.boundingBox(), snippet.boundingBox()]);
+    return Math.abs(targetBounds!.y - previewBounds!.y);
+  }).toBeLessThan(2);
+  const returnToReference = menu.getByRole("menuitem", { name: "Return to reference" });
+  await expect(returnToReference).toHaveCount(0);
+  await snippet.press("ArrowDown");
+  await expect(returnToReference).toBeVisible();
+  await returnToReference.click();
+  await expect(returnToReference).toHaveCount(0);
+  await expect.poll(scrollTop).toBe(initialScrollTop);
   // The clicked words name the tab; the whole-page target adds no kind label.
   const tab = await chooseOpenInReferences(page, menu, "supplementary appendix, Page 5");
   await expect(tab).toBeVisible();
