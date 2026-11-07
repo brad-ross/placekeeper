@@ -37,13 +37,15 @@ The durable requirement is a stable Toolbar Presentation whose measurements desc
 
 ## Current policy and verified corrections
 
-The four-state collapse scheme below is historical. In the current checkout, [PR #164](https://github.com/brad-ross/placekeeper/pull/164) carries forward the measured policy from main. As width shrinks, the title truncates and then yields to an icon. If the remaining controls still cannot fit, Undo/Redo share a trigger and Back/Forward move into the page menu. The compact composition also applies on coarse pointers at widths of 480 px or less. Unavailable history actions retain their direct slots or menu entries.
+[PR #165](https://github.com/brad-ross/placekeeper/pull/165) replaced the fine-pointer gap squeeze with a measured fallback. The filename ellipsizes as room shrinks and yields to the file icon below 56px of text room. If even the icon and direct controls cannot fit at normal spacing, Undo/Redo move into Edit history and Back/Forward move into Page navigation, on any pointer type. Coarse-pointer viewports at 480px or less also retain their explicit touch composition (`apps/web/src/review/review-chrome-layout.ts:78`, `apps/web/src/review/ReviewChrome.tsx`, `apps/web/src/review/ReviewChrome.tsx:381`).
 
-The tray buttons add a real column to the width budget. The live title calculation subtracts that column and its gap when present, and the sizing rack mirrors the tray buttons, title presentation, and compact touch state. A toolbar can report a valid candidate label while its live layout still overflows. Verify both the viewport bounds and the usable control sizes at narrow widths (`apps/web/src/review/ReviewChrome.tsx`, `test/acceptance/review-workflow.spec.ts`).
+The earlier below-760px rule omitted disabled history actions. Preserve those actions in their direct slots or compact menu entries so availability alone does not rearrange the row.
+
+[PR #164](https://github.com/brad-ross/placekeeper/pull/164) adds a column for the tray buttons to the width budget. The live title calculation subtracts that column and its gap when present, and the sizing rack mirrors the tray buttons, title presentation, and compact touch state. A toolbar can report a valid candidate label while its live layout still overflows. Verify both the viewport bounds and the usable control sizes at narrow widths (`apps/web/src/review/ReviewChrome.tsx`, `test/acceptance/review-workflow.spec.ts`).
 
 Electron must mark whole `[data-review-chrome-group]` elements as `no-drag`, including gaps between controls. Before this correction, a real native drag in the 8px Copy-to-Back seam moved the window by 60px horizontally and 40px vertically. The fresh packaged app stayed stationary for that seam drag while blank toolbar space still moved it by 60px and 40px. This was a native CGEvent check, separate from DOM geometry; the focused installed check also passed.
 
-Verification passed 82 unit checks, typechecking, 11 Chromium checks, seven WebKit checks, and all 12 installed checks against the freshly packaged macOS app (1.0 minute), including three SyncTeX checks and the group `no-drag` assertion. Back/Forward remain reachable for one-page or page-unready documents, and keyboard focus follows the natural Undo/Redo or Back/Forward order when an action becomes disabled. Focused correctness and independent adversarial reviews found no actionable issues. This is focused evidence, not a new full-suite pass.
+The earlier native and touch correction passed 82 unit checks, typechecking, 11 Chromium checks, seven WebKit checks, and all 12 installed checks against the freshly packaged macOS app (1.0 minute), including three SyncTeX checks and the group `no-drag` assertion. Back/Forward remain reachable for one-page or page-unready documents, and keyboard focus follows the natural Undo/Redo or Back/Forward order when an action becomes disabled. Focused correctness and independent adversarial reviews found no actionable issues. This is focused evidence, not a new full-suite pass.
 
 ## Guidance
 
@@ -56,17 +58,25 @@ Represent every valid toolbar composition explicitly and order it from richest t
 3. `zoomCompact`: Zoom also moves behind its current-value trigger.
 4. `navigationCompact`: Navigation moves behind a trigger that still shows current and total pages.
 
-The chooser still encodes this progression, and unit tests lock its order and fit edges (`apps/web/src/review/review-chrome-layout.ts`, `apps/web/test/review-chrome-layout.test.ts`). The current renderer's `controlsForPresentation` and `sizingCluster` do not branch on those candidate labels; menu relocation follows the measured width and compact touch policies (`apps/web/src/review/ReviewChrome.tsx`). A passing chooser test therefore does not prove that a narrower label renders a smaller toolbar.
+The chooser still encodes this progression, and unit tests lock its order and fit edges (`apps/web/src/review/review-chrome-layout.ts`, `apps/web/test/review-chrome-layout.test.ts`). The current renderer's `controlsForPresentation` and `sizingCluster` do not branch on those candidate labels; menu relocation follows the measured history fallback and the compact-touch policy (`apps/web/src/review/ReviewChrome.tsx`). A passing chooser test therefore does not prove that a narrower label renders a smaller toolbar.
 
 That order expressed the earlier design's priorities. Do not infer current Zoom or Navigation collapse behavior from the retained names.
 
 ### Measure complete rendered candidates
 
-Keep the hidden sizing rack consistent with the rendered controls. The current rack uses simplified identity and control proxies, not a second copy of the visible toolbar; its measurements cannot substitute for checking actual layout (`apps/web/src/review/ReviewChrome.tsx:967`). History measurement must include every direct slot reserved by the current pointer/width composition, regardless of availability (see *Keep availability-dependent controls in fixed slots* below). The rack is `aria-hidden` and inert, so it does not create duplicate interaction surfaces.
+Keep the hidden sizing rack consistent with the rendered controls. The current rack uses simplified identity and control proxies, not a second copy of the visible toolbar; its measurements cannot substitute for checking actual layout (`apps/web/src/review/ReviewChrome.tsx:1096`). History measurement must include every direct slot reserved by the current pointer/width composition, regardless of availability (see *Keep availability-dependent controls in fixed slots* below). The rack is `aria-hidden` and inert, so it does not create duplicate interaction surfaces.
 
-The toolbar measures candidates after layout, observes live and sizing elements with `ResizeObserver`, coalesces reads through an animation frame, and remeasures after fonts settle (`apps/web/src/review/ReviewChrome.tsx:346`). Keep these measurements consistent with the rendered composition; the retained chooser alone cannot correct a layout that exceeds its viewport.
+The toolbar measures candidates after layout, observes live and sizing elements with `ResizeObserver`, coalesces reads through an animation frame, and remeasures after fonts settle (`apps/web/src/review/ReviewChrome.tsx:427`). Keep these measurements consistent with the rendered composition; the retained chooser alone cannot correct a layout that exceeds its viewport.
 
 The compact-touch media condition is an explicit interaction policy. CSS applies the title and touch presentation and preserves touch target sizes (`apps/web/src/app/neutral-controls.css`). Test the resulting layout on both sides of the policy boundary.
+
+### Subtract the width compaction freed before expanding
+
+Measure room from the live row after reserving the control clusters, tray buttons, normal gaps, context status, and document trigger chrome. Exclude the currently rendered filename width so showing or hiding it does not change the budget for that same decision (`apps/web/src/review/ReviewChrome.tsx:37`).
+
+After combining history, the live row has more free space because those controls moved. Comparing that space directly with the expanded threshold can restore the controls immediately, recreate overflow, and collapse the row again. Measure the room freed across the transition, subtract it from compact room when deciding whether to expand, and require extra runway. Keep the title icon-only while the measured history fallback is active so the saved space cannot bring the title back prematurely (`apps/web/src/review/ReviewChrome.tsx:487`, `apps/web/src/review/review-chrome-layout.ts:104`).
+
+The chooser test models a collapse that frees 70px. A compact row with 75px free stays compact because the expanded row would have only 5px of runway. With the default 16px runway it expands at 86px free (`apps/web/test/review-chrome-layout.test.ts`). Keep rendered geometry checks alongside this arithmetic check to catch drift between measured and painted controls.
 
 ### Historical chooser: collapse immediately, expand with runway
 
@@ -86,7 +96,7 @@ The compact trigger should retain the group's essential state: current/total pag
 
 ### Keep availability-dependent controls in fixed slots
 
-Width is not the only thing that can change the row. Undo/Redo, Back/Forward, the page menu's Previous/Next, and Fit Width become available or unavailable as the reader edits, navigates, or reaches the first or last page. Keep them present and disabled when unavailable so state changes do not rearrange the row or menu. On narrow touch layouts, this requirement applies inside the history and navigation menus as well as to their stable triggers. The below-760px exception was a confirmed regression and has been removed. Fit Width marks the already-fitted state with `data-fit-width-current` (`apps/web/src/review/ReviewChrome.tsx`).
+Width is not the only thing that can change the row. Undo/Redo, Back/Forward, the page menu's Previous/Next, and Fit Width become available or unavailable as the reader edits, navigates, or reaches the first or last page. Keep them present and disabled when unavailable so state changes do not rearrange the row or menu. In the compact composition, this requirement applies inside the history and navigation menus as well as to their stable triggers. The below-760px exception was a confirmed regression and has been removed. Fit Width marks the already-fitted state with `data-fit-width-current` (`apps/web/src/review/ReviewChrome.tsx`).
 
 Four details make fixed slots work with the measured row:
 
@@ -107,13 +117,13 @@ On fine pointers, the tray group reveals on toolbar hover, keyboard focus, or wh
 
 ### Reserve title meaning without inflating its hit area
 
-Treat filename space and the document action's usable target as separate requirements. The measured title policy hides filename text when room runs out while retaining its full accessible name and document action; direct layouts otherwise ellipsize the title (`apps/web/src/app/neutral-controls.css`, `apps/web/src/review/ReviewChrome.tsx`). Do not claim that the retained chooser guarantees a filename floor before controls collapse.
+Treat filename space and the document action's usable target as separate requirements. The measured title policy hides filename text below its readability threshold while retaining its full accessible name and document action. With more room, the text ellipsizes (`apps/web/src/app/neutral-controls.css`, `apps/web/src/review/ReviewChrome.tsx`). Do not claim that the retained chooser guarantees a filename floor before controls collapse.
 
 Keep the title's layout and interaction geometry consistent. The neutral toolbar uses a content-sized identity track and caps both the identity and its trigger, so truncation does not leave a large empty gap before the page controls (`apps/web/src/app/neutral-controls.css:76`). The geometry test checks title truncation and limits trailing identity space to one pixel; it does not establish a wider reserved slot around the trigger (`test/acceptance/review-workflow.spec.ts:1264`).
 
 ### Transfer focus across recomposition
 
-When a pointer/width policy moves a focused action, capture its semantic group before the render and restore focus to a visible anchor afterward. Preserve pending document actions instead of closing their menu during that transition (`apps/web/src/review/ReviewChrome.tsx:307`). A policy change can occur without a measured candidate-label change, so focus restoration must observe the composition change itself. Also test natural keyboard continuation after an action disables its own menu item; programmatically focusing the next item would mask lost focus (`test/acceptance/review-workflow.spec.ts`).
+When a width or input policy moves a focused action, capture its semantic group before recomposition and restore focus to a visible anchor afterward. The touch and measured transitions share this focus preparation and preserve a pending document menu (`apps/web/src/review/ReviewChrome.tsx:370`, `apps/web/src/review/ReviewChrome.tsx:502`). Test natural keyboard continuation after an action disables its own menu item, since programmatically focusing the next item can mask lost focus (`test/acceptance/review-workflow.spec.ts`).
 
 Use one popup primitive. `TopBarMenu` handles initial enabled-item focus, all-disabled fallback, Escape, roving focus, opener restoration, Tab exit, and geometry tracking for portaled placement (`apps/web/src/review/TopBarMenu.tsx`).
 
@@ -173,4 +183,5 @@ Keep the title action content-fitting where text is shown. Where the narrow poli
 - [Truthful compact status for live agent context](./truthful-compact-agent-context-status.md)
 - [Compact Editorial language for review task and recovery surfaces](./compact-editorial-language-for-annotation-modals.md)
 - [Shared production review client with host-specific runtime boundaries](../architecture-patterns/shared-production-review-client-host-runtime-boundaries.md)
+- [PR #165](https://github.com/brad-ross/placekeeper/pull/165)
 - [PR #68: Fully embedded VS Code LaTeX review](https://github.com/brad-ross/placekeeper/pull/68)
