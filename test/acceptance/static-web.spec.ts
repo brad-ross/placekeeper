@@ -110,7 +110,7 @@ async function openAnnotationsWorkspace(page: Page): Promise<void> {
   const workspace = page.locator(presentation === "bottom" ? "#review-workspace" : "#review-tools-workspace");
   const openAttribute = presentation === "bottom" ? "data-workspace-open" : "data-tools-workspace-open";
   if (await workspace.getAttribute(openAttribute) !== "true") {
-    await page.getByRole("button", { name: "Show workspace", exact: true }).click();
+    await page.getByRole("button", { name: "Show Workspace", exact: true }).click();
   }
   await expect(workspace).toHaveAttribute(openAttribute, "true");
   await expect(workspace).toBeVisible();
@@ -588,7 +588,7 @@ for (const width of [390, 1280]) test(`@critical landing showcase and PDF contro
   await demo.locator('[data-initial-view-ready="true"]').waitFor({ state: 'attached' });
   await expect(demo.locator('[data-page-index="13"] > img').first()).toBeVisible();
   await expect(demo.locator('[data-owned-mark]')).toHaveCount(0);
-  await demo.getByRole('button', { name: 'Show workspace', exact: true }).click();
+  await demo.getByRole('button', { name: 'Show Workspace', exact: true }).click();
   await expect(demo.getByRole('tab', { name: 'Outline', exact: true })).toBeEnabled();
   if (width === 1280) {
     expect(await demo.locator('body').evaluate(() => innerWidth)).toBe(1000);
@@ -858,7 +858,7 @@ test('@critical real-paper demo keeps its metadata while bounding the main previ
   });
   expect(momentum.canceled.every(Boolean)).toBe(true);
   expect(new Set(momentum.offsets).size).toBe(1);
-  await demo.getByRole('button', { name: 'Show workspace', exact: true }).click();
+  await demo.getByRole('button', { name: 'Show Workspace', exact: true }).click();
   await expect(demo.getByRole('button', { name: /Theoretical Properties/ }).first()).toBeVisible();
   await page.getByRole('tab', { name: 'Follow references', exact: true }).click();
   await expect(demo.getByRole('tab', { name: 'Appendix A, Page 31', exact: true })).toBeVisible();

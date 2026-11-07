@@ -268,7 +268,7 @@ test("omits destination copy controls and reopens canonical links without source
   await page.goto(launched.url);
   await expectCurrentPage(page, "1 / 4");
 
-  await page.getByRole("button", { name: "Show workspace" }).click();
+  await page.getByRole("button", { name: "Show Workspace" }).click();
   const outline = page.getByRole("navigation", { name: "Document outline" });
   await expect(outline).toBeVisible();
   const overview = outline.getByRole("button", { name: "Overview, Page 2", exact: true });
@@ -286,7 +286,7 @@ test("omits destination copy controls and reopens canonical links without source
   await result.getByRole("button").first().focus();
   await expect(result.locator('.copy-link-control')).toHaveCount(0);
 
-  await page.getByRole("group", { name: "Workspace trays", exact: true }).getByRole("button", { name: "Hide workspace", exact: true }).click();
+  await page.getByRole("group", { name: "Workspace trays", exact: true }).getByRole("button", { name: "Hide Workspace", exact: true }).click();
   await page.locator("[data-review-stage]").evaluate(async element => {
     await Promise.all(element.getAnimations({ subtree: true }).map(animation => animation.finished.catch(() => undefined)));
   });

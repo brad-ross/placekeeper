@@ -1812,7 +1812,7 @@ export function ReviewShell(props: ReviewShellProps) {
     focusWorkspaceModeAfterLayout(mode);
   };
   const authoringActive = authoringSession !== null;
-  const workspaceTrayTarget = authoringActive ? 'References' : 'workspace';
+  const workspaceTrayTarget = authoringActive ? 'References' : 'Workspace';
   const workspaceTrayMode = authoringActive ? 'references' : effectiveWorkspaceMode;
   const sharedTrayShowsTarget = !authoringActive || effectiveWorkspaceMode === 'references';
   const workspaceTrayToggles: ReviewChromeTrayToggle[] = [];
@@ -2488,7 +2488,7 @@ export function ReviewShell(props: ReviewShellProps) {
             onModeChange={selectWorkspaceMode}
             onHide={() => hideWorkspaceTray(referenceTraySurface)}
             hideLabel={effectiveReferenceLayout.kind === 'narrow-unified'
-              ? 'Hide workspace'
+              ? 'Hide Workspace'
               : 'Hide References'}
             onReferenceTabActivate={(identity) => {
               props.workspace.onReferenceTabActivate?.(identity);
@@ -2544,7 +2544,7 @@ export function ReviewShell(props: ReviewShellProps) {
             )}
             onModeChange={selectWorkspaceMode}
             onHide={() => hideWorkspaceTray(effectiveReferenceLayout.kind === 'narrow-unified' ? 'bottom' : 'right')}
-            hideLabel="Hide workspace"
+            hideLabel="Hide Workspace"
             onOutlineActivate={(item) => {
               if (authoringSessionRef.current === null) props.workspace.onOutlineActivate?.(item);
             }}

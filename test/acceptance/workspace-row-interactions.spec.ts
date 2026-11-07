@@ -61,7 +61,7 @@ for (const width of [1280, 620, 390]) {
     page.on('pageerror', (error) => { throw error; });
     await page.setViewportSize({ width, height: 900 });
     await page.goto('/test/acceptance/review-harness/index.html?visual=outline');
-    const openOutlineWorkspace = page.getByRole('button', { name: 'Show workspace', exact: true });
+    const openOutlineWorkspace = page.getByRole('button', { name: 'Show Workspace', exact: true });
     if (await openOutlineWorkspace.isVisible()) await openOutlineWorkspace.click();
     await page.getByRole('tab', { name: 'Outline', exact: true }).click();
     const collapse = page.locator('[data-outline-expansion-toggle]:visible');
@@ -91,7 +91,7 @@ for (const width of [1280, 620, 390]) {
       .evaluate((element) => element === document.activeElement);
 
     await page.goto('/test/acceptance/review-harness/index.html?visual=tray&search=canonical');
-    const openTrayWorkspace = page.getByRole('button', { name: 'Show workspace', exact: true });
+    const openTrayWorkspace = page.getByRole('button', { name: 'Show Workspace', exact: true });
     if (await openTrayWorkspace.isVisible()) await openTrayWorkspace.click();
     await page.getByRole('tab', { name: 'Annotations', exact: true }).click();
     for (const annotation of await page.locator('li[data-annotation-origin]').all()) {
@@ -162,7 +162,7 @@ test('touch rows expose actions in the page slot while read-only rows retain pag
   const page = await context.newPage();
   try {
     await page.goto('/test/acceptance/review-harness/index.html?visual=tray&search=canonical');
-    const open = page.getByRole('button', { name: 'Show workspace', exact: true });
+    const open = page.getByRole('button', { name: 'Show Workspace', exact: true });
     if (await open.isVisible()) await open.click();
     await page.getByRole('tab', { name: 'Annotations', exact: true }).click();
     const owned = page.locator('[data-review-item="owned-highlight"]');
@@ -191,7 +191,7 @@ for (const width of [1280, 620]) {
   test(`returning from a long annotation releases pointer hover and preserves keyboard return at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 });
     await page.goto('/test/acceptance/review-harness/index.html?visual=tray');
-    const open = page.getByRole('button', { name: 'Show workspace', exact: true });
+    const open = page.getByRole('button', { name: 'Show Workspace', exact: true });
     if (await open.isVisible()) await open.click();
     await page.getByRole('tab', { name: 'Annotations', exact: true }).click();
     const row = page.locator('[data-review-item="owned-highlight"]');
@@ -328,7 +328,7 @@ test('vertical reference tabs fill their rail and horizontal tabs fit their titl
 test('horizontal reference tabs in a bottom workspace fit short titles', async ({ page }) => {
   await page.setViewportSize({ width: 620, height: 900 });
   await page.goto('/test/acceptance/review-harness/index.html?visual=reference-layout');
-  await page.getByRole('button', { name: 'Show workspace', exact: true }).click();
+  await page.getByRole('button', { name: 'Show Workspace', exact: true }).click();
   await page.getByRole('tab', { name: 'References', exact: true }).click();
   const tabs = page.locator('.reference-tabs[data-reference-tabs-orientation="horizontal"]:visible');
   await expect(tabs).toBeVisible();
@@ -370,7 +370,7 @@ async function openReferences(page: Page, width: number) {
   await page.goto('/test/acceptance/review-harness/index.html?visual=reference-layout&referenceReturn=visible');
   if (width >= 900) await page.getByRole('button', { name: 'Show References', exact: true }).click();
   else {
-    await page.getByRole('button', { name: 'Show workspace', exact: true }).click();
+    await page.getByRole('button', { name: 'Show Workspace', exact: true }).click();
     await page.getByRole('tab', { name: 'References', exact: true }).click();
   }
   const tabs = page.locator('.reference-tabs:visible');

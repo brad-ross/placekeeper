@@ -128,7 +128,7 @@ export function zoomInputWidth(value: string): string {
 
 export interface ReviewChromeTrayToggle {
   readonly surface: 'right' | 'bottom';
-  readonly target: 'workspace' | 'References';
+  readonly target: 'Workspace' | 'References';
   readonly open: boolean;
   readonly controls: string;
   readonly buttonRef: Ref<HTMLButtonElement>;

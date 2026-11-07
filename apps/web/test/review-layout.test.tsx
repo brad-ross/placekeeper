@@ -1685,7 +1685,7 @@ describe('review shell layout and accessibility contract', () => {
       layout: 'wide-bottom',
       trayButtons: [
         ['bottom', 'true', 'review-workspace', 'Hide References'],
-        ['right', 'false', 'review-tools-workspace', 'Show workspace'],
+        ['right', 'false', 'review-tools-workspace', 'Show Workspace'],
       ],
     },
     {
@@ -1693,18 +1693,18 @@ describe('review shell layout and accessibility contract', () => {
       layout: 'wide-split',
       trayButtons: [
         ['bottom', 'true', 'review-workspace', 'Hide References'],
-        ['right', 'true', 'review-tools-workspace', 'Hide workspace'],
+        ['right', 'true', 'review-tools-workspace', 'Hide Workspace'],
       ],
     },
     {
       name: 'the right-docked layout',
       layout: 'wide-right',
-      trayButtons: [['right', 'true', 'review-workspace review-tools-workspace', 'Hide workspace']],
+      trayButtons: [['right', 'true', 'review-workspace review-tools-workspace', 'Hide Workspace']],
     },
     {
       name: 'the narrow layout',
       layout: 'narrow-unified',
-      trayButtons: [['bottom', 'true', 'review-workspace review-tools-workspace', 'Hide workspace']],
+      trayButtons: [['bottom', 'true', 'review-workspace review-tools-workspace', 'Hide Workspace']],
     },
   ])('exposes the toolbar tray controls for $name', ({ layout: kind, trayButtons }) => {
     let layout = createReferenceWorkspaceLayout({ width: 1440, height: 900 });

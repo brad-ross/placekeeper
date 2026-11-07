@@ -72,7 +72,7 @@ async function openFixture(
 }
 
 async function openAnnotations(page: Page): Promise<void> {
-  const toggle = page.getByRole('group', { name: 'Workspace trays', exact: true }).getByRole('button', { name: /^(?:Show|Hide) workspace$/u });
+  const toggle = page.getByRole('group', { name: 'Workspace trays', exact: true }).getByRole('button', { name: /^(?:Show|Hide) Workspace$/u });
   if (await toggle.getAttribute('aria-expanded') !== 'true') await toggle.click();
   const annotations = page.getByRole('tab', { name: 'Annotations', exact: true });
   if (await annotations.getAttribute('aria-selected') !== 'true') await annotations.click();
@@ -670,7 +670,7 @@ test('creates, edits, reopens, and deletes one shared selection annotation from 
   const row = page.locator(`[data-review-item="${item.id}"]`);
   await expect(row).toContainText('Edited shared Reference highlight.');
 
-  await page.getByRole('group', { name: 'Workspace trays', exact: true }).getByRole('button', { name: 'Hide workspace', exact: true }).click();
+  await page.getByRole('group', { name: 'Workspace trays', exact: true }).getByRole('button', { name: 'Hide Workspace', exact: true }).click();
   const workspace = page.locator('[data-review-workspace]');
   await expect(workspace).toHaveAttribute('data-workspace-open', 'false');
   const mainMark = page.locator(
@@ -915,7 +915,7 @@ test('keeps Reference card hover, selection, dismissal, and focus lifecycle moun
   await expect(inspection).toHaveCount(0);
 
   const toolsWorkspace = page.locator('#review-tools-workspace');
-  await toolsWorkspace.getByRole('button', { name: 'Hide workspace', exact: true }).click();
+  await toolsWorkspace.getByRole('button', { name: 'Hide Workspace', exact: true }).click();
   await expect(toolsWorkspace).toHaveAttribute('data-tools-workspace-open', 'false');
   await expect(activeTab).toHaveAttribute('aria-selected', 'true');
   await ownedMark.scrollIntoViewIfNeeded();

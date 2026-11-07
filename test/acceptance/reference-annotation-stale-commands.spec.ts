@@ -75,7 +75,7 @@ async function openReferenceEditor(page: Page, itemId: string): Promise<{
   readonly editor: ReturnType<Page['getByRole']>;
   readonly apply: ReturnType<Page['getByRole']>;
 }> {
-  const workspace = page.getByRole('group', { name: 'Workspace trays', exact: true }).getByRole('button', { name: /^(?:Show|Hide) workspace$/u });
+  const workspace = page.getByRole('group', { name: 'Workspace trays', exact: true }).getByRole('button', { name: /^(?:Show|Hide) Workspace$/u });
   if (await workspace.getAttribute('aria-expanded') !== 'true') await workspace.click();
   const annotations = page.getByRole('tab', { name: 'Annotations', exact: true });
   if (await annotations.getAttribute('aria-selected') !== 'true') await annotations.click();

@@ -54,7 +54,7 @@ test('page and zoom menus align to the right edge of their numeric groups', asyn
 test('workspace fade follows the opening tray without another pointer or scroll event', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
   await openPdf(page);
-  await page.getByRole('button', { name: 'Show workspace', exact: true }).click();
+  await page.getByRole('button', { name: 'Show Workspace', exact: true }).click();
   // Do not move the pointer after opening: the transition itself must publish geometry.
   await page.waitForTimeout(240);
   const geometry = await page.locator('[data-review-stage]').evaluate(reviewEdgeGeometry);
@@ -157,7 +157,7 @@ test('agent status opens to the right and stays inside desktop and narrow viewpo
 
 test('search results share annotation row spacing, metadata, and action styling', async ({ page }) => {
   await openPdf(page);
-  await page.getByRole('button', { name: 'Show workspace', exact: true }).click();
+  await page.getByRole('button', { name: 'Show Workspace', exact: true }).click();
   await page.getByRole('tab', { name: 'Annotations', exact: true }).click();
   const annotation = page.locator('li[data-annotation-origin]').first();
   await expect(annotation).toBeVisible();

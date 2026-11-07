@@ -385,23 +385,23 @@ test('active text fitting follows right workspace closure while custom zoom stay
   await openBook(page);
   await page.setViewportSize({ width: 1400, height: 1100 });
   const workspace = page.locator('#review-tools-workspace');
-  await page.getByRole('button', { name: 'Show workspace', exact: true }).click();
+  await page.getByRole('button', { name: 'Show Workspace', exact: true }).click();
   await expect(workspace).toHaveAttribute('data-tools-workspace-open', 'true');
   await fit(page, 'text');
   const dockedScale = await scale(page);
-  await page.getByRole('group', { name: 'Workspace trays', exact: true }).getByRole('button', { name: 'Hide workspace', exact: true }).click();
+  await page.getByRole('group', { name: 'Workspace trays', exact: true }).getByRole('button', { name: 'Hide Workspace', exact: true }).click();
   await expect(workspace).toHaveAttribute('data-tools-workspace-open', 'false');
   await expect.poll(() => scale(page)).toBeGreaterThan(dockedScale + 0.1);
   await openZoom(page);
   await expect(fitButton(page)).toHaveAttribute('data-fit-active', 'true');
   await page.keyboard.press('Escape');
-  await page.getByRole('button', { name: 'Show workspace', exact: true }).click();
+  await page.getByRole('button', { name: 'Show Workspace', exact: true }).click();
   await expect(workspace).toHaveAttribute('data-tools-workspace-open', 'true');
   const zoom = page.getByRole('textbox', { name: /^Current zoom/u });
   await zoom.fill('150');
   await zoom.press('Enter');
   await expect.poll(() => scale(page)).toBeCloseTo(1.5, 3);
-  await page.getByRole('group', { name: 'Workspace trays', exact: true }).getByRole('button', { name: 'Hide workspace', exact: true }).click();
+  await page.getByRole('group', { name: 'Workspace trays', exact: true }).getByRole('button', { name: 'Hide Workspace', exact: true }).click();
   await expect(workspace).toHaveAttribute('data-tools-workspace-open', 'false');
   // Read beyond the resize debounce and CSS transition to detect an unwanted refit.
   const samples = await mainPage(page).evaluate((element) => new Promise<number[]>((resolve) => {
@@ -422,7 +422,7 @@ test('refits text to the reading area when the workspace opens during a resize f
   await fit(page, 'text');
   await goToPage(page, 2);
   await openZoom(page);
-  await page.getByRole('button', { name: 'Show workspace', exact: true }).evaluate((button) => {
+  await page.getByRole('button', { name: 'Show Workspace', exact: true }).evaluate((button) => {
     const fitControl = document.querySelector('[data-review-zoom-action="fit-width"]')!;
     const zoom = document.querySelector<HTMLInputElement>('.review-chrome__zoom-input')!;
     const initialZoom = Number(zoom.value);
@@ -502,10 +502,10 @@ for (const scrollbarWidth of [null, 15]) {
     await expect(fitButton(page)).toHaveAttribute('data-fit-active', 'true');
     await page.keyboard.press('Escape');
     await page.mouse.move(0, 1090);
-    await page.getByRole('button', { name: 'Show workspace', exact: true }).click();
+    await page.getByRole('button', { name: 'Show Workspace', exact: true }).click();
     await expect(page.locator('#review-tools-workspace')).toHaveAttribute('data-tools-workspace-open', 'true');
     await expectBalancedMargins(1);
-    await page.getByRole('group', { name: 'Workspace trays', exact: true }).getByRole('button', { name: 'Hide workspace', exact: true }).click();
+    await page.getByRole('group', { name: 'Workspace trays', exact: true }).getByRole('button', { name: 'Hide Workspace', exact: true }).click();
     await expect(page.locator('#review-tools-workspace')).toHaveAttribute('data-tools-workspace-open', 'false');
     await expectBalancedMargins(1);
   });

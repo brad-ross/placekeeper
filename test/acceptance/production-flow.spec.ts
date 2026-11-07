@@ -474,7 +474,7 @@ async function openAnnotationsWorkspace(page: Page) {
 
 async function currentWorkspaceToggle(page: Page) {
   return page.getByRole('group', { name: 'Workspace trays', exact: true })
-    .getByRole('button', { name: /^(?:Show|Hide) workspace$/u });
+    .getByRole('button', { name: /^(?:Show|Hide) Workspace$/u });
 }
 
 async function toggleWorkspace(page: Page) {
@@ -1113,7 +1113,7 @@ test("searches extracted PDF text with variants, history, references, and retain
     "true",
   );
   await expect(page.getByRole("group", { name: "Workspace trays", exact: true })
-    .getByRole("button", { name: "Hide workspace", exact: true })).toBeVisible();
+    .getByRole("button", { name: "Hide Workspace", exact: true })).toBeVisible();
   await query.click();
   await expect(query).toBeFocused();
   await expect.poll(() => query.evaluate((element) => getComputedStyle(element).backgroundColor))
@@ -1784,7 +1784,7 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
   const rightToggle = trayToggles.locator('[data-workspace-tray-toggle="right"]');
   const bottomToggle = trayToggles.locator('[data-workspace-tray-toggle="bottom"]');
   await expect(trayToggles.getByRole("button")).toHaveCount(2);
-  await expect(rightToggle).toHaveAccessibleName("Show workspace");
+  await expect(rightToggle).toHaveAccessibleName("Show Workspace");
   await expect(rightToggle).toHaveAttribute("aria-expanded", "false");
   await expect(bottomToggle).toHaveAccessibleName("Hide References");
   await expect(bottomToggle).toHaveAttribute("aria-expanded", "true");
@@ -1800,15 +1800,15 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
   ]);
   if (!toolsBounds || !bottomBounds) throw new Error("Coordinated tray geometry is unavailable.");
   expect(bottomBounds.y - (toolsBounds.y + toolsBounds.height)).toBeCloseTo(await expectedWorkspaceInset(page), 0);
-  await expect(toolsWorkspace.getByRole("button", { name: "Hide workspace" })).toBeVisible();
+  await expect(toolsWorkspace.getByRole("button", { name: "Hide Workspace" })).toBeVisible();
   await mainPageOne.click({ position: { x: 24, y: 24 } });
   await expect(toolsWorkspace).toHaveAttribute("data-tools-workspace-open", "true");
   await expect(workspace).toHaveAttribute("data-workspace-open", "true");
 
-  await expect(rightToggle).toHaveAccessibleName("Hide workspace");
+  await expect(rightToggle).toHaveAccessibleName("Hide Workspace");
   await expect(rightToggle).toHaveAttribute("aria-expanded", "true");
   await rightToggle.click();
-  await expect(rightToggle).toHaveAccessibleName("Show workspace");
+  await expect(rightToggle).toHaveAccessibleName("Show Workspace");
   await expect(rightToggle).toHaveAttribute("aria-expanded", "false");
   await expect(bottomToggle).toHaveAttribute("aria-expanded", "true");
   await rightToggle.click();
@@ -1827,7 +1827,7 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
   await expect(workspace).toHaveAttribute("data-workspace-presentation", "right");
   await expect(trayToggles.getByRole("button")).toHaveCount(1);
   await expect(bottomToggle).toHaveCount(0);
-  await expect(rightToggle).toHaveAccessibleName("Hide workspace");
+  await expect(rightToggle).toHaveAccessibleName("Hide Workspace");
   await expect(rightToggle).toHaveAttribute("aria-expanded", "true");
   await expect(workspace.getByRole("button", { name: "Hide References" })).toHaveAttribute(
     "aria-expanded", "true",
@@ -2079,14 +2079,14 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
   await bottomReferencesMode.focus();
   await bottomReferencesMode.press(workspaceForwardTab);
   await expect(page.getByRole("button", { name: "Move References to right" })).toBeFocused();
-  await page.getByRole("button", { name: "Show workspace" }).click();
+  await page.getByRole("button", { name: "Show Workspace" }).click();
   await primaryTab.click();
 
   await page.setViewportSize({ width: 760, height: 900 });
   await expect(page.locator("[data-review-stage]")).toHaveAttribute("data-reference-layout", "narrow-unified");
   await expect(trayToggles.getByRole("button")).toHaveCount(1);
   await expect(rightToggle).toHaveCount(0);
-  await expect(bottomToggle).toHaveAccessibleName("Hide workspace");
+  await expect(bottomToggle).toHaveAccessibleName("Hide Workspace");
   await expect(bottomToggle).toHaveAttribute("aria-expanded", "true");
   await expect(page.getByRole("tab", { name: "References", exact: true })).toHaveAttribute(
     "aria-selected",
@@ -2097,7 +2097,7 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
   await page.setViewportSize({ width: 1280, height: 900 });
   await expect(page.locator("[data-review-stage]")).toHaveAttribute("data-reference-layout", "wide-split");
   await expect(trayToggles.getByRole("button")).toHaveCount(2);
-  await expect(rightToggle).toHaveAccessibleName("Hide workspace");
+  await expect(rightToggle).toHaveAccessibleName("Hide Workspace");
   await expect(bottomToggle).toHaveAccessibleName("Hide References");
   await expect(toolsWorkspace).toHaveAttribute("data-tools-workspace-open", "true");
   await expect(workspace).toHaveAttribute("data-workspace-presentation", "bottom");
@@ -2640,7 +2640,7 @@ for (const mobile of [false, true]) {
         const chrome = page.locator('[data-review-chrome]');
         const toggle = chrome.locator('[data-workspace-tray-toggle="bottom"]');
         await expect(toggle).toBeVisible();
-        await expect(toggle).toHaveAccessibleName('Show workspace');
+        await expect(toggle).toHaveAccessibleName('Show Workspace');
         const toolbarBounds = (await chrome.boundingBox())!;
         const toggleBounds = (await toggle.boundingBox())!;
         expect(toolbarBounds.height).toBe(50);
@@ -3008,7 +3008,7 @@ test("keeps compound reference actions in narrow keyboard order through survivor
 
   await expect(page.getByRole("tablist", { name: "Open references", includeHidden: true })).toHaveCount(0);
   await expect(workspace).toHaveAttribute("data-workspace-open", "false");
-  const reopenTools = page.getByRole("button", { name: "Show workspace" });
+  const reopenTools = page.getByRole("button", { name: "Show Workspace" });
   await expect(reopenTools).toBeFocused();
   await reopenTools.click();
   await expect(page.getByRole("tab", { name: "References", exact: true })).toHaveCount(0);
@@ -5489,7 +5489,7 @@ test('defaults a real PDF to fit width and refits bottom and resizable right rea
   await openFreshProductionFixture(page, pdf, 'Annotation tray Fit Width launch failed');
   await expect(mainPage).toBeVisible();
   await waitForRenderedPageImage(mainPage);
-  await page.getByRole('button', { name: 'Show workspace' }).click();
+  await page.getByRole('button', { name: 'Show Workspace' }).click();
   const toolsWorkspace = page.locator('#review-tools-workspace');
   await expect(toolsWorkspace).toHaveAttribute('data-tools-workspace-open', 'true');
   await expect.poll(() => toolsWorkspace.evaluate((element) => getComputedStyle(element).transform))
@@ -5667,7 +5667,7 @@ test('refits opening workspaces only from fit width and preserves manual reading
   await expect(notePeek).toBeVisible();
   await expect(drawer).toBeHidden();
   expect(await viewport.evaluate((element) => element.scrollTop)).toBeCloseTo(markScrollBefore, 0);
-  await page.getByRole('button', { name: 'Show workspace' }).click();
+  await page.getByRole('button', { name: 'Show Workspace' }).click();
   await expect(drawer).toBeVisible();
   await expect(drawer).toHaveAttribute('data-workspace-presentation', 'bottom');
   await expect(notePeek).toHaveCount(0);
@@ -6542,7 +6542,7 @@ test('revokes Reference copy authority across tab switch, Send to Main, and fina
     page.getByRole('button', { name: 'Close active reference' }),
   );
   await expect(page.locator('[data-reference-tab]')).toHaveCount(0);
-  const openReferences = page.getByRole('button', { name: 'Show workspace' });
+  const openReferences = page.getByRole('button', { name: 'Show Workspace' });
   await expect(openReferences).toBeFocused();
   expect(await dispatchClipboardCopy(openReferences)).toEqual({
     defaultPrevented: false,

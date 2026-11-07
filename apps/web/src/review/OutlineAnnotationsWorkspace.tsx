@@ -67,7 +67,7 @@ export function OutlineAnnotationsWorkspace({
   search,
   headerAction,
   onHide,
-  hideLabel = 'Hide workspace',
+  hideLabel = 'Hide Workspace',
   onModeChange,
   onOutlineActivate,
   onOutlineReference,

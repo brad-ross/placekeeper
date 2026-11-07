@@ -18,7 +18,7 @@ async function openAnnotationsWorkspace(page: Page) {
     ? 'data-tools-workspace-open'
     : 'data-workspace-open';
   if (await workspace.getAttribute(openAttribute) !== 'true') {
-    await page.getByRole('button', { name: 'Show workspace' }).click();
+    await page.getByRole('button', { name: 'Show Workspace' }).click();
   }
   await expect(workspace).toHaveAttribute(openAttribute, 'true');
   await expect(workspace).toBeVisible();
@@ -50,11 +50,11 @@ async function closeWorkspace(page: Page) {
     ? 'data-tools-workspace-open'
     : 'data-workspace-open';
   if (await surface.getAttribute(openAttribute) === 'true') {
-    await surface.getByRole('button', { name: 'Hide workspace', exact: true }).click();
+    await surface.getByRole('button', { name: 'Hide Workspace', exact: true }).click();
   }
   await expect(surface).toHaveAttribute(openAttribute, 'false');
   const toggle = page.locator(`[data-workspace-tray-toggle="${expectedPresentation}"]`);
-  await expect(toggle).toHaveAccessibleName('Show workspace');
+  await expect(toggle).toHaveAccessibleName('Show Workspace');
   await expect(toggle).toHaveAttribute('aria-expanded', 'false');
   await expect(toggle).toBeFocused();
   return toggle;
@@ -676,7 +676,7 @@ test.describe('canonical review workflow', () => {
   test('keeps focus and References coherent when a live outline disappears and returns', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 900 });
     await page.getByRole('button', { name: 'Set outline tree' }).click();
-    await page.getByRole('button', { name: 'Show workspace' }).click();
+    await page.getByRole('button', { name: 'Show Workspace' }).click();
     const outlineDestination = page.getByRole('button', {
       name: 'Harness section, Page 1',
       exact: true,
@@ -743,7 +743,7 @@ test.describe('canonical review workflow', () => {
   test('restores the exact branch set through the wired outline expansion control', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 900 });
     await page.getByRole('button', { name: 'Set outline tree' }).click();
-    await page.getByRole('button', { name: 'Show workspace' }).click();
+    await page.getByRole('button', { name: 'Show Workspace' }).click();
 
     const harness = outlineDisclosure(page, 'harness-outline');
     const nested = outlineDisclosure(page, 'harness-outline-nested');
@@ -778,7 +778,7 @@ test.describe('canonical review workflow', () => {
   test('resets a pending outline restore when the document generation changes', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 900 });
     await page.getByRole('button', { name: 'Set outline tree' }).click();
-    await page.getByRole('button', { name: 'Show workspace' }).click();
+    await page.getByRole('button', { name: 'Show Workspace' }).click();
     await page.locator('.review-workspace__header').hover();
     await page.getByRole('button', { name: 'Collapse all outline entries' }).click();
     await expect(page.getByRole('button', {
@@ -934,7 +934,7 @@ test.describe('canonical review workflow', () => {
     expect(await viewport.boundingBox()).toEqual(initialViewport);
 
     await page.getByRole('button', { name: 'Open harness reference' }).click();
-    await page.getByRole('button', { name: 'Show workspace' }).click();
+    await page.getByRole('button', { name: 'Show Workspace' }).click();
     await page.setViewportSize({ width: 760, height: 720 });
     await page.locator('[data-review-stage]').evaluate(async element => {
       await Promise.all(element.getAnimations({ subtree: true }).filter(animation => animation.effect?.getComputedTiming().iterations !== Infinity).map(animation => animation.finished.catch(() => undefined)));
@@ -1000,11 +1000,15 @@ test.describe('canonical review workflow', () => {
     await installRuntimeClassicScrollport(page);
     await page.getByRole('button', { name: 'Open harness reference' }).press('Enter');
     await page.getByRole('button', { name: 'Show References' }).click();
-    await page.getByRole('button', { name: 'Show workspace' }).click();
+    await page.getByRole('button', { name: 'Show Workspace' }).click();
     const trayToggles = page.getByRole('group', { name: 'Workspace trays' }).getByRole('button');
     await expect(trayToggles).toHaveCount(2);
     await expect(trayToggles.nth(0)).toHaveAccessibleName('Hide References');
-    await expect(trayToggles.nth(1)).toHaveAccessibleName('Hide workspace');
+    await expect(trayToggles.nth(1)).toHaveAccessibleName('Hide Workspace');
+    await trayToggles.nth(0).hover();
+    await expect(page.getByRole('tooltip')).toHaveText('Hide References');
+    await trayToggles.nth(1).hover();
+    await expect(page.getByRole('tooltip')).toHaveText('Hide Workspace');
 
     const stage = page.locator('[data-review-stage]');
     await expect(stage).toHaveAttribute('data-reference-layout', 'wide-split');
@@ -1023,7 +1027,7 @@ test.describe('canonical review workflow', () => {
       element.firstElementChild?.setAttribute('style', 'width: 100%; height: 1600px; background: white');
     });
     await page.getByRole('button', { name: 'Open harness reference' }).press('Enter');
-    await page.getByRole('button', { name: 'Show workspace' }).click();
+    await page.getByRole('button', { name: 'Show Workspace' }).click();
     await expect.poll(() => viewport.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
     const backing = page.locator('.review-overlay-frame');
     const expectedClip = () => viewport.evaluate((element) => {
@@ -1070,7 +1074,7 @@ test.describe('canonical review workflow', () => {
     ))).toBe(`${Math.max(tracks.vertical, tracks.horizontal)}px`);
 
     await page.getByRole('button', { name: 'Open harness reference' }).press('Enter');
-    await page.getByRole('button', { name: 'Show workspace' }).click();
+    await page.getByRole('button', { name: 'Show Workspace' }).click();
     const [stageBounds, surfaceBounds, viewportBounds] = await Promise.all([
       page.locator('[data-review-stage]').boundingBox(),
       page.locator('#review-workspace').boundingBox(),
@@ -1087,7 +1091,7 @@ test.describe('canonical review workflow', () => {
     const documentBounds = await page.locator('.review-document').boundingBox();
     expect(viewportBounds).toEqual(documentBounds);
     expect(await canvas.boundingBox()).toEqual(initialCanvas);
-    const hide = page.locator('#review-workspace').getByRole('button', { name: 'Hide workspace', exact: true });
+    const hide = page.locator('#review-workspace').getByRole('button', { name: 'Hide Workspace', exact: true });
     await expect(hide).toBeVisible();
     await hide.focus();
     await expect(hide).toBeFocused();
@@ -1123,7 +1127,7 @@ test.describe('canonical review workflow', () => {
         ? 'data-tools-workspace-open'
         : 'data-workspace-open';
       if (await surface.getAttribute(openAttribute) !== 'true') {
-        await page.getByRole('button', { name: 'Show workspace' }).click();
+        await page.getByRole('button', { name: 'Show Workspace' }).click();
         await expect(surface).toHaveAttribute(openAttribute, 'true');
       }
       await expect.poll(() => page.locator('[data-review-stage]').evaluate((element) => (
@@ -1140,7 +1144,7 @@ test.describe('canonical review workflow', () => {
       await scroller.evaluate((element) => { element.scrollTop = element.scrollHeight; });
       const headerAfter = await header.boundingBox();
       expect(headerAfter).toEqual(headerBefore);
-      const hide = surface.getByRole('button', { name: 'Hide workspace', exact: true });
+      const hide = surface.getByRole('button', { name: 'Hide Workspace', exact: true });
       await expect(hide).toBeVisible();
       await hide.focus();
       await expect(hide).toBeFocused();
@@ -3239,7 +3243,7 @@ test.describe('canonical review workflow', () => {
       await page.getByRole('button', { name: 'Highlight', exact: true }).click();
       await page.getByRole('button', { name: 'Save', exact: true }).click();
       if (workspace === 'outline') {
-        await page.getByRole('button', { name: 'Show workspace' }).click();
+        await page.getByRole('button', { name: 'Show Workspace' }).click();
         await page.getByRole('tab', { name: 'Outline', exact: true }).click();
       }
       const mark = page.locator('[data-owned-focus-id]').first();

@@ -22,7 +22,7 @@ async function openAnnotations(page: Page) {
     presentation,
   );
   if (await workspace.getAttribute(openAttribute) !== 'true') {
-    await page.getByRole('button', { name: 'Show workspace' }).click();
+    await page.getByRole('button', { name: 'Show Workspace' }).click();
   }
   await expect(workspace).toHaveAttribute(openAttribute, 'true');
 

@@ -18,7 +18,7 @@ test('host bootstrap loads the outline for a resumed document generation', async
   }
   await page.getByRole('button', { name: 'Finish host bootstrap' }).click();
   await expect(page.getByRole('textbox', { name: /^Current page \d+ of 4/u })).toBeVisible();
-  const show = page.getByRole('button', { name: 'Show workspace', exact: true });
+  const show = page.getByRole('button', { name: 'Show Workspace', exact: true });
   if (await show.isVisible()) await show.click();
   await page.getByRole('tab', { name: 'Outline', exact: true }).click();
   const destination = page.getByRole('button', { name: 'Overview, Page 2', exact: true });
@@ -327,7 +327,7 @@ test('normal-motion workspace opening and closing refit after the tray settles',
       else resolve(samples);
     };
     sample();
-    document.querySelector<HTMLButtonElement>('button[aria-label="Show workspace"]')!.click();
+    document.querySelector<HTMLButtonElement>('button[aria-label="Show Workspace"]')!.click();
   }));
   const first = samples[0]!;
   const last = samples.at(-1)!;
@@ -377,7 +377,7 @@ for (const width of [1280, 640]) {
         else resolve(samples);
       };
       sample();
-      tray.querySelector<HTMLButtonElement>('button[aria-label="Hide References"], button[aria-label="Hide workspace"]')!.click();
+      tray.querySelector<HTMLButtonElement>('button[aria-label="Hide References"], button[aria-label="Hide Workspace"]')!.click();
     }));
     const first = samples[0]!;
     const last = samples.at(-1)!;
@@ -430,7 +430,7 @@ for (const { referencesOpen, tall, zoomPercent } of [
         else resolve(samples);
       };
       sample();
-      document.querySelector<HTMLButtonElement>('button[aria-label="Show workspace"]')!.click();
+      document.querySelector<HTMLButtonElement>('button[aria-label="Show Workspace"]')!.click();
     }));
     const first = samples[0]!;
     const last = samples.at(-1)!;
@@ -467,13 +467,13 @@ test('refreshes the current page when workspace occlusion changes without scroll
   await page.getByRole('button', { name: 'Finish host bootstrap' }).click();
   const currentPage = page.getByRole('textbox', { name: /^Current page \d+ of 4/u });
   await expect(currentPage).toBeVisible();
-  const show = page.getByRole('button', { name: 'Show workspace', exact: true });
+  const show = page.getByRole('button', { name: 'Show Workspace', exact: true });
   if (await show.isVisible()) await show.click();
   await page.getByRole('tab', { name: 'Outline', exact: true }).click();
   await page.getByRole('button', { name: 'Overview, Page 2', exact: true }).click();
   await expect(currentPage).toHaveValue('2');
   await settlePages();
-  await page.getByRole('group', { name: 'Workspace trays', exact: true }).getByRole('button', { name: 'Hide workspace', exact: true }).click();
+  await page.getByRole('group', { name: 'Workspace trays', exact: true }).getByRole('button', { name: 'Hide Workspace', exact: true }).click();
   await settlePages();
   const zoom = page.getByRole('textbox', { name: /^Current zoom/u });
   await zoom.fill(String(Number(await zoom.inputValue()) + 1));
@@ -519,7 +519,7 @@ test('refreshes the current page when a right workspace narrows mixed-width page
   await page.getByRole('button', { name: 'Finish host bootstrap' }).click();
   const currentPage = page.getByRole('textbox', { name: /^Current page \d+ of 4/u });
   await expect(currentPage).toBeVisible();
-  const hide = page.getByRole('group', { name: 'Workspace trays', exact: true }).getByRole('button', { name: 'Hide workspace', exact: true });
+  const hide = page.getByRole('group', { name: 'Workspace trays', exact: true }).getByRole('button', { name: 'Hide Workspace', exact: true });
   if (await hide.isVisible()) await hide.click();
   const zoom = page.getByRole('textbox', { name: /^Current zoom/u });
   await zoom.fill('120');
@@ -534,7 +534,7 @@ test('refreshes the current page when a right workspace narrows mixed-width page
   });
   await expect(currentPage).toHaveValue('2');
   const before = await viewport.evaluate(element => ({ top: element.scrollTop, left: element.scrollLeft }));
-  await page.getByRole('button', { name: 'Show workspace', exact: true }).click();
+  await page.getByRole('button', { name: 'Show Workspace', exact: true }).click();
   await expect(currentPage).toHaveValue('1');
   expect(await viewport.evaluate(element => ({ top: element.scrollTop, left: element.scrollLeft }))).toEqual(before);
   await expect(zoom).toHaveValue('120');
