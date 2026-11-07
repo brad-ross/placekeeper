@@ -11,6 +11,10 @@
   --pdf-insert-ink: #2f6fc4;
   --pdf-correction-fill: rgb(218 78 78 / 20%);
   --pdf-correction-ink: #c34f54;
+  /* Search hits, on the page and in the result list: the accent blue, strong
+     enough to find at a glance yet distinct from the paler selection wash. */
+  --pdf-search-fill: rgb(47 111 196 / 30%);
+  --pdf-search-related-fill: rgb(217 173 43 / 42%);
   --pk-font-ui: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --pk-canvas: #f7f7f7;
   --pk-tray: #f0f0f0;
@@ -87,12 +91,6 @@
   grid-template-columns: minmax(0, max-content) max-content minmax(max-content, 1fr) max-content;
 }
 
-@media (max-width: 480px) {
-  .review-chrome:has(> .review-chrome__tray-controls) {
-    column-gap: min(4px, var(--pk-toolbar-gap));
-  }
-}
-
 .review-chrome__identity {
   width: 100%;
   gap: var(--pk-toolbar-gap);
@@ -101,8 +99,22 @@
 /* One cap for the identity and its trigger, so a long PDF title truncates
    without leaving a gap before the page controls. */
 .review-chrome__identity > .document-actions {
+  /* Flex, so the trigger inside shrinks with the identity column instead of
+     overflowing onto the page and zoom controls. */
+  display: flex;
   min-width: 0;
   max-width: 320px;
+}
+
+/* Too narrow for a readable title: show only the file icon. The full title
+   stays in the trigger's tooltip and accessible name. */
+.review-chrome[data-review-chrome-title="icon"] > .review-chrome__identity .review-chrome__filename {
+  display: none;
+}
+
+.review-chrome[data-review-chrome-title="icon"] > .review-chrome__identity .review-chrome__save-identity {
+  justify-content: center;
+  min-width: 32px;
 }
 
 .review-chrome .review-chrome__save-identity,
@@ -495,29 +507,13 @@
   pointer-events: none;
 }
 
-@media (max-width: 360px) {
-  .review-chrome {
-    --pk-toolbar-gap: 3px;
-  }
-
-  .review-chrome__filename {
-    display: none;
-  }
-
-  .review-chrome .review-chrome__save-identity {
-    justify-content: center;
-  }
-}
-
-.review-chrome[data-review-chrome-history-compact="true"] .review-chrome__filename {
+.review-chrome[data-review-chrome-touch-compact="true"] .review-chrome__filename {
   display: none;
 }
 
-@media (pointer: coarse) {
-  .review-chrome[data-review-chrome-history-compact="true"] .review-chrome__save-identity {
-    min-width: 44px;
-    justify-content: center;
-  }
+.review-chrome[data-review-chrome-touch-compact="true"] > .review-chrome__identity .review-chrome__save-identity {
+  min-width: 44px;
+  justify-content: center;
 }
 
 .review-chrome__paired-icon {

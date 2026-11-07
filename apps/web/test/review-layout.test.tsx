@@ -1684,16 +1684,16 @@ describe('review shell layout and accessibility contract', () => {
       name: 'a split layout with the right tray closed',
       layout: 'wide-bottom',
       trayButtons: [
-        ['right', 'false', 'review-tools-workspace', 'Show workspace'],
         ['bottom', 'true', 'review-workspace', 'Hide References'],
+        ['right', 'false', 'review-tools-workspace', 'Show workspace'],
       ],
     },
     {
       name: 'a split layout with both trays open',
       layout: 'wide-split',
       trayButtons: [
-        ['right', 'true', 'review-tools-workspace', 'Hide workspace'],
         ['bottom', 'true', 'review-workspace', 'Hide References'],
+        ['right', 'true', 'review-tools-workspace', 'Hide workspace'],
       ],
     },
     {

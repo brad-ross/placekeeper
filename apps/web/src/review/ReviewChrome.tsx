@@ -1,4 +1,4 @@
-import { useId, useLayoutEffect, useRef, useState, type MouseEvent, type PointerEvent, type ReactNode, type Ref } from 'react';
+import { useCallback, useId, useLayoutEffect, useRef, useState, type MouseEvent, type PointerEvent, type ReactNode, type Ref } from 'react';
 
 import {
   VIEWER_ZOOM_MAX_PERCENT,
@@ -21,10 +21,42 @@ import {
 import { TopBarMenu } from './TopBarMenu.js';
 import {
   REVIEW_CHROME_PRESENTATIONS,
+  chooseReviewChromeHistoryCompact,
   chooseReviewChromePresentation,
+  chooseReviewChromeTitlePresentation,
   type ReviewChromePresentation,
   type ReviewChromePresentationWidths,
+  type ReviewChromeTitlePresentation,
 } from './review-chrome-layout.js';
+
+/**
+ * Width left for the document title text once the other toolbar controls
+ * and the title button's own icon and padding have their natural widths.
+ * Independent of whether the title is currently shown.
+ */
+function measureReviewChromeTitleRoom(chrome: HTMLElement): number {
+  const style = getComputedStyle(chrome);
+  const contentWidth = chrome.clientWidth
+    - (Number.parseFloat(style.paddingLeft) || 0)
+    - (Number.parseFloat(style.paddingRight) || 0);
+  const columnGap = Number.parseFloat(style.columnGap) || 0;
+  const width = (element: Element | null) => element?.getBoundingClientRect().width ?? 0;
+  const identity = chrome.querySelector<HTMLElement>(':scope > .review-chrome__identity');
+  const trigger = identity?.querySelector<HTMLElement>('.review-chrome__save-identity') ?? null;
+  const filename = trigger?.querySelector<HTMLElement>('.review-chrome__filename') ?? null;
+  const context = identity?.querySelector<HTMLElement>(':scope > [data-review-context-status]') ?? null;
+  const trays = chrome.querySelector(':scope > .review-chrome__tray-controls');
+  const identityGap = identity === null ? 0 : Number.parseFloat(getComputedStyle(identity).columnGap) || 0;
+  const filenameShown = filename !== null && getComputedStyle(filename).display !== 'none';
+  const triggerChrome = width(trigger) - (filenameShown ? width(filename) : 0);
+  return contentWidth
+    - width(chrome.querySelector(':scope > .review-chrome__left-controls'))
+    - width(chrome.querySelector(':scope > .review-chrome__viewer-controls'))
+    - 2 * columnGap
+    - (trays === null ? 0 : width(trays) + columnGap)
+    - (context === null ? 0 : width(context) + identityGap)
+    - triggerChrome;
+}
 
 export function validPageNumber(draft: string, totalPages: number): number | undefined {
   const normalized = draft.trim();
@@ -189,9 +221,20 @@ export function ReviewChrome({
   workspaceTrayToggles = [],
 }: ReviewChromeProps) {
   const hasWorkspaceTrayToggles = workspaceTrayToggles.length > 0;
-  const [compactHistory, setCompactHistory] = useState(false);
+  const [compactTouch, setCompactTouch] = useState(false);
   const compactHistoryFocusRef = useRef<TopBarMenuId | null>(null);
   const [presentation, setPresentation] = useState<ReviewChromePresentation>('navigationCompact');
+  const [titlePresentation, setTitlePresentation] = useState<ReviewChromeTitlePresentation>('title');
+  // Too narrow for separate history controls even with an icon-only title.
+  const [narrowHistory, setNarrowHistory] = useState(false);
+  const titleMeasurementRef = useRef<{
+    presentation: ReviewChromeTitlePresentation;
+    narrow: boolean;
+    roomBeforeCombining: number | null;
+    savings: number | null;
+  }>({ presentation: 'title', narrow: false, roomBeforeCombining: null, savings: null });
+  // Undo/Redo share one menu button and Back/Forward move into the page menu.
+  const compactHistory = compactTouch || narrowHistory;
   const [activeTopBarMenu, setActiveTopBarMenu] = useState<TopBarMenuId | null>(null);
   const topBarMenuKeyboardOpenRef = useRef(true);
   const [topBarMenuHoverOpen, setTopBarMenuHoverOpen] = useState(false);
@@ -319,27 +362,27 @@ export function ReviewChrome({
   documentMenuPendingRef.current = documentMenuPending;
   presentationRef.current = presentation;
 
+  const prepareHistoryLayoutChange = useCallback(() => {
+    const focusedGroup = document.activeElement instanceof HTMLElement
+      ? document.activeElement.closest<HTMLElement>('[data-review-chrome-group]')?.dataset.reviewChromeGroup
+      : undefined;
+    const documentPending = documentMenuPendingRef.current && activeTopBarMenuRef.current === 'document';
+    compactHistoryFocusRef.current = documentPending ? null : activeTopBarMenuRef.current
+      ?? (focusedGroup as TopBarMenuId | undefined) ?? null;
+    if (!documentPending) setActiveTopBarMenu(null);
+  }, []);
+
   useLayoutEffect(() => {
-    // Tray toggles add a fixed-width column, so the narrowest fine-pointer
-    // layout also needs the existing compact history menus.
-    const media = matchMedia(hasWorkspaceTrayToggles
-      ? '(max-width: 480px) and (pointer: coarse), (max-width: 380px)'
-      : '(max-width: 480px) and (pointer: coarse)');
+    const media = matchMedia('(max-width: 480px) and (pointer: coarse)');
     const update = () => {
-      if (media.matches === compactHistory) return;
-      const focusedGroup = document.activeElement instanceof HTMLElement
-        ? document.activeElement.closest<HTMLElement>('[data-review-chrome-group]')?.dataset.reviewChromeGroup
-        : undefined;
-      const documentPending = documentMenuPendingRef.current && activeTopBarMenuRef.current === 'document';
-      compactHistoryFocusRef.current = documentPending ? null : activeTopBarMenuRef.current
-        ?? (focusedGroup as TopBarMenuId | undefined) ?? null;
-      if (!documentPending) setActiveTopBarMenu(null);
-      setCompactHistory(media.matches);
+      if (media.matches === compactTouch) return;
+      if (!titleMeasurementRef.current.narrow) prepareHistoryLayoutChange();
+      setCompactTouch(media.matches);
     };
     update();
     media.addEventListener('change', update);
     return () => media.removeEventListener('change', update);
-  }, [compactHistory, hasWorkspaceTrayToggles]);
+  }, [compactTouch, prepareHistoryLayoutChange]);
 
   useLayoutEffect(() => {
     const group = compactHistoryFocusRef.current;
@@ -423,6 +466,65 @@ export function ReviewChrome({
       observer.disconnect();
     };
   }, []);
+
+  // As the bar narrows: the title truncates with an ellipsis, then collapses
+  // to its file icon, then Undo/Redo and Back/Forward combine so the controls
+  // keep their normal spacing.
+  useLayoutEffect(() => {
+    const chrome = chromeRef.current;
+    if (!chrome || typeof ResizeObserver === 'undefined') return;
+    let frame = 0;
+    let disposed = false;
+    const measurement = titleMeasurementRef.current;
+    const measure = () => {
+      frame = 0;
+      if (disposed || chrome.clientWidth <= 0) return;
+      const titleRoom = measureReviewChromeTitleRoom(chrome);
+      const showsCombined = chrome.querySelector('.review-chrome__history-trigger') !== null;
+      if (measurement.narrow && measurement.roomBeforeCombining !== null && showsCombined) {
+        measurement.savings = titleRoom - measurement.roomBeforeCombining;
+        measurement.roomBeforeCombining = null;
+      }
+      const nextNarrow = chooseReviewChromeHistoryCompact({
+        titleRoom, compact: measurement.narrow, savings: measurement.savings,
+      });
+      if (nextNarrow !== measurement.narrow) {
+        measurement.narrow = nextNarrow;
+        // Record the room before combining so we can measure what it frees.
+        measurement.roomBeforeCombining = nextNarrow && !showsCombined ? titleRoom : null;
+        // Already combined (touch layout): nothing to free, so no runway owed.
+        measurement.savings = nextNarrow && showsCombined ? 0 : null;
+        if (chrome.dataset.reviewChromeTouchCompact !== 'true') prepareHistoryLayoutChange();
+        setNarrowHistory(nextNarrow);
+      }
+      // Combined controls come after the title has collapsed; the freed room
+      // must not bring the title back, or widening would hide it again.
+      const next = measurement.narrow ? 'icon' : chooseReviewChromeTitlePresentation({
+        titleRoom, previous: measurement.presentation,
+      });
+      if (next === measurement.presentation) return;
+      measurement.presentation = next;
+      setTitlePresentation(next);
+    };
+    const scheduleMeasure = () => {
+      if (disposed || frame !== 0) return;
+      frame = requestAnimationFrame(measure);
+    };
+    const observer = new ResizeObserver(scheduleMeasure);
+    observer.observe(chrome);
+    for (const element of chrome.querySelectorAll<HTMLElement>(
+      ':scope > :is(.review-chrome__identity, .review-chrome__left-controls, .review-chrome__viewer-controls, .review-chrome__tray-controls)',
+    )) {
+      observer.observe(element);
+    }
+    measure();
+    void document.fonts?.ready.then(scheduleMeasure);
+    return () => {
+      disposed = true;
+      if (frame !== 0) cancelAnimationFrame(frame);
+      observer.disconnect();
+    };
+  }, [hasWorkspaceTrayToggles, prepareHistoryLayoutChange]);
 
   useLayoutEffect(() => {
     const focusGroup = pendingTransitionFocusRef.current;
@@ -1009,7 +1111,8 @@ export function ReviewChrome({
     className="review-chrome"
     data-review-chrome
     data-review-chrome-presentation={presentation}
-    data-review-chrome-history-compact={compactHistory ? 'true' : undefined}
+    data-review-chrome-title={titlePresentation}
+    data-review-chrome-touch-compact={compactTouch ? 'true' : undefined}
     data-top-bar-menu-open={activeTopBarMenu ?? undefined}
   >
     <div className="review-chrome__identity">
@@ -1077,6 +1180,8 @@ export function ReviewChrome({
         key={candidate}
         className="review-chrome review-chrome__sizing-candidate"
         data-review-chrome-candidate={candidate}
+        data-review-chrome-title={titlePresentation}
+        data-review-chrome-touch-compact={compactTouch ? 'true' : undefined}
         style={{
           position: 'absolute',
           display: 'inline-grid',

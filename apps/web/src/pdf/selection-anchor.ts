@@ -14,6 +14,7 @@ import {
   type PageText,
   type ReliabilityDiagnostic,
 } from './text-reliability.js';
+import { DEFAULT_SELECTION_CONTEXT_CHARACTERS } from './context-excerpt.js';
 
 export interface AnchorPage extends PageText {
   pageIndex: number;
@@ -182,7 +183,7 @@ export function createSelectionAnchor(input: CreateSelectionAnchorInput): Select
   }
 
   const quoteIndex = input.quoteStart ?? input.page.extractedText.indexOf(input.quote);
-  const contextCharacters = Math.max(0, input.contextCharacters ?? 48);
+  const contextCharacters = Math.max(0, input.contextCharacters ?? DEFAULT_SELECTION_CONTEXT_CHARACTERS);
   const segmentRects = naturalRects.map(toPageSpace);
   const prefix = input.page.extractedText.slice(Math.max(0, quoteIndex - contextCharacters), quoteIndex);
   const suffix = input.page.extractedText.slice(
@@ -322,7 +323,7 @@ export function createCaretAnchor(
       diagnostic: 'selection-geometry-out-of-bounds',
     };
   }
-  const contextCharacters = Math.max(0, input.contextCharacters ?? 48);
+  const contextCharacters = Math.max(0, input.contextCharacters ?? DEFAULT_SELECTION_CONTEXT_CHARACTERS);
   return {
     ok: true,
     anchor: {

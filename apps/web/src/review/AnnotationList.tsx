@@ -274,6 +274,7 @@ export function AnnotationRowContent({
         {...(presentation.sourceText ? { sourceText: presentation.sourceText } : {})}
         {...(presentation.sourceTreatment ? { sourceTreatment: presentation.sourceTreatment } : {})}
         {...(presentation.quoteText ? { quoteText: presentation.quoteText } : {})}
+        {...(presentation.quoteContext ? { quoteContext: presentation.quoteContext } : {})}
         readerRecord={readerRecord}
         {...(onReadFull ? { onReadFull } : {})}
         {...(onReaderOverflowChange ? { onOverflowChange: onReaderOverflowChange } : {})}

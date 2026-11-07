@@ -1196,11 +1196,15 @@ test.describe('canonical review workflow', () => {
     );
   });
 
-  test('keeps direct page and zoom controls usable while the neutral toolbar wraps', async ({ page }) => {
+  test('keeps direct page and zoom controls usable in the compact toolbar', async ({ page }) => {
     await page.goto('/test/acceptance/review-harness/index.html?responsive=full');
     await page.setViewportSize({ width: 320, height: 720 });
     const chrome = page.locator('[data-review-chrome]');
-    await expect(chrome).toHaveAttribute('data-review-chrome-presentation', 'expanded');
+    await expect(chrome).toHaveAttribute('data-review-chrome-title', 'icon');
+    await expect(chrome.getByRole('button', { name: 'Open edit history' })).toBeVisible();
+    await page.evaluate(() => new Promise<void>((resolve) => {
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+    }));
 
     const pageInput = page.getByRole('textbox', {
       name: 'Current page 3 of 12. Enter a page number',
@@ -1592,7 +1596,7 @@ test.describe('canonical review workflow', () => {
     const chrome = page.locator('[data-review-chrome]');
     const history = chrome.locator(':scope > .review-chrome__left-controls [data-main-history], :scope > .review-chrome__viewer-controls .review-chrome__history-control');
     await expect(history).toHaveCount(4);
-    for (const width of [760, 759, 640, 480, 381]) {
+    for (const width of [760, 759, 640, 480]) {
       await page.setViewportSize({ width, height: 720 });
       await expect.poll(() => history.evaluateAll((buttons) => buttons.length === 4
         && buttons.every((button) => button.getBoundingClientRect().width >= 32)),
@@ -1600,6 +1604,7 @@ test.describe('canonical review workflow', () => {
     }
 
     await page.setViewportSize({ width: 640, height: 720 });
+    await expect(chrome).toHaveAttribute('data-review-chrome-title', 'title');
     const positions = async () => ({
       history: await history.evaluateAll((buttons) => buttons.map((button) => ({
         x: button.getBoundingClientRect().x,
@@ -1638,7 +1643,7 @@ test.describe('canonical review workflow', () => {
     const menu = page.getByRole('menu', { name: 'Edit history' });
     await expect(menu.getByRole('menuitem', { name: 'Undo' })).toBeFocused();
     await expect(menu.getByRole('menuitem', { name: 'Redo' })).toBeDisabled();
-    await page.setViewportSize({ width: 381, height: 720 });
+    await page.setViewportSize({ width: 640, height: 720 });
     await expect(menu).toHaveCount(0);
     await expect(undo).toBeFocused();
   });

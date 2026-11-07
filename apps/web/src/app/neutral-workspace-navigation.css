@@ -392,6 +392,15 @@
   opacity: 1;
 }
 
+/* Result count sits inside the field, right-aligned beside the clear button. */
+.pdf-search__count {
+  flex: none;
+  color: var(--pk-muted);
+  font: 400 12px/1 var(--pk-font-ui);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 .pdf-search__clear-slot {
   position: static;
   display: block;
@@ -527,11 +536,18 @@
   font: 400 11px/1.5 var(--pk-font-ui);
 }
 
+/* Result matches use the same wash as the search hits painted on the PDF. */
 .pdf-search__result-match {
   padding: 0 1px;
-  color: inherit;
-  background: #e6e6e6;
+  border-radius: 2px;
+  /* Full ink on the tint, so the match reads ahead of the muted snippet. */
+  color: var(--pk-ink);
+  background: var(--pdf-search-fill, rgb(47 111 196 / 30%));
   font-weight: 400;
+}
+
+.pdf-search__result-match[data-pdf-search-match-kind="related"] {
+  background: var(--pdf-search-related-fill, rgb(217 173 43 / 42%));
 }
 
 :is(.review-workspace, .review-tools-workspace) li[data-search-result] {
