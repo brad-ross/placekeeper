@@ -3143,6 +3143,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
             label: tab.label ?? `Page ${tab.originalTarget.pageIndex + 1}`,
             pageContext: tab.pageContext ?? `Page ${tab.originalTarget.pageIndex + 1}`,
             pageNumber: tab.originalTarget.pageIndex + 1,
+            failed: tab.settledLocation === null,
           })),
           pendingReference,
           referenceReturn: activeReferenceReturn,

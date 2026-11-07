@@ -58,11 +58,18 @@ interface Operation {
 }
 
 interface PendingReferenceRequest {
+  readonly tabIdentity: string;
   readonly target: PdfNavigationTarget;
   readonly metadata: NavigationDestinationMetadata;
   readonly documentGeneration: number;
-  readonly preservedMainTarget?: PdfNavigationTarget | null;
-  readonly options?: ReferenceOpenOptions;
+  readonly preserveMain: boolean;
+  readonly options: ReferenceOpenOptions;
+}
+
+function referenceOpenIdentity(target: PdfNavigationTarget, options: ReferenceOpenOptions): string {
+  return options.preferredTabIdentity ?? (options.annotationIdentity === undefined
+    ? target.identity
+    : annotationReferenceTabIdentity(options.annotationIdentity));
 }
 
 export interface ReferenceOpenSettlement {
@@ -79,6 +86,7 @@ export interface ReferenceOpenOptions {
   /** Recreates the exact frozen origin after its tab was closed. */
   readonly preferredTabIdentity?: string;
   readonly onSettled?: (settlement: ReferenceOpenSettlement) => void;
+  readonly destinationBand?: DestinationBand;
 }
 
 /** Transient, active-viewer presentation state; never part of durable review navigation. */
@@ -415,6 +423,7 @@ export class NavigationCoordinator {
   private documentGeneration: number;
   private lastSearchTargetIdentity: string | null = null;
   private pendingReference: PendingReferenceRequest | null = null;
+  private readonly failedReferences = new Map<string, PendingReferenceRequest>();
   private linkRequest: ViewerPdfLinkInvocation | null = null;
   private linkRequestSourceTabIdentity: string | null = null;
   /** A Send-selected successor whose saved view is not currently rendered. */
@@ -439,8 +448,6 @@ export class NavigationCoordinator {
   /** False while the main band is shown ahead of its still-settling jump. */
   private mainBandSettled = true;
   private referenceBands = new Map<string, DestinationBand>();
-  /** The band of a link open that failed, applied if that open is retried. */
-  private retryBand: { readonly targetIdentity: string; readonly band: DestinationBand } | null = null;
 
   constructor(private readonly dependencies: NavigationCoordinatorDependencies) {
     this.documentGeneration = dependencies.getState().documentGeneration;
@@ -571,7 +578,7 @@ export class NavigationCoordinator {
       && state.pendingReferenceSwitch === null
       && this.referenceRestoreIdentity === null
       && state.activeTabIdentity !== null
-      && state.tabs.some((tab) => tab.identity === state.activeTabIdentity)
+      && state.tabs.some((tab) => tab.identity === state.activeTabIdentity && tab.settledLocation !== null)
       ? state.activeTabIdentity
       : null;
     if (
@@ -683,14 +690,13 @@ export class NavigationCoordinator {
     this.releaseDescription(task);
     if (!this.generationMatches(request.target.documentGeneration)) return false;
     const band = bandFromDescription(description);
-    // Kept for a retry of this open, which creates the tab later.
-    this.retryBand = band === null ? null : { targetIdentity: request.target.identity, band };
     const opened = await this.openReference(
       request.target,
       linkReferenceMetadata(request.metadata, description),
+      undefined,
+      band === null ? {} : { destinationBand: band },
     );
     if (!opened || !this.generationMatches(request.target.documentGeneration)) return opened;
-    this.retryBand = null;
     const tab = this.dependencies.getState().tabs.find((candidate) => (
       candidate.annotationIdentity === undefined
       && candidate.originalTarget.identity === request.target.identity
@@ -1008,7 +1014,7 @@ export class NavigationCoordinator {
       : null;
     const presentation = this.dependencies.getReferenceReturnState();
     if (
-      tab === null
+      tab === null || tab.settledLocation === null
       || tab.originalTarget.documentGeneration !== state.documentGeneration
       || presentation === null
       || presentation.tabIdentity !== tabIdentity
@@ -1060,7 +1066,7 @@ export class NavigationCoordinator {
     const preferredExisting = options.preferredTabIdentity === undefined
       ? undefined
       : state.tabs.find((tab) => tab.identity === options.preferredTabIdentity);
-    const existing = preferredExisting ?? (options.annotationIdentity === undefined
+    const matchingTab = preferredExisting ?? (options.annotationIdentity === undefined
       ? state.tabs.find((tab) => (
           tab.annotationIdentity === undefined
           && tab.originalTarget.identity === target.identity
@@ -1069,7 +1075,17 @@ export class NavigationCoordinator {
           tab.annotationIdentity !== undefined
           && annotationReaderIdentityMatches(tab.annotationIdentity, options.annotationIdentity!)
     )));
+    const existing = matchingTab?.settledLocation === null ? undefined : matchingTab;
+    const tabIdentity = matchingTab?.identity ?? referenceOpenIdentity(target, options);
     const preserveMain = preservedMainTarget !== undefined;
+    const pending: PendingReferenceRequest = {
+      tabIdentity,
+      target,
+      metadata,
+      documentGeneration: operation.documentGeneration,
+      preserveMain,
+      options,
+    };
     const main = preserveMain ? this.dependencies.getMainNavigation() : undefined;
     const mainLocation = preservedMainTarget === null
       ? main?.captureLocation('viewport-origin') ?? null
@@ -1093,13 +1109,7 @@ export class NavigationCoordinator {
       return this.failReference(operation);
     };
     if (!existing && preserveMain) {
-      this.pendingReference = {
-        target,
-        metadata,
-        documentGeneration: operation.documentGeneration,
-        preservedMainTarget,
-        ...(Object.keys(options).length === 0 ? {} : { options }),
-      };
+      this.pendingReference = pending;
       this.dependencies.setPendingReference({ status: 'loading', ...metadata });
     }
 
@@ -1145,12 +1155,7 @@ export class NavigationCoordinator {
     }
 
     if (!preserveMain) {
-      this.pendingReference = {
-        target,
-        metadata,
-        documentGeneration: operation.documentGeneration,
-        ...(Object.keys(options).length === 0 ? {} : { options }),
-      };
+      this.pendingReference = pending;
       this.dependencies.setPendingReference({ status: 'loading', ...metadata });
     }
 
@@ -1181,11 +1186,7 @@ export class NavigationCoordinator {
     );
     if (settledLocation === null) return failPreservingMain();
 
-    const tabIdentity = options.preferredTabIdentity
-      ?? (options.annotationIdentity === undefined
-        ? target.identity
-        : annotationReferenceTabIdentity(options.annotationIdentity));
-
+    this.failedReferences.delete(tabIdentity);
     this.dependencies.dispatch({
       type: 'open-reference',
       target,
@@ -1195,9 +1196,7 @@ export class NavigationCoordinator {
       ...(options.annotationIdentity === undefined
         ? {}
         : { annotationIdentity: options.annotationIdentity }),
-      ...(options.preferredTabIdentity === undefined
-        ? {}
-        : { tabIdentity: options.preferredTabIdentity }),
+      tabIdentity,
     });
     // Reference mounting can settle the shared runway more than once. Restore
     // Main only after the tab and its final layout are committed so the viewer
@@ -1242,29 +1241,26 @@ export class NavigationCoordinator {
   }
 
   async retryReference(): Promise<boolean> {
-    const pending = this.pendingReference;
+    const activeIdentity = this.dependencies.getState().activeTabIdentity;
+    const pending = activeIdentity === null ? undefined : this.failedReferences.get(activeIdentity);
     const controller = this.dependencies.getReferenceController();
     if (
-      pending === null
+      pending === undefined
+      || this.pendingReference !== null
       || controller === null
       || pending.documentGeneration !== this.documentGeneration
       || controller.snapshot().documentGeneration !== this.documentGeneration
     ) return false;
+    const { tabIdentity, preserveMain, options } = pending;
     const status = controller.snapshot().status;
-    if (status !== 'failed' && status !== 'loaded') return false;
-    const operation = this.begin(pending.documentGeneration, { preservePendingReference: true, movesMain: false });
+    const operation = this.begin(pending.documentGeneration, { movesMain: false });
     if (operation === null) return false;
-    const preserveMain = pending.preservedMainTarget !== undefined;
     const main = preserveMain ? this.dependencies.getMainNavigation() : undefined;
-    const mainLocation = pending.preservedMainTarget === null
-      ? main?.captureLocation('viewport-origin') ?? null
-      : main?.captureLocation() ?? null;
+    // A retained tab can be retried long after the user has moved Main.
+    const mainLocation = main?.captureLocation('viewport-origin') ?? null;
     const restoreMainLocation = async () => {
       if (!preserveMain) return true;
       if (main !== this.dependencies.getMainNavigation()) return false;
-      if (main && pending.preservedMainTarget !== null) {
-        return main.applyTarget(pending.preservedMainTarget);
-      }
       const shifted = main?.captureLocation('viewport-origin') ?? null;
       return !main
         || !mainLocation
@@ -1272,8 +1268,10 @@ export class NavigationCoordinator {
         || main.applyLocation(mainLocation);
     };
     this.clearReferenceReturnState();
+    this.pendingReference = pending;
     this.dependencies.setPendingReference({ status: 'loading', ...pending.metadata });
-    const opened = status === 'failed' ? await controller.retry() : true;
+    const opened = status === 'failed' ? await controller.retry()
+      : status === 'loaded' || await controller.open();
     if (!this.isCurrent(operation)) return false;
     if (!opened) return this.failReference(operation);
     const navigation = this.dependencies.getReferenceNavigation()
@@ -1286,36 +1284,31 @@ export class NavigationCoordinator {
       pending.target,
     );
     if (settledLocation === null) return this.failReference(operation);
+    this.failedReferences.delete(tabIdentity);
     this.dependencies.dispatch({
       type: 'open-reference',
       target: pending.target,
       settledLocation,
       label: pending.metadata.label,
       pageContext: pending.metadata.pageContext,
-      ...(pending.options?.annotationIdentity === undefined
+      ...(options.annotationIdentity === undefined
         ? {}
-        : { annotationIdentity: pending.options.annotationIdentity }),
-      ...(pending.options?.preferredTabIdentity === undefined
-        ? {}
-        : { tabIdentity: pending.options.preferredTabIdentity }),
+        : { annotationIdentity: options.annotationIdentity }),
+      tabIdentity,
     });
-    const tabIdentity = pending.options?.preferredTabIdentity
-      ?? (pending.options?.annotationIdentity === undefined
-        ? pending.target.identity
-        : annotationReferenceTabIdentity(pending.options.annotationIdentity));
     if (preserveMain) {
       await this.dependencies.layout.settle();
       if (!this.isCurrent(operation)) return false;
       if (!await restoreMainLocation() || !this.isCurrent(operation)) return false;
     }
-    const explicitReveal = pending.options?.annotationIdentity !== undefined
-      || pending.options?.preferredTabIdentity !== undefined;
+    const explicitReveal = options.annotationIdentity !== undefined
+      || options.preferredTabIdentity !== undefined;
     const committedSettlement = explicitReveal
       ? await this.revealReferenceTarget(
           operation,
           tabIdentity,
           pending.target,
-          pending.options?.annotationIdentity,
+          options.annotationIdentity,
         )
       : null;
     if (explicitReveal && committedSettlement === null) return this.failReference(operation);
@@ -1323,19 +1316,12 @@ export class NavigationCoordinator {
     this.pendingReference = null;
     this.referenceRestoreIdentity = null;
     this.dependencies.setPendingReference(null);
-    // A retried link open gets the band its first attempt resolved (KTD9).
-    const retryBand = this.retryBand;
-    this.retryBand = null;
-    if (
-      retryBand !== null
-      && pending.options?.annotationIdentity === undefined
-      && retryBand.targetIdentity === pending.target.identity
-      && this.generationMatches(retryBand.band.documentGeneration)
-    ) {
-      this.referenceBands.set(tabIdentity, retryBand.band);
+    const band = options.destinationBand;
+    if (band !== undefined && this.generationMatches(band.documentGeneration)) {
+      this.referenceBands.set(tabIdentity, band);
       this.publishBands();
     }
-    pending.options?.onSettled?.(committedSettlement ?? {
+    options.onSettled?.(committedSettlement ?? {
       token: operation.token,
       documentGeneration: operation.documentGeneration,
       tabIdentity,
@@ -1379,6 +1365,10 @@ export class NavigationCoordinator {
       ? null
       : state.tabs.find((candidate) => candidate.identity === identity) ?? null;
     if (tab === null) return true;
+    if (tab.settledLocation === null) {
+      this.dependencies.focusReferenceTab(tab.identity);
+      return true;
+    }
     const navigation = this.dependencies.getReferenceNavigation();
     const live = navigation?.captureLocation() ?? null;
     if (!navigation || live === null) {
@@ -1413,6 +1403,7 @@ export class NavigationCoordinator {
     const index = state.tabs.findIndex((tab) => tab.identity === identity);
     if (index < 0) return false;
     if (state.activeTabIdentity !== identity) {
+      this.failedReferences.delete(identity);
       this.dependencies.dispatch({
         type: 'close-reference',
         targetIdentity: identity,
@@ -1427,6 +1418,7 @@ export class NavigationCoordinator {
     if (successorIdentity !== null) {
       if (!await this.restoreReferenceTab(operation, successorIdentity, false)) return false;
       if (!this.isCurrent(operation)) return false;
+      this.failedReferences.delete(identity);
       this.dependencies.dispatch({
         type: 'close-reference',
         targetIdentity: identity,
@@ -1438,6 +1430,7 @@ export class NavigationCoordinator {
       return true;
     }
 
+    this.failedReferences.delete(identity);
     this.dependencies.dispatch({
       type: 'close-reference',
       targetIdentity: identity,
@@ -1459,7 +1452,8 @@ export class NavigationCoordinator {
     if (operation === null) return false;
     this.clearReferenceReturnState();
     const state = this.dependencies.getState();
-    if (state.activeTabIdentity !== identity) return false;
+    if (state.activeTabIdentity !== identity
+      || !state.tabs.some((tab) => tab.identity === identity && tab.settledLocation !== null)) return false;
     const reference = this.dependencies.getReferenceNavigation();
     const main = this.dependencies.getMainNavigation();
     const referenceLocation = reference?.captureLocation() ?? null;
@@ -1850,7 +1844,7 @@ export class NavigationCoordinator {
     this.mainBand = null;
     this.mainBandSettled = true;
     this.referenceBands.clear();
-    this.retryBand = null;
+    this.failedReferences.clear();
     this.publishBands();
     this.locationRestored = this.dependencies.locationHistory === undefined;
     this.dependencies.getMainNavigation()?.replaceDocument(documentGeneration);
@@ -1875,6 +1869,7 @@ export class NavigationCoordinator {
     this.clearReferenceReturnState();
     this.operationToken += 1;
     this.pendingReference = null;
+    this.failedReferences.clear();
     this.linkRequest = null;
     this.linkRequestSourceTabIdentity = null;
     this.referenceRestoreIdentity = null;
@@ -2006,7 +2001,17 @@ export class NavigationCoordinator {
     const incoming = state.tabs.find((tab) => tab.identity === identity);
     const navigation = this.dependencies.getReferenceNavigation();
     const outgoingLocation = navigation?.captureLocation() ?? null;
-    if (!incoming || !navigation || outgoingLocation === null) {
+    if (incoming?.settledLocation === null) {
+      if (outgoingLocation !== null && this.referenceRestoreIdentity !== state.activeTabIdentity) {
+        this.dependencies.dispatch({ type: 'refresh-active-reference', settledLocation: outgoingLocation });
+      }
+      this.dependencies.dispatch({ type: 'select-failed-reference', targetIdentity: identity });
+      this.referenceRestoreIdentity = null;
+      if (announce) this.dependencies.focusReferenceTab(identity);
+      return true;
+    }
+    const active = state.tabs.find((tab) => tab.identity === state.activeTabIdentity);
+    if (!incoming || !navigation || (outgoingLocation === null && active?.settledLocation !== null)) {
       if (announce && this.isCurrent(operation)) this.dependencies.setAnnouncement(REFERENCE_FAILURE);
       return false;
     }
@@ -2023,7 +2028,7 @@ export class NavigationCoordinator {
         }
         this.dependencies.dispatch({ type: 'refresh-active-reference', settledLocation });
         this.referenceRestoreIdentity = null;
-      } else {
+      } else if (outgoingLocation !== null) {
         this.dependencies.dispatch({ type: 'refresh-active-reference', settledLocation: outgoingLocation });
       }
       if (announce) {
@@ -2037,8 +2042,7 @@ export class NavigationCoordinator {
       token: operation.token,
       targetIdentity: identity,
       outgoingLocation: this.referenceRestoreIdentity === state.activeTabIdentity
-        ? state.tabs.find((tab) => tab.identity === state.activeTabIdentity)?.settledLocation
-          ?? outgoingLocation
+        ? active?.settledLocation ?? outgoingLocation
         : outgoingLocation,
     });
     const settledLocation = await this.restoreReferenceLocation(
@@ -2076,6 +2080,7 @@ export class NavigationCoordinator {
     navigation: PdfViewerNavigation,
     tab: ReferenceNavigationState['tabs'][number],
   ): Promise<PdfViewerLocation | null> {
+    if (tab.settledLocation === null) return null;
     this.dependencies.resetReferenceManualScrollIntent();
     let applied = await navigation.applyLocation(tab.settledLocation);
     this.dependencies.resetReferenceManualScrollIntent();
@@ -2358,10 +2363,11 @@ export class NavigationCoordinator {
       && current.documentGeneration === state.documentGeneration;
     if (
       tab === null
+      || tab.settledLocation === null
       || tab.originalTarget.documentGeneration !== state.documentGeneration
       || current?.pending === true
     ) {
-      if (!currentMatches || tab === null) this.clearReferenceReturnState();
+      if (!currentMatches || tab?.settledLocation == null) this.clearReferenceReturnState();
       return;
     }
     const navigation = this.dependencies.getReferenceNavigation();
@@ -2411,7 +2417,19 @@ export class NavigationCoordinator {
     if (!this.isCurrent(operation)) return false;
     const pending = this.pendingReference;
     if (pending !== null) {
-      this.dependencies.setPendingReference({ status: 'error', ...pending.metadata });
+      this.failedReferences.set(pending.tabIdentity, pending);
+      this.dependencies.dispatch({
+        type: 'open-reference',
+        target: pending.target,
+        settledLocation: null,
+        ...pending.metadata,
+        tabIdentity: pending.tabIdentity,
+        ...(pending.options.annotationIdentity === undefined
+          ? {}
+          : { annotationIdentity: pending.options.annotationIdentity }),
+      });
+      this.pendingReference = null;
+      this.dependencies.setPendingReference(null);
     }
     this.dependencies.setAnnouncement(REFERENCE_FAILURE);
     return false;
@@ -2420,17 +2438,16 @@ export class NavigationCoordinator {
   private begin(
     documentGeneration = this.documentGeneration,
     {
-      preservePendingReference = false,
       // Reference-only operations leave the main reader where it is, so its band stays.
       movesMain = true,
-    }: { readonly preservePendingReference?: boolean; readonly movesMain?: boolean } = {},
+    }: { readonly movesMain?: boolean } = {},
   ): Operation | null {
     if (!this.generationMatches(documentGeneration)) return null;
     this.dependencies.resetReferenceManualScrollIntent();
     this.clearLinkRequest();
     this.abortChosenDescription();
     if (movesMain) this.clearMainBand();
-    this.cancelPendingTransactions(preservePendingReference);
+    this.cancelPendingTransactions();
     this.activeDestinationRestoreToken = null;
     return {
       token: ++this.operationToken,
@@ -2463,11 +2480,11 @@ export class NavigationCoordinator {
     this.operationToken += 1;
   }
 
-  private cancelPendingTransactions(preservePendingReference = false): void {
+  private cancelPendingTransactions(): void {
     this.dependencies.getMainNavigation()?.cancelPendingNavigation();
     this.dependencies.getReferenceNavigation()?.cancelPendingNavigation();
     this.dependencies.dispatch({ type: 'cancel-pending-navigation' });
-    if (!preservePendingReference && this.pendingReference !== null) {
+    if (this.pendingReference !== null) {
       this.pendingReference = null;
       this.dependencies.setPendingReference(null);
     }

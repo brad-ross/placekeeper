@@ -616,10 +616,10 @@ describe('shared reference workspace', () => {
         mode="references"
         presentation="right"
         modes={['references']}
-        tabs={[{ identity: 'lemma', label: 'Lemma A.7', pageContext: 'Page 18' }]}
+        tabs={[{ identity: 'lemma', label: 'Lemma A.7', pageContext: 'Page 18', failed: status === 'error' }]}
         activeTabIdentity="lemma"
         referenceReturn={{ tabIdentity: 'lemma', available: true, pending: false }}
-        pendingReference={{ status, label: 'Proof', pageContext: 'Page 31' }}
+        pendingReference={status === 'loading' ? { status, label: 'Proof', pageContext: 'Page 31' } : null}
         onReferenceReturn={() => undefined}
         onModeChange={() => undefined}
         onReferenceTabActivate={() => undefined}
@@ -800,7 +800,9 @@ describe('shared reference workspace', () => {
     />);
     const failed = renderToStaticMarkup(<ReferenceWorkspace
       {...base}
-      pendingReference={{ status: 'error', label: 'Equation (4)', pageContext: 'Page 6' }}
+      headerVariant="references"
+      tabs={[{ identity: 'equation', label: 'Equation (4)', pageContext: 'Page 6', failed: true }]}
+      activeTabIdentity="equation"
     />);
 
     expect(empty).toContain('data-reference-empty');
@@ -814,7 +816,9 @@ describe('shared reference workspace', () => {
     expect(loading).toContain('Equation (4)');
     expect(failed).toContain('Reference unavailable.');
     expect(failed).toContain('Equation (4) · Page 6');
-    expect(failed).toContain('data-reference-panel-layout="full"');
+    expect(failed).toContain('data-reference-panel-layout="split"');
+    expect(failed).toContain('aria-label="Close active reference"');
+    expect(failed).not.toContain('aria-label="Open in main document"');
     expect(failed).toContain('aria-label="Retry reference"');
     expect(failed).not.toContain('role="alert"');
   });
@@ -826,9 +830,8 @@ describe('shared reference workspace', () => {
       mode="references"
       presentation="bottom"
       modes={['references']}
-      tabs={[{ identity: 'detail', label: 'Target detail', pageContext: 'Page 3' }]}
+      tabs={[{ identity: 'detail', label: 'Target detail', pageContext: 'Page 3', failed: true }]}
       activeTabIdentity="detail"
-      pendingReference={{ status: 'error', label: 'Primary result', pageContext: 'Page 2' }}
       onModeChange={vi.fn()}
       onReferenceTabActivate={vi.fn()}
       onReferenceTabClose={vi.fn()}

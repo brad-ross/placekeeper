@@ -3701,9 +3701,10 @@ test("collapses an outline-free PDF with source annotations to Search and restor
   await expect(mainWorkspace).toHaveAttribute("data-empty-outline-main-mount", "stable");
 });
 
-test("retries one failed reference clone without exposing raw load details", async ({ page }) => {
+test("keeps a failed reference in its own tab for retry or close", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
   let documentRequestCount = 0;
+  let failNextReferenceClone = true;
   const documentHeaders: Array<{ authorization?: string; cookie?: string }> = [];
   await page.route("**/document/**", async (route) => {
     documentRequestCount += 1;
@@ -3712,7 +3713,8 @@ test("retries one failed reference clone without exposing raw load details", asy
       ...(headers.authorization === undefined ? {} : { authorization: headers.authorization }),
       ...(headers.cookie === undefined ? {} : { cookie: headers.cookie }),
     });
-    if (documentRequestCount === 3) {
+    if (documentRequestCount >= 3 && failNextReferenceClone) {
+      failNextReferenceClone = false;
       await route.abort("failed");
       return;
     }
@@ -3729,22 +3731,26 @@ test("retries one failed reference clone without exposing raw load details", asy
   const retry = page.getByRole("button", { name: "Retry reference" });
   await expect(retry).toBeVisible();
   await expect(retry).toBeFocused();
-  const error = page.locator("[data-reference-state='error']");
+  const primaryTab = page.getByRole("tab", { name: /Primary result/u });
+  await expect(primaryTab).toHaveAttribute("aria-selected", "true");
+  const panel = page.getByRole("tabpanel", { name: /Primary result/u });
+  const error = panel.locator("[data-reference-state='error']");
   await expect(error).toContainText("Reference unavailable.");
   await expect(error).toContainText("Primary result · Page 2");
-  const clearsTrayHeader = await error.evaluate((card) => {
-    const header = card.closest('[data-review-workspace]')?.querySelector('header');
-    return header !== null && header !== undefined
-      && card.getBoundingClientRect().top >= header.getBoundingClientRect().bottom;
+  const isBesideTabs = await error.evaluate((card) => {
+    const tabList = card.closest('#workspace-panel-references')?.querySelector('.reference-tabs');
+    return tabList !== null && tabList !== undefined
+      && card.getBoundingClientRect().left >= tabList.getBoundingClientRect().right;
   });
-  expect(clearsTrayHeader).toBe(true);
+  expect(isBesideTabs).toBe(true);
+  await expect(page.getByRole("button", { name: "Close active reference" })).toBeEnabled();
   await expect(page.locator(".review-workspace__status")).toHaveText(
     "Reference unavailable. Retry when ready.",
   );
   expect(await page.locator("body").textContent()).not.toMatch(/net::|ERR_|Bearer /u);
 
   await retry.click();
-  const primaryTab = page.getByRole("tab", { name: /Primary result/u });
+  await expect(error).toHaveCount(0);
   await expect.poll(() => documentRequestCount).toBeGreaterThanOrEqual(3);
   await expectReferenceReady(page, primaryTab);
   await expect(primaryTab).toBeFocused();
@@ -3754,6 +3760,16 @@ test("retries one failed reference clone without exposing raw load details", asy
   expect(documentHeaders.every(({ authorization, cookie }) => (
     authorization?.startsWith("Bearer ") === true && cookie === undefined
   ))).toBe(true);
+
+  const close = page.getByRole("button", { name: "Close active reference" });
+  await close.click();
+  await expect(primaryTab).toHaveCount(0);
+  failNextReferenceClone = true;
+  await openLinkInReferences(page, primaryLink);
+  await expect(error).toBeVisible();
+  await close.click();
+  await expect(primaryTab).toHaveCount(0);
+  await expect(retry).toHaveCount(0);
 });
 
 test('creates an insertion from middle-of-line PDFium caret geometry', async ({ page }) => {

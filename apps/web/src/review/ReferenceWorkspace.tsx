@@ -33,6 +33,7 @@ export interface ReferenceWorkspaceTab {
   readonly label: string;
   readonly pageContext: string;
   readonly pageNumber?: number;
+  readonly failed?: boolean;
 }
 
 export interface ReferenceReturnControlState {
@@ -78,17 +79,13 @@ function ReferenceReturnButton({
   );
 }
 
-export type PendingReferencePanel =
-  | {
-    readonly status: 'loading';
-    readonly label: string;
-    readonly pageContext: string;
-  }
-  | {
-    readonly status: 'error';
-    readonly label: string;
-    readonly pageContext: string;
-  };
+export interface PendingReferencePanel {
+  readonly status: 'loading';
+  readonly label: string;
+  readonly pageContext: string;
+}
+
+type ReferencePanelStatus = 'loading' | 'error';
 
 export interface ReferenceWorkspaceProps {
   readonly open: boolean;
@@ -136,7 +133,7 @@ export function referenceTabFocusIndex(
 
 export function chooseWorkspaceModeFocusTarget(input: {
   readonly mode: WorkspaceMode;
-  readonly pendingStatus: PendingReferencePanel['status'] | null;
+  readonly pendingStatus: ReferencePanelStatus | null;
   readonly remembered: HTMLElement | null;
   readonly panel: HTMLElement | null;
   readonly retry: HTMLElement | null;
@@ -163,7 +160,7 @@ export function ReferenceWorkspace({
   presentation,
   tabs,
   activeTabIdentity,
-  pendingReference = null,
+  pendingReference: loadingReference = null,
   referenceReturn = null,
   announcement = '',
   onModeChange,
@@ -199,7 +196,7 @@ export function ReferenceWorkspace({
   const previous = useRef<{
     open: boolean;
     mode: WorkspaceMode;
-    pendingStatus: PendingReferencePanel['status'] | null;
+    pendingStatus: ReferencePanelStatus | null;
   }>({ open: false, mode, pendingStatus: null });
   const previousActiveReference = useRef<string | null>(null);
   const referenceTabOrientation: ReferenceTabOrientation = presentation === 'bottom'
@@ -207,6 +204,10 @@ export function ReferenceWorkspace({
     ? 'vertical'
     : 'horizontal';
   const showReferenceTabs = tabs.length > 0;
+  const activeTab = tabs.find(({ identity }) => identity === activeTabIdentity) ?? null;
+  const pendingReference = loadingReference ?? (activeTab?.failed
+    ? { status: 'error' as const, label: activeTab.label, pageContext: activeTab.pageContext }
+    : null);
   const reserveReferenceTabRail = referenceTabOrientation === 'vertical'
     && pendingReference?.status === 'loading';
   const referenceViewportConcealed = pendingReference?.status === 'error';
@@ -300,11 +301,11 @@ export function ReferenceWorkspace({
     const changed = previousActiveReference.current !== activeTabIdentity;
     previousActiveReference.current = activeTabIdentity;
     if (!changed || !open || mode !== 'references' || activeTabIdentity === null) return;
-    if (authoringEditorHasFocus()) return;
+    if (pendingReference?.status === 'error' || authoringEditorHasFocus()) return;
     // Apply focus before the new tab paints so its page/action endcap and
     // keyboard focus styling do not flash through an unfocused first frame.
     focusWithoutScroll(referenceTabRefs.current.get(activeTabIdentity));
-  }, [activeTabIdentity, authoringTakeover, mode, open]);
+  }, [activeTabIdentity, authoringTakeover, mode, open, pendingReference?.status]);
 
   useLayoutEffect(() => {
     const identity = closeFocusIdentity.current;
@@ -377,7 +378,6 @@ export function ReferenceWorkspace({
     }
   };
 
-  const activeTab = tabs.find(({ identity }) => identity === activeTabIdentity) ?? null;
   const showReferenceReturn = open
     && mode === 'references'
     && pendingReference === null
@@ -494,6 +494,7 @@ export function ReferenceWorkspace({
                     showActions ? ' reference-tab-segment--compound' : ''
                   }`}
                   data-reference-tab-segment={tab.identity}
+                  data-reference-tab-failed={tab.failed || undefined}
                   data-reference-page-swap={showActions ? 'true' : undefined}
                   role="presentation"
                 >
@@ -542,7 +543,7 @@ export function ReferenceWorkspace({
                       }}
                     />
                   ) : null}
-                  {showActions ? (
+                  {showActions && !tab.failed ? (
                     <ReviewTooltipButton
                       label="Open in main document"
                       type="button"
@@ -564,8 +565,8 @@ export function ReferenceWorkspace({
                       data-reference-tab-action="close"
                       data-workspace-focus-token={`reference-close:${tab.identity}`}
                       aria-label="Close active reference"
-                      aria-disabled={pendingReference !== null || undefined}
-                      onClick={() => { if (pendingReference === null) onReferenceTabClose(tab.identity); }}
+                      aria-disabled={loadingReference !== null || undefined}
+                      onClick={() => { if (loadingReference === null) onReferenceTabClose(tab.identity); }}
                     >
                       <ReviewIcon name="close" />
                     </ReviewTooltipButton>
