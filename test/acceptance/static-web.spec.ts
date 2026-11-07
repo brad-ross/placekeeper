@@ -887,11 +887,20 @@ test('@critical demo starts fitted and Fit Width keeps the requested scale', asy
   const demo = page.frameLocator('iframe');
   await demo.locator('[data-initial-view-ready="true"]').waitFor({ state: 'attached' });
   const zoom = demo.getByRole('textbox', { name: /^Current zoom/ });
-  await expect(zoom).toHaveValue('146');
   await expect(demo.getByRole('textbox', { name: /^Current page/ })).toHaveValue('14');
   await expect(demo.locator('body')).toHaveAttribute('data-first-fitted-demo-page', '14');
   const readPage = demo.locator('[data-pdf-copy-surface="main"] [data-page-index="13"] > img').first();
-  // Initial fitting must match the button's horizontal geometry, not just its percentage.
+  // Use the viewport's client bounds to exclude any native scrollbar gutter.
+  const initialMargins = await readPage.evaluate((image) => {
+    const workspace = image.closest('.pdf-workspace')!;
+    const viewport = workspace.querySelector<HTMLElement>('[data-viewer-framing-viewport]')!;
+    const left = viewport.getBoundingClientRect().left + viewport.clientLeft;
+    const right = Math.min(left + viewport.clientWidth, workspace.getBoundingClientRect().right);
+    const pageBounds = image.getBoundingClientRect();
+    return { left: pageBounds.left - left, right: right - pageBounds.right };
+  });
+  expect(Math.abs(initialMargins.left - 10)).toBeLessThan(1);
+  expect(Math.abs(initialMargins.right - 10)).toBeLessThan(1);
   const initialBounds = (await readPage.boundingBox())!;
   await expect(demo.locator('body')).not.toHaveAttribute('data-unfitted-demo-paint', 'true');
   for (const mode of ['Read with focus', 'Follow references', 'Make comments']) {
