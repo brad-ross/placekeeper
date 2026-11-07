@@ -720,6 +720,15 @@ test('task-first generated Annotation Tray and blocked document menu', async ({ 
 test('height-constrained generated Annotation Tray stays contained', async ({ page }) => {
   const viewport = { width: 320, height: 560 };
   const product = await openScene(page, 'tray&reconciliation=mixed', viewport);
+  expect(await page.evaluate(() => matchMedia('(pointer: fine)').matches)).toBe(true);
+  for (const surface of ['[data-review-chrome]', '[data-review-stage]']) {
+    const { left, right } = await page.locator(surface).evaluate((element) => {
+      const bounds = element.getBoundingClientRect();
+      return { left: bounds.left, right: bounds.right };
+    });
+    expect(left).toBeGreaterThanOrEqual(0);
+    expect(right).toBeLessThanOrEqual(viewport.width);
+  }
   await expect(page.locator('#review-workspace')).toHaveAttribute('data-workspace-open', 'true');
   const annotations = page.getByRole('tab', { name: 'Annotations', exact: true });
   if (await annotations.getAttribute('aria-selected') !== 'true') await annotations.click();

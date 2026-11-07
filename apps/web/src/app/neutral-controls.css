@@ -499,19 +499,15 @@
   }
 }
 
-@media (max-width: 380px) {
-  .review-chrome:has(> .review-chrome__tray-controls) .review-chrome__filename {
-    display: none;
-  }
-}
-
-.review-chrome[data-review-chrome-touch-compact="true"] .review-chrome__filename {
+.review-chrome[data-review-chrome-history-compact="true"] .review-chrome__filename {
   display: none;
 }
 
-.review-chrome[data-review-chrome-touch-compact="true"] .review-chrome__save-identity {
-  min-width: 44px;
-  justify-content: center;
+@media (pointer: coarse) {
+  .review-chrome[data-review-chrome-history-compact="true"] .review-chrome__save-identity {
+    min-width: 44px;
+    justify-content: center;
+  }
 }
 
 .review-chrome__paired-icon {

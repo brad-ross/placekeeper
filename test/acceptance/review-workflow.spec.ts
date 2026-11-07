@@ -1507,6 +1507,8 @@ test.describe('canonical review workflow', () => {
           clientWidth: element.clientWidth,
           scrollWidth: element.scrollWidth,
           height: chromeBounds.height,
+          left: chromeBounds.left,
+          right: chromeBounds.right,
           identity: identityBounds.toJSON(),
           controls: controlsBounds.toJSON(),
           navigation: navigation.getBoundingClientRect().toJSON(),
@@ -1523,6 +1525,8 @@ test.describe('canonical review workflow', () => {
         expect((await documentAction.boundingBox())!.width).toBeGreaterThanOrEqual(32);
       }
       expect(geometry.height).toBe(50);
+      expect(geometry.left).toBeGreaterThanOrEqual(-0.5);
+      expect(geometry.right).toBeLessThanOrEqual(width + 0.5);
       expect(geometry.scrollWidth).toBeLessThanOrEqual(geometry.clientWidth + 1);
       const visibleColumns = [geometry.identity, geometry.navigation, geometry.controls, geometry.trays]
         .filter((item) => item.width > 0.5);
@@ -1550,9 +1554,11 @@ test.describe('canonical review workflow', () => {
     const chrome = page.locator('[data-review-chrome]');
     const history = chrome.locator(':scope > .review-chrome__left-controls [data-main-history], :scope > .review-chrome__viewer-controls .review-chrome__history-control');
     await expect(history).toHaveCount(4);
-    for (const width of [760, 759, 640, 480, 320]) {
+    for (const width of [760, 759, 640, 480, 381]) {
       await page.setViewportSize({ width, height: 720 });
-      await expect.poll(() => history.evaluateAll((buttons) => buttons.every((button) => button.getBoundingClientRect().width >= 32)), { message: `History slots retain their width at ${width}px` }).toBe(true);
+      await expect.poll(() => history.evaluateAll((buttons) => buttons.length === 4
+        && buttons.every((button) => button.getBoundingClientRect().width >= 32)),
+      { message: `History slots retain their width at ${width}px` }).toBe(true);
     }
 
     await page.setViewportSize({ width: 640, height: 720 });
@@ -1584,6 +1590,19 @@ test.describe('canonical review workflow', () => {
     await expect(undo).toBeEnabled();
     await expect(redo).toBeDisabled();
     expect(await positions()).toEqual(initialPositions);
+
+    await undo.focus();
+    await page.setViewportSize({ width: 320, height: 720 });
+    await expect(history).toHaveCount(0);
+    const historyTrigger = chrome.getByRole('button', { name: 'Open edit history' });
+    await expect(historyTrigger).toBeFocused();
+    await historyTrigger.press('Enter');
+    const menu = page.getByRole('menu', { name: 'Edit history' });
+    await expect(menu.getByRole('menuitem', { name: 'Undo' })).toBeFocused();
+    await expect(menu.getByRole('menuitem', { name: 'Redo' })).toBeDisabled();
+    await page.setViewportSize({ width: 381, height: 720 });
+    await expect(menu).toHaveCount(0);
+    await expect(undo).toBeFocused();
   });
 
   test('keeps narrow touch history in stable menus within the viewport', async ({ browser }) => {
@@ -2892,11 +2911,13 @@ test.describe('canonical review workflow', () => {
     expect(inputBounds!.x + inputBounds!.width).toBeLessThanOrEqual(320);
     await page.getByRole('button', { name: 'Apply' }).click();
     await page.locator('[data-review-chrome]').hover({ position: { x: 2, y: 2 } });
-    await page.getByRole('button', { name: 'Undo' }).click();
+    await page.getByRole('button', { name: 'Open edit history' }).click();
+    const historyMenu = page.getByRole('menu', { name: 'Edit history' });
+    await historyMenu.getByRole('menuitem', { name: 'Undo' }).click();
     await expect(page.locator('[data-owned-mark]')).toHaveCount(0);
-    await page.locator('[data-review-chrome]').hover({ position: { x: 2, y: 2 } });
-    await page.getByRole('button', { name: 'Redo' }).click();
+    await historyMenu.getByRole('menuitem', { name: 'Redo' }).click();
     await expect(page.locator('[data-owned-mark="replace"]')).toHaveCount(1);
+    await page.keyboard.press('Escape');
 
     await openAnnotationsWorkspace(page);
     await expect(page.locator('#review-tools-workspace')).toBeVisible();

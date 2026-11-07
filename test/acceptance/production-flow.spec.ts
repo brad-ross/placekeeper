@@ -5770,14 +5770,14 @@ test('uses the same expanded review tree for a narrow VS Code embed launch', asy
     expect(bounds.y + bounds.height).toBeLessThanOrEqual(720);
   };
 
-  const undo = page.getByRole('button', { name: 'Undo' });
-  await expect(undo).toBeEnabled();
+  const historyTrigger = chrome.getByRole('button', { name: 'Open edit history' });
+  const historyMenu = page.getByRole('menu', { name: 'Edit history' });
   await chrome.hover({ position: { x: 2, y: 2 } });
-  await undo.click();
-  const redo = page.getByRole('button', { name: 'Redo' });
-  await expect(redo).toBeEnabled();
-  await chrome.hover({ position: { x: 2, y: 2 } });
-  await redo.click();
+  await historyTrigger.click();
+  await expectMenuInsideViewport(historyMenu);
+  await historyMenu.getByRole('menuitem', { name: 'Undo' }).click();
+  await historyMenu.getByRole('menuitem', { name: 'Redo' }).click();
+  await page.keyboard.press('Escape');
 
   const pageInput = page.getByRole('textbox', {
     name: 'Current page 1 of 4. Enter a page number',
