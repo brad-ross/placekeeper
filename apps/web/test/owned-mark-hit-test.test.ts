@@ -6,6 +6,7 @@ import {
   ScopedOwnedMarkPointerGesture,
   groupOwnedMarkGeometry,
   hitTestOwnedMark,
+  hitTestOwnedMarkHover,
 } from '../src/pdf/owned-mark-hit-test.js';
 
 const timestamp = '2026-08-08T00:00:00.000Z';
@@ -77,6 +78,23 @@ describe('owned mark page-space hit testing', () => {
       annotation('under', [rect]),
       annotation('over', [rect]),
     ]), { x: 20, y: 20 })).toBe('over');
+  });
+
+  it('prefers a direct hit over a higher mark’s hover bounds and keeps the gap out of click targets', () => {
+    const groups = groupOwnedMarkGeometry([
+      annotation('lower', [{ x: 10, y: 18, width: 15, height: 4 }]),
+      annotation('multiline', [
+        { x: 10, y: 10, width: 30, height: 8 },
+        { x: 10, y: 22, width: 30, height: 8 },
+      ]),
+    ]);
+
+    expect(hitTestOwnedMarkHover(groups, { x: 12, y: 20 }, 1)).toEqual({
+      id: 'lower', direct: true,
+    });
+    const gap = { x: 30, y: 20 };
+    expect(hitTestOwnedMarkHover(groups, gap, 1)).toEqual({ id: 'multiline', direct: false });
+    expect(hitTestOwnedMark(groups, gap)).toBeUndefined();
   });
 
   it('activates only a release on the pressed mark and cancels drag, outside, and pointer-cancel', () => {
