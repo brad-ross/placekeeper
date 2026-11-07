@@ -7,6 +7,7 @@ import {
   type Rect,
 } from '@embedpdf/models';
 
+import { EXCERPT_INVISIBLE, leadingContext, trailingContext } from './context-excerpt.js';
 import { hasReliableGlyphGeometry, mergeGlyphLineRects } from './glyph-lines.js';
 import { assessPageTextReliability, type TextRect } from './text-reliability.js';
 import {
@@ -191,19 +192,14 @@ function canonicalTextWithMap(
   return { text: canonical.join(''), sourceIndexes };
 }
 
-/**
- * PDFium marks a hyphen at a line break with U+FFFE; with soft hyphens and
- * stray control glyphs it would render as a box, so excerpts drop them and
- * rejoin the word.
- */
-const EXCERPT_INVISIBLE = /[\u0000-\u0008\u000e-\u001f\u007f-\u009f\u00ad\ufffe\uffff]/u;
+const EXCERPT_CONTEXT_CHARACTERS = 48;
 
 function excerpt(characters: readonly string[], start: number, count: number): {
   readonly text: string;
   readonly match: { readonly start: number; readonly length: number };
 } {
-  const from = Math.max(0, start - 48);
-  const to = Math.min(characters.length, start + count + 48);
+  const from = Math.max(0, start - EXCERPT_CONTEXT_CHARACTERS);
+  const to = Math.min(characters.length, start + count + EXCERPT_CONTEXT_CHARACTERS);
   const source = characters.slice(from, to);
   const boundaries = [0];
   let normalized = '';
@@ -220,14 +216,17 @@ function excerpt(characters: readonly string[], start: number, count: number): {
     }
     boundaries.push(normalized.length);
   }
-  const excerptText = normalized.trimEnd();
+  const normalizedText = normalized.trimEnd();
   const localMatchStart = start - from;
   const localMatchEnd = localMatchStart + count;
-  const matchStart = Math.min(boundaries[localMatchStart] ?? 0, excerptText.length);
-  const matchEnd = Math.min(boundaries[localMatchEnd] ?? matchStart, excerptText.length);
+  const matchStart = Math.min(boundaries[localMatchStart] ?? 0, normalizedText.length);
+  const matchEnd = Math.min(boundaries[localMatchEnd] ?? matchStart, normalizedText.length);
+  // Cut context begins and ends on whole words, marked with an ellipsis.
+  const before = leadingContext(normalizedText.slice(0, matchStart), from > 0);
+  const after = trailingContext(normalizedText.slice(matchEnd), to < characters.length);
   return {
-    text: excerptText,
-    match: { start: matchStart, length: Math.max(0, matchEnd - matchStart) },
+    text: `${before}${normalizedText.slice(matchStart, matchEnd)}${after}`,
+    match: { start: before.length, length: Math.max(0, matchEnd - matchStart) },
   };
 }
 

@@ -72,7 +72,9 @@ describe('PDF search workspace', () => {
     expect(html).toContain('class="pdf-search__result-page">4</span>');
     expect(html).toContain('class="annotation-item__title-row pdf-search__result-heading"');
     expect(html).not.toContain('pdf-search__result-separator');
-    expect(html).toContain('Let <mark class="pdf-search__result-match">λ</mark> denote the arrival rate.');
+    expect(html).toContain('Let <mark class="pdf-search__result-match" data-pdf-search-match-kind="exact">λ</mark> denote the arrival rate.');
+    // The result count sits inside the field, just before the clear button.
+    expect(html).toMatch(/<input class="pdf-search__input"[^>]*\/><span class="pdf-search__count"[^>]*>1 result<\/span><span class="pdf-search__clear-slot">/u);
     expect(html).toContain('aria-label="Open result on page 4 in References"');
     expect(html).toContain('aria-label="Copy page link for Search result on page 4"');
     expect(html).toContain('lucide-link');

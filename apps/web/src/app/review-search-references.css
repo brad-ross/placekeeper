@@ -176,15 +176,16 @@
   list-style: none;
 }
 
-/* Search hits are painted like text highlight marks, in the selection wash. */
+/* Search hits are painted like text highlight marks, in the search blue the
+   result list also uses. */
 [data-pdf-search-highlight] {
   border-radius: var(--pdf-mark-radius, 3px);
-  background: color-mix(in srgb, var(--review-pdf-selection-bg) 72%, transparent);
+  background: var(--pdf-search-fill, rgb(47 111 196 / 30%));
   mix-blend-mode: multiply;
 }
 
 [data-pdf-search-highlight][data-pdf-search-match-kind="related"] {
-  background: color-mix(in srgb, var(--review-warning) 42%, transparent);
+  background: var(--pdf-search-related-fill, rgb(217 173 43 / 42%));
 }
 
 /* Transient, inert Destination Band (KTD8); never an annotation. It is
