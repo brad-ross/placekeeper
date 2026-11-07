@@ -1848,18 +1848,19 @@ test('keeps the initial Mac workspace toggle above the PDF viewport', async ({ p
   await page.locator('[data-launch-surface]').first().evaluate((element) => {
     element.setAttribute('data-launch-surface', 'macos');
   });
-  const rail = page.locator('[data-workspace-edge-rail="right"]');
-  await expect(rail).toBeVisible();
-  await expect(rail).toBeInViewport();
-  const ownsHitTarget = () => rail.evaluate((element) => {
+  const toggle = page.locator('[data-workspace-tray-toggle="right"]');
+  await expect(toggle).toBeVisible();
+  await expect(toggle).toBeInViewport();
+  const ownsHitTarget = () => toggle.evaluate((element) => {
     const bounds = element.getBoundingClientRect();
     const hit = document.elementFromPoint(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
     return hit === element || (hit !== null && element.contains(hit));
   });
   expect(await ownsHitTarget()).toBe(true);
-  await rail.click();
+  await toggle.click();
   await expect(page.getByRole('tab', { name: 'Outline', exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Hide workspace', exact: true }).click();
-  await expect(rail).toBeVisible();
+  await page.locator('#review-tools-workspace').getByRole('button', { name: 'Hide workspace', exact: true }).click();
+  await expect(toggle).toBeFocused();
+  await expect(toggle).toBeVisible();
   expect(await ownsHitTarget()).toBe(true);
 });

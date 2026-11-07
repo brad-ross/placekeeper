@@ -29,7 +29,6 @@ import {
   referenceResizeKeyValue,
   referenceResizePointerValue,
 } from '../src/review/ReferenceResizeHandle.js';
-import { WorkspaceEdgeRail } from '../src/review/WorkspaceEdgeRail.js';
 import {
   chooseToolModeFocusTarget,
   OutlineAnnotationsWorkspace,
@@ -700,25 +699,7 @@ describe('shared reference workspace', () => {
     expect(referenceTabFocusIndex(0, 3, 'ArrowDown', 'horizontal')).toBeNull();
   });
 
-  it('exposes surface-specific rails and an accessible reference splitter', () => {
-    const rightRail = renderToStaticMarkup(
-      <WorkspaceEdgeRail
-        surface="right"
-        target="workspace"
-        open
-        controls="review-tools-workspace"
-        onToggle={() => undefined}
-      />,
-    );
-    const bottomRail = renderToStaticMarkup(
-      <WorkspaceEdgeRail
-        surface="bottom"
-        target="References"
-        open={false}
-        controls="review-workspace"
-        onToggle={() => undefined}
-      />,
-    );
+  it('exposes an accessible reference splitter', () => {
     const splitter = renderToStaticMarkup(
       <ReferenceResizeHandle
         dock="bottom"
@@ -730,11 +711,6 @@ describe('shared reference workspace', () => {
       />,
     );
 
-    expect(rightRail).toContain('data-workspace-edge-rail="right"');
-    expect(rightRail).toContain('aria-expanded="true"');
-    expect(rightRail).toContain('aria-controls="review-tools-workspace"');
-    expect(bottomRail).toContain('data-workspace-edge-rail="bottom"');
-    expect(bottomRail).toContain('aria-expanded="false"');
     expect(splitter).toContain('role="separator"');
     expect(splitter).toContain('aria-orientation="horizontal"');
     expect(splitter).toContain('aria-valuemin="192"');

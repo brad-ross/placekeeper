@@ -389,7 +389,7 @@ test('active text fitting follows right workspace closure while custom zoom stay
   await expect(workspace).toHaveAttribute('data-tools-workspace-open', 'true');
   await fit(page, 'text');
   const dockedScale = await scale(page);
-  await page.getByRole('button', { name: 'Hide workspace', exact: true }).click();
+  await page.getByRole('group', { name: 'Workspace trays', exact: true }).getByRole('button', { name: 'Hide workspace', exact: true }).click();
   await expect(workspace).toHaveAttribute('data-tools-workspace-open', 'false');
   await expect.poll(() => scale(page)).toBeGreaterThan(dockedScale + 0.1);
   await openZoom(page);
@@ -401,7 +401,7 @@ test('active text fitting follows right workspace closure while custom zoom stay
   await zoom.fill('150');
   await zoom.press('Enter');
   await expect.poll(() => scale(page)).toBeCloseTo(1.5, 3);
-  await page.getByRole('button', { name: 'Hide workspace', exact: true }).click();
+  await page.getByRole('group', { name: 'Workspace trays', exact: true }).getByRole('button', { name: 'Hide workspace', exact: true }).click();
   await expect(workspace).toHaveAttribute('data-tools-workspace-open', 'false');
   // Read beyond the resize debounce and CSS transition to detect an unwanted refit.
   const samples = await mainPage(page).evaluate((element) => new Promise<number[]>((resolve) => {
@@ -417,8 +417,37 @@ test('active text fitting follows right workspace closure while custom zoom stay
   for (const value of samples) expect(value).toBeCloseTo(1.5, 3);
 });
 
+test('refits text to the reading area when the workspace opens during a resize fit', async ({ page }) => {
+  await openBook(page);
+  await fit(page, 'text');
+  await goToPage(page, 2);
+  await openZoom(page);
+  await page.getByRole('button', { name: 'Show workspace', exact: true }).evaluate((button) => {
+    const fitControl = document.querySelector('[data-review-zoom-action="fit-width"]')!;
+    const zoom = document.querySelector<HTMLInputElement>('.review-chrome__zoom-input')!;
+    const initialZoom = Number(zoom.value);
+    // Open as soon as the resize changes the zoom, while the fit still owns
+    // the operation and before it validates the new geometry on later frames.
+    const observer = new MutationObserver(() => {
+      if (fitControl.getAttribute('aria-busy') !== 'true' || Number(zoom.value) <= initialZoom) return;
+      observer.disconnect();
+      (button as HTMLButtonElement).click();
+    });
+    observer.observe(fitControl, { attributes: true });
+    observer.observe(zoom, { attributeFilter: ['value'] });
+  });
+  await page.setViewportSize({ width: 1400, height: 1100 });
+  await expect(page.locator('#review-tools-workspace')).toHaveAttribute('data-tools-workspace-open', 'true');
+  const readingWidth = await page.locator('.review-document').evaluate((element) => element.getBoundingClientRect().width);
+  // Fit text leaves 36px on either side and 24px for the tray inset and fade.
+  await expect.poll(() => scale(page, 1)).toBeCloseTo((readingWidth - 96) / 300, 2);
+  await openZoom(page);
+  await expect(fitButton(page)).toHaveAttribute('aria-busy', 'false');
+  await expect(fitButton(page)).toHaveAttribute('data-fit-active', 'true');
+});
+
 for (const scrollbarWidth of [null, 15]) {
-  test(`balances text margins within the clear reading area beside the workspace rail and tray with ${scrollbarWidth === null ? 'native' : `${scrollbarWidth}px`} scrollbars`, async ({ page, browserName }) => {
+  test(`balances text margins within the clear reading area with the workspace hidden and open with ${scrollbarWidth === null ? 'native' : `${scrollbarWidth}px`} scrollbars`, async ({ page, browserName }) => {
     test.skip(scrollbarWidth !== null && browserName !== 'chromium',
       'Only Chromium reserves native scrollbar space for explicit scrollbar pseudo-element sizes.');
     await openBook(page);
@@ -430,15 +459,13 @@ for (const scrollbarWidth of [null, 15]) {
       await expect.poll(() => viewport(page).evaluate((element) =>
         (element as HTMLElement).offsetWidth - element.clientWidth)).toBe(scrollbarWidth);
     }
-    // Inspect the actual paint, independently of the geometry helper used
-    // below. A classic scrollbar already occupies part of the 40px rail.
-    const occupiedWidth = await viewport(page).evaluate((element) =>
-      (element as HTMLElement).offsetWidth - element.clientWidth);
-    const opaqueWidth = Math.max(0, 40 - occupiedWidth);
-    await expect.poll(() => page.locator('.review-document .pdf-workspace__scrollbar-backing')
-      .evaluate((element) => [...getComputedStyle(element, '::after').backgroundImage
-        .matchAll(/\)\s+([\d.]+)px/gu)].map((match) => Number(match[1]))))
-      .toEqual([opaqueWidth, opaqueWidth + 12]);
+    await expect.poll(() => viewport(page).evaluate((element) => {
+      const style = getComputedStyle(element);
+      return [style.paddingLeft, style.paddingRight];
+    })).toEqual(['10px', '10px']);
+    const frame = page.locator('.review-overlay-frame');
+    await expect(frame.locator('.review-overlay-frame__right-backing')).toHaveCSS('display', 'none');
+    await expect(frame.locator('.review-overlay-frame__right-fade')).toHaveCSS('display', 'none');
     await fit(page, 'text');
     const expectBalancedMargins = async (index = 0) => {
       await expect.poll(async () => {
@@ -478,7 +505,7 @@ for (const scrollbarWidth of [null, 15]) {
     await page.getByRole('button', { name: 'Show workspace', exact: true }).click();
     await expect(page.locator('#review-tools-workspace')).toHaveAttribute('data-tools-workspace-open', 'true');
     await expectBalancedMargins(1);
-    await page.getByRole('button', { name: 'Hide workspace', exact: true }).click();
+    await page.getByRole('group', { name: 'Workspace trays', exact: true }).getByRole('button', { name: 'Hide workspace', exact: true }).click();
     await expect(page.locator('#review-tools-workspace')).toHaveAttribute('data-tools-workspace-open', 'false');
     await expectBalancedMargins(1);
   });

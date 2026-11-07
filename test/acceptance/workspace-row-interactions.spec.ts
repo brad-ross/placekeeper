@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
+import { waitForStaticPdf } from '../../scripts/static-browser-journey.js';
 
 const rowPaint = (row: Locator) => row.evaluate((element) => {
   const style = getComputedStyle(element);
@@ -214,48 +215,50 @@ for (const width of [1280, 620]) {
   });
 }
 
-test('collapsed narrow workspace matches the References rail and hides obsolete backing layers', async ({ page }) => {
-  const appearance = () => page.locator('[data-review-stage]').evaluate((stage) => {
-    const rail = stage.querySelector<HTMLElement>('[data-workspace-edge-rail="bottom"]')!;
-    const backing = stage.querySelector<HTMLElement>('.review-overlay-frame__bottom-backing')!;
-    const fade = stage.querySelector<HTMLElement>('.review-overlay-frame__bottom-fade')!;
-    const stageBox = stage.getBoundingClientRect();
-    const railBox = rail.getBoundingClientRect();
-    const backingStyle = getComputedStyle(backing);
-    const fadeStyle = getComputedStyle(fade);
-    return {
-      left: railBox.left - stageBox.left,
-      bottom: stageBox.bottom - railBox.bottom,
-      width: railBox.width,
-      height: railBox.height,
-      backingDisplay: backingStyle.display,
-      backingColor: backingStyle.backgroundColor,
-      backingHeight: backing.getBoundingClientRect().height,
-      fadeDisplay: fadeStyle.display,
-      fadeBackground: fadeStyle.backgroundImage,
-      fadeHeight: fade.getBoundingClientRect().height,
-    };
-  });
-  await page.setViewportSize({ width: 1280, height: 900 });
-  await page.goto('/test/acceptance/review-harness/index.html?visual=reference-layout');
-  await expect(page.getByRole('button', { name: 'Show References', exact: true })).toBeVisible();
-  const reference = await appearance();
-  expect(reference.backingDisplay).toBe('none');
-  expect(reference.fadeDisplay).toBe('none');
-  expect(reference.fadeBackground).toContain('linear-gradient');
-  for (const width of [760, 620, 390]) {
+for (const { width, surface } of [{ width: 1280, surface: 'right' }, { width: 620, surface: 'bottom' }]) {
+  test(`closed ${surface} workspace gives the PDF its full reading width`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 });
-    await page.goto('/test/acceptance/review-harness/index.html?visual=reading');
-    const close = page.getByRole('button', { name: 'Hide workspace', exact: true });
-    if (await close.isVisible()) await close.click();
-    const open = page.getByRole('button', { name: 'Show workspace', exact: true });
-    await expect(open).toHaveAttribute('data-workspace-edge-rail', 'bottom');
-    await expect.poll(appearance).toEqual(reference);
-    await open.click();
-    await page.getByRole('button', { name: 'Hide workspace', exact: true }).click();
-    await expect.poll(appearance).toEqual(reference);
-  }
-});
+    await page.goto('/test/acceptance/review-harness/?fit-modes=book');
+    await waitForStaticPdf(page);
+    const stage = page.locator('[data-review-stage]');
+    const document = stage.locator('.review-document');
+    const scrollport = document.locator('[data-viewer-framing-viewport]');
+    const toggle = page.getByRole('group', { name: 'Workspace trays' })
+      .locator(`[data-workspace-tray-toggle="${surface}"]`);
+    if (await toggle.getAttribute('aria-expanded') === 'true') await toggle.click();
+
+    const expectClosedFraming = async () => {
+      await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+      await expect(stage).toHaveAttribute(`data-${surface}-overlay`, 'false');
+      await expect(scrollport).toHaveCSS('padding-left', '10px');
+      await expect(scrollport).toHaveCSS('padding-right', '10px');
+      await expect.poll(async () => (await document.boundingBox())!.width).toBe((await stage.boundingBox())!.width);
+      // Settle at the right edge so horizontal overflow can't show its scroll cue.
+      await scrollport.evaluate(element => { element.scrollLeft = element.scrollWidth; });
+      await expect.poll(() => scrollport.locator('.pdf-workspace__scrollbar-backing')
+        .evaluate(element => getComputedStyle(element, '::after').display)).toBe('none');
+    };
+    await expectClosedFraming();
+    await toggle.click();
+    await expect(stage).toHaveAttribute(`data-${surface}-overlay`, 'true');
+    await expect.poll(() => scrollport.locator('.pdf-workspace__scrollbar-backing')
+      .evaluate(element => getComputedStyle(element, '::after').display)).toBe('block');
+    if (surface === 'right') {
+      await expect(scrollport).toHaveCSS('padding-left', '24px');
+      await expect.poll(async () => (await document.boundingBox())!.width).toBeLessThan((await stage.boundingBox())!.width);
+    }
+    await toggle.click();
+    await expectClosedFraming();
+
+    await expect(scrollport).toHaveCSS('overflow-y', 'auto');
+    await expect(scrollport).toHaveCSS('scrollbar-width', 'auto');
+    await expect.poll(() => scrollport.evaluate(element => {
+      element.scrollTop = element.scrollHeight;
+      return element.scrollHeight - element.clientHeight - element.scrollTop;
+    })).toBeLessThan(1);
+    expect(await scrollport.evaluate(element => element.scrollTop)).toBeGreaterThan(0);
+  });
+}
 
 test('bottom resize handle sits inside the tray with a thin faded upper edge', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
@@ -537,54 +540,21 @@ for (const presentation of ['right', 'bottom']) {
   });
 }
 
-test('scrollbar backing follows workspace docking without changing native scrollbar styling', async ({ page }) => {
+test('bottom workspace keeps its inset from the native scrollbar edges', async ({ page }) => {
   await page.goto('/test/acceptance/review-harness/index.html?visual=outline');
-  const result = await page.evaluate(() => {
+  const margins = await page.evaluate(() => {
     const layout = document.createElement('div');
     layout.className = 'review-layout';
-    layout.innerHTML = '<div class="pdf-workspace__scrollbar-backing"></div>';
-    document.body.append(layout);
-    const backing = layout.firstElementChild!;
+    layout.style.cssText = 'position:fixed;width:800px;height:600px;--review-overlay-inset:12px';
     layout.dataset.workspacePresentation = 'bottom';
-    const bottom = getComputedStyle(backing, '::after').display;
-    layout.dataset.workspacePresentation = 'right';
-    const right = getComputedStyle(backing, '::after').display;
-    layout.remove();
-    return { bottom, right };
-  });
-  expect(result.bottom).toBe('none');
-  expect(result.right).not.toBe('none');
-});
-
-test('tray margins and reference opener alignment survive scrollbar backing changes', async ({ page }) => {
-  await page.goto('/test/acceptance/review-harness/index.html?visual=outline');
-  const result = await page.evaluate(() => {
-    const layout = document.createElement('div');
-    layout.className = 'review-layout';
-    layout.style.cssText = 'position:fixed;width:800px;height:600px;--review-overlay-inset:12px;--reference-bottom-height:40px;--review-main-scrollbar-width:0px;--review-main-scrollbar-height:0px';
-    layout.dataset.referenceLayout = 'wide-split';
-    layout.dataset.bottomSurfaceOpen = 'false';
-    layout.dataset.referencesAvailable = 'false';
-    layout.dataset.workspacePresentation = 'right';
-    layout.innerHTML = '<div class="review-overlay-frame"></div><div class="pdf-workspace__scrollbar-backing"></div><div class="review-tools-workspace" data-workspace-presentation="right" data-tools-workspace-open="true"></div><button class="workspace-edge-rail" data-workspace-edge-rail="bottom"></button>';
+    layout.innerHTML = '<div class="review-tools-workspace" data-workspace-presentation="bottom" data-tools-workspace-open="true"></div>';
     document.body.append(layout);
-    const tray = layout.querySelector('.review-tools-workspace')!;
-    const button = layout.querySelector('button')!;
-    const rightClip = getComputedStyle(layout.querySelector('.review-overlay-frame')!).clipPath;
-    const aligned = Math.abs(tray.getBoundingClientRect().bottom - button.getBoundingClientRect().bottom) < .5;
-    const background = getComputedStyle(layout.querySelector('.pdf-workspace__scrollbar-backing')!, '::after').backgroundImage;
-    layout.dataset.workspacePresentation = 'bottom';
-    tray.setAttribute('data-workspace-presentation', 'bottom');
-    const margins = { right: getComputedStyle(tray).right, bottom: getComputedStyle(tray).bottom };
-    const clip = getComputedStyle(layout.querySelector('.review-overlay-frame')!).clipPath;
+    const tray = getComputedStyle(layout.firstElementChild!);
+    const result = { right: tray.right, bottom: tray.bottom };
     layout.remove();
-    return { aligned, background, margins, clip, rightClip };
+    return result;
   });
-  expect(result.aligned).toBe(true);
-  expect(result.rightClip).toBe('inset(0px 16px 16px 0px)');
-  expect(result.background).not.toContain('to top');
-  expect(result.margins).toEqual({ right: '12px', bottom: '12px' });
-  expect(result.clip).toBe('inset(0px 16px 16px 0px)');
+  expect(margins).toEqual({ right: '12px', bottom: '12px' });
 });
 
 test('empty references do not paint a bottom edge fade', async ({ page }) => {
@@ -613,7 +583,7 @@ test('bottom workspace margins leave both native scrollbars above their backing'
     const layout = document.createElement('div');
     layout.className = 'review-layout';
     Object.assign(layout.dataset, { workspacePresentation: 'bottom', bottomOverlay: 'true', rightOverlay: 'false', scrollRightFade: 'true' });
-    layout.style.cssText = '--review-surface-canvas:#f7f7f7;--review-main-scrollbar-width:0px;--review-main-scrollbar-height:0px;--review-overlay-bottom-start:200px;--scrollbar-backing-right:16px;--scrollbar-backing-bottom:16px;--scrollbar-backing-width:600px;--scrollbar-backing-height:400px';
+    layout.style.cssText = '--review-surface-canvas:#f7f7f7;--review-main-scrollbar-width:0px;--review-main-scrollbar-height:0px;--review-overlay-bottom-start:200px;--scrollbar-backing-width:600px;--scrollbar-backing-height:400px';
     layout.innerHTML = '<div class="review-overlay-frame"><span class="review-overlay-frame__outer-right-fade"></span></div><div class="pdf-workspace__scrollbar-backing"></div>';
     document.body.append(layout);
     const frame = layout.firstElementChild!;
@@ -629,24 +599,37 @@ test('bottom workspace margins leave both native scrollbars above their backing'
   expect(styles.size).toBe('auto, auto');
 });
 
-test('right edge fade uses one full-height layer even below the horizontal scrollbar', async ({ page }) => {
+test('right tray and horizontal overflow use the same full-height fade layer', async ({ page }) => {
   await page.goto('/test/acceptance/review-harness/index.html?visual=outline');
   const result = await page.evaluate(() => {
     const layout = document.createElement('div');
     layout.className = 'review-layout';
-    Object.assign(layout.dataset, { workspacePresentation: 'right', referencesAvailable: 'false', rightOverlay: 'false', rightRailPresent: 'true' });
-    layout.style.cssText = '--review-surface-canvas:#f7f7f7;--review-document-right-space:40px;--review-overlay-fade-size:12px;--scrollbar-backing-width:600px;--scrollbar-backing-height:400px';
+    Object.assign(layout.dataset, { workspacePresentation: 'right', rightOverlay: 'true' });
+    layout.style.cssText = '--review-surface-canvas:#f7f7f7;--review-overlay-right-start:560px;--review-overlay-fade-size:12px;--scrollbar-backing-width:600px;--scrollbar-backing-height:400px';
     layout.innerHTML = '<div class="review-overlay-frame"><span class="review-overlay-frame__right-backing"></span><span class="review-overlay-frame__right-fade"></span></div><div class="pdf-workspace__scrollbar-backing"></div>';
     document.body.append(layout);
-    const backing = getComputedStyle(layout.lastElementChild!, '::after');
-    const result = { background: backing.backgroundImage, height: backing.height,
-      oldLayers: [...layout.querySelectorAll('span')].map(element => getComputedStyle(element).display) };
+    const backing = layout.lastElementChild!;
+    const open = getComputedStyle(backing, '::after');
+    const openStyles = { background: open.backgroundImage, height: open.height, display: open.display };
+    const oldLayers = [...layout.querySelectorAll('span')].map(element => getComputedStyle(element).display);
+    layout.dataset.rightOverlay = 'false';
+    const closed = getComputedStyle(backing, '::after').display;
+    layout.dataset.scrollRightFade = 'true';
+    const scroll = getComputedStyle(backing, '::after');
+    const scrollStyles = { background: scroll.backgroundImage, height: scroll.height, display: scroll.display };
+    layout.dataset.bottomOverlay = 'true';
+    layout.style.setProperty('--review-overlay-bottom-start', '300px');
+    const bottomWithScroll = getComputedStyle(backing, '::after').backgroundImage;
     layout.remove();
-    return result;
+    return { open: openStyles, closed, scroll: scrollStyles, bottomWithScroll, oldLayers };
   });
-  expect(result.height).toBe('400px');
-  expect(result.background).toContain('40px');
-  expect(result.background).toContain('52px');
+  expect(result.open).toMatchObject({ height: '400px', display: 'block' });
+  expect(result.open.background).toContain('560px');
+  expect(result.closed).toBe('none');
+  expect(result.scroll).toMatchObject({ height: '400px', display: 'block' });
+  expect(result.scroll.background).toContain('12px');
+  expect(result.bottomWithScroll).toContain('linear-gradient(to left');
+  expect(result.bottomWithScroll).toContain('linear-gradient(to top');
   expect(result.oldLayers).toEqual(['none', 'none']);
 });
 
@@ -688,22 +671,4 @@ test('macOS toolbar keeps its native-control clearance during resize and overlay
   });
   expect(new Set(positions).size).toBe(1);
   expect(positions[0]).toBeGreaterThanOrEqual(92);
-});
-
-test('collapsed bottom rail paints full width and height under native scrollbars', async ({ page }) => {
-  await page.goto('/test/acceptance/review-harness/index.html?visual=outline');
-  const result = await page.evaluate(() => {
-    const layout = document.createElement('div');
-    layout.className = 'review-layout';
-    Object.assign(layout.dataset, { workspacePresentation: 'bottom', bottomOverlay: 'false', bottomRailPresent: 'true' });
-    layout.style.cssText = '--review-surface-canvas:#f7f7f7;--review-control-default:32px;--scrollbar-backing-width:600px;--scrollbar-backing-height:400px';
-    layout.innerHTML = '<div class="review-overlay-frame"><span class="review-overlay-frame__bottom-backing"></span><span class="review-overlay-frame__bottom-fade"></span></div><div class="pdf-workspace__scrollbar-backing"></div>';
-    document.body.append(layout);
-    const backing = getComputedStyle(layout.lastElementChild!, '::after');
-    const result = { width: backing.width, height: backing.height, display: backing.display,
-      old: [...layout.querySelectorAll('span')].map(element => getComputedStyle(element).display) };
-    layout.remove();
-    return result;
-  });
-  expect(result).toEqual({ width: '600px', height: '400px', display: 'block', old: ['none', 'none'] });
 });

@@ -17,12 +17,6 @@
   overflow: visible;
 }
 
-.review-layout[data-right-surface-open="false"][data-right-rail-present="true"] {
-  --review-document-right-space: var(--review-collapsed-rail-size, 40px);
-  --review-document-left-gap: calc(var(--review-collapsed-rail-size, 40px) + var(--review-overlay-fade-size, 12px));
-  --review-document-right-gap: var(--review-overlay-fade-size, 12px);
-}
-
 .review-layout[data-right-surface-open="true"] {
   --review-document-right-space: calc(var(--reference-right-width) + var(--review-overlay-inset, 12px));
   --review-document-left-gap: 24px;
@@ -90,48 +84,6 @@
   right: 0;
   left: 0;
   top: calc(var(--review-overlay-bottom-start) - var(--review-overlay-fade-size));
-  height: var(--review-overlay-fade-size);
-  background: linear-gradient(transparent, var(--review-surface-canvas));
-}
-
-.review-layout[data-right-overlay="false"][data-right-rail-present="true"]
-  .review-overlay-frame__right-backing {
-  display: block;
-  top: 0;
-  right: var(--review-main-scrollbar-width);
-  bottom: var(--review-main-scrollbar-height);
-  width: calc(var(--review-collapsed-rail-size, 40px) - var(--review-main-scrollbar-width));
-  min-width: 0;
-  background: var(--review-surface-canvas);
-}
-
-.review-layout[data-right-overlay="false"][data-right-rail-present="true"]
-  .review-overlay-frame__right-fade {
-  display: block;
-  top: 0;
-  right: var(--review-collapsed-rail-size, 40px);
-  bottom: var(--review-main-scrollbar-height);
-  width: var(--review-overlay-fade-size);
-  background: linear-gradient(to right, transparent, var(--review-surface-canvas));
-}
-
-.review-layout[data-bottom-overlay="false"][data-bottom-rail-present="true"]
-  .review-overlay-frame__bottom-backing {
-  display: block;
-  right: var(--review-main-scrollbar-width);
-  bottom: var(--review-main-scrollbar-height);
-  left: 0;
-  height: calc(max(var(--review-collapsed-rail-size, 40px), var(--review-overlay-inset, 12px) + max(32px, var(--review-control-default))) - var(--review-main-scrollbar-height));
-  min-height: 0;
-  background: var(--review-surface-canvas);
-}
-
-.review-layout[data-bottom-overlay="false"][data-bottom-rail-present="true"]
-  .review-overlay-frame__bottom-fade {
-  display: block;
-  right: var(--review-main-scrollbar-width);
-  bottom: max(var(--review-collapsed-rail-size, 40px), var(--review-overlay-inset, 12px) + max(32px, var(--review-edge-rail-size, var(--review-control-default))));
-  left: 0;
   height: var(--review-overlay-fade-size);
   background: linear-gradient(transparent, var(--review-surface-canvas));
 }
@@ -420,18 +372,8 @@
   left: 0;
   width: var(--scrollbar-backing-width, 0px);
   height: var(--scrollbar-backing-height, 0px);
-  background:
-    linear-gradient(to left, var(--review-surface-canvas) var(--scrollbar-backing-right, 0px), transparent 0),
-    linear-gradient(to top, var(--review-surface-canvas) var(--scrollbar-backing-bottom, 0px), transparent 0);
-}
-
-/* Bottom-docked workspaces use the native overlay scrollbar over the document. */
-.review-layout[data-workspace-presentation="bottom"] .pdf-workspace__scrollbar-backing::after {
   display: none;
 }
-
-
-
 
 .review-layout[data-references-available="false"][data-bottom-overlay="false"] .review-overlay-frame__outer-bottom-fade {
   display: none;
@@ -440,21 +382,6 @@
 .review-layout[data-workspace-presentation="bottom"][data-right-overlay="false"]
   .review-overlay-frame__outer-right-fade {
   display: none;
-}
-
-/* One compositor-stable surface owns the entire right edge, including its
-   fade and lower corner. Native scrollbars paint above this scrollport child.
-   Their occupied width is already outside the backing's client-width surface. */
-.review-layout[data-workspace-presentation="right"] .pdf-workspace__scrollbar-backing::after {
-  --right-backing-size: var(--review-right-edge-size);
-  background: linear-gradient(to left,
-    var(--review-surface-canvas) var(--right-backing-size),
-    transparent calc(var(--right-backing-size) + var(--review-overlay-fade-size, 12px)));
-}
-
-.review-layout[data-workspace-presentation="right"][data-right-overlay="true"]
-  .pdf-workspace__scrollbar-backing::after {
-  --right-backing-size: calc(100% - var(--review-overlay-right-start));
 }
 
 .review-layout[data-workspace-presentation="right"][data-right-overlay] .review-overlay-frame__right-backing,
@@ -479,36 +406,31 @@
   display: none;
 }
 
-/* Open bottom surfaces use the same complete-edge painting model as the
-   right surface. Both gradients belong below native scrollbar painting. */
-.review-layout[data-workspace-presentation="right"] .pdf-workspace__scrollbar-backing {
-  --review-right-edge-size: max(0px, calc(var(--review-document-right-space, 40px) - var(--review-main-scrollbar-width, 0px)));
-  --review-right-edge-paint: linear-gradient(to left, var(--review-surface-canvas) var(--review-right-edge-size), transparent calc(var(--review-right-edge-size) + var(--review-overlay-fade-size, 12px)));
+/* Paint open trays and scroll cues inside the scrollport so native
+   scrollbars stay above the full edge, including the corners. */
+.review-layout[data-workspace-presentation="right"][data-right-overlay="true"] .pdf-workspace__scrollbar-backing,
+.review-layout[data-workspace-presentation="right"][data-right-overlay="false"][data-scroll-right-fade="true"] .pdf-workspace__scrollbar-backing {
+  --review-right-edge-paint: linear-gradient(to left, var(--review-surface-canvas) var(--review-right-backing-size, 0px), transparent calc(var(--review-right-backing-size, 0px) + var(--review-overlay-fade-size, 12px)));
 }
+
 .review-layout[data-workspace-presentation="right"][data-right-overlay="true"] .pdf-workspace__scrollbar-backing {
-  --review-right-edge-paint: linear-gradient(to left, var(--review-surface-canvas) calc(100% - var(--review-overlay-right-start)), transparent calc(100% - var(--review-overlay-right-start) + var(--review-overlay-fade-size, 12px)));
+  --review-right-backing-size: calc(100% - var(--review-overlay-right-start));
 }
+
+.review-layout[data-workspace-presentation="right"][data-right-overlay="true"] .pdf-workspace__scrollbar-backing::after,
+.review-layout[data-workspace-presentation="right"][data-right-overlay="false"]:where([data-scroll-right-fade="true"]) .pdf-workspace__scrollbar-backing::after {
+  display: block;
+  background: var(--review-right-edge-paint);
+}
+
 .review-layout[data-bottom-overlay="true"][data-workspace-presentation] .pdf-workspace__scrollbar-backing::after {
   display: block;
   background:
     var(--review-right-edge-paint, linear-gradient(transparent, transparent)),
     linear-gradient(to top, var(--review-surface-canvas) calc(100% - var(--review-overlay-bottom-start)), transparent calc(100% - var(--review-overlay-bottom-start) + var(--review-overlay-fade-size, 12px)));
 }
+
 .review-layout[data-bottom-overlay="true"] .review-overlay-frame__bottom-backing,
 .review-layout[data-bottom-overlay="true"] .review-overlay-frame__bottom-fade {
-  display: none;
-}
-
-/* Collapsed bottom rails have the same full-width native-scrollport backing
-   as open trays, including the fade and the bottom scrollbar corner. */
-.review-layout[data-bottom-overlay="false"][data-bottom-rail-present="true"] .pdf-workspace__scrollbar-backing::after {
-  display: block;
-  --bottom-rail-height: max(var(--review-collapsed-rail-size, 40px), var(--review-overlay-inset, 12px) + max(32px, var(--review-edge-rail-size, var(--review-control-default))));
-  background:
-    var(--review-right-edge-paint, linear-gradient(transparent, transparent)),
-    linear-gradient(to top, var(--review-surface-canvas) var(--bottom-rail-height), transparent calc(var(--bottom-rail-height) + var(--review-overlay-fade-size, 12px)));
-}
-.review-layout[data-bottom-overlay="false"][data-bottom-rail-present="true"] .review-overlay-frame__bottom-backing,
-.review-layout[data-bottom-overlay="false"][data-bottom-rail-present="true"] .review-overlay-frame__bottom-fade {
   display: none;
 }

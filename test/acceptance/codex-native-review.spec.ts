@@ -66,7 +66,7 @@ test('test MCP bridge retains nested references and returns to the main reading 
     await page.keyboard.press('Enter');
     await page.getByRole('menuitem', { name: /Open in References/u }).click();
     await expect(page.locator('[data-reference-tab]')).toHaveCount(2);
-    await page.getByRole('button', { name: 'Hide References' }).click();
+    await page.locator('#review-workspace').getByRole('button', { name: 'Hide References', exact: true }).click();
     await expect(main).toBeVisible();
     expect(await main.locator('.pdf-workspace__viewport').evaluate(element => ({ top: element.scrollTop, left: element.scrollLeft }))).toEqual(before);
   } finally { await bridge.dispose(); }

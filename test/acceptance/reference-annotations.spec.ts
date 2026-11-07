@@ -72,8 +72,8 @@ async function openFixture(
 }
 
 async function openAnnotations(page: Page): Promise<void> {
-  const rail = page.getByRole('button', { name: /^(?:Show|Hide) workspace$/u });
-  if (await rail.getAttribute('aria-expanded') !== 'true') await rail.click();
+  const toggle = page.getByRole('group', { name: 'Workspace trays', exact: true }).getByRole('button', { name: /^(?:Show|Hide) workspace$/u });
+  if (await toggle.getAttribute('aria-expanded') !== 'true') await toggle.click();
   const annotations = page.getByRole('tab', { name: 'Annotations', exact: true });
   if (await annotations.getAttribute('aria-selected') !== 'true') await annotations.click();
   await expect(annotations).toHaveAttribute('aria-selected', 'true');
@@ -503,7 +503,7 @@ test('reuses an annotation Reference tab, reveals its mark, and leaves Main and 
   await expectReferenceReady(page, page.locator(`[data-reference-tab][aria-selected="true"]`));
   await expect(page.locator('[data-reference-tab]')).toHaveCount(2);
   await expect(page.locator('[data-reference-annotation-inspection]')).toHaveCount(1);
-  await page.getByRole('button', { name: 'Hide References' }).click();
+  await page.locator('#review-workspace').getByRole('button', { name: 'Hide References', exact: true }).click();
   await expect(page.locator('[data-reference-annotation-inspection]')).toHaveCount(0);
   expect(await mainSnapshot(page)).toEqual(unchangedMain);
 });
@@ -670,7 +670,7 @@ test('creates, edits, reopens, and deletes one shared selection annotation from 
   const row = page.locator(`[data-review-item="${item.id}"]`);
   await expect(row).toContainText('Edited shared Reference highlight.');
 
-  await page.getByRole('button', { name: 'Hide workspace', exact: true }).click();
+  await page.getByRole('group', { name: 'Workspace trays', exact: true }).getByRole('button', { name: 'Hide workspace', exact: true }).click();
   const workspace = page.locator('[data-review-workspace]');
   await expect(workspace).toHaveAttribute('data-workspace-open', 'false');
   const mainMark = page.locator(
@@ -1449,6 +1449,41 @@ test('defers document authority replacement while a Reference edit is active', a
   expect(host.broker.state(launched.sessionId)?.pendingDrafts).toHaveLength(0);
 });
 
+test('switches a shared tools tray to References with Space while authoring and restores focus after closing', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await openFixture(page, referencePdf);
+  await chooseCopyDestination(page);
+  const referenceTab = await openPrimaryReference(page);
+  await page.getByRole('button', { name: 'Move References to right' }).press('Enter');
+  await expect(page.getByRole('tablist', { name: 'Open references' })).toHaveAttribute('aria-orientation', 'horizontal');
+  await openAnnotations(page);
+
+  const mainPage = page.locator('.pdf-workspace:not(.pdf-workspace--reference) .pdf-workspace__page[data-page-index="0"]');
+  await mainPage.focus();
+  await page.keyboard.press('Alt+Shift+N');
+  await expect(page.getByRole('button', { name: /^Page Note placement cursor/u })).toBeFocused();
+  await page.keyboard.press('Enter');
+  const composer = page.getByRole('region', { name: 'Page Note' });
+  const editor = composer.getByRole('textbox', { name: 'Comment' });
+  const draft = 'Keep this draft when the shared tray changes.';
+  await editor.fill(draft);
+
+  const trayToggles = page.getByRole('group', { name: 'Workspace trays', exact: true });
+  const showReferences = trayToggles.getByRole('button', { name: 'Show References', exact: true });
+  await expect(showReferences).toHaveAttribute('aria-expanded', 'false');
+  await showReferences.press('Space');
+  await expectReferenceReady(page, referenceTab);
+  const hideReferences = trayToggles.getByRole('button', { name: 'Hide References', exact: true });
+  await expect(hideReferences).toHaveAttribute('aria-expanded', 'true');
+  await expect(editor).toHaveValue(draft);
+
+  await page.getByRole('button', { name: 'Close active reference', exact: true }).press('Enter');
+  await expect(referenceTab).toHaveCount(0);
+  await expect(trayToggles).toHaveCount(0);
+  await expect(editor).toBeFocused();
+  await expect(editor).toHaveValue(draft);
+});
+
 test('recovers a closed annotation-origin editor and reuses its tab after applying the edit', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
   const sessionId = await openFixture(page, referencePdf, async (id) => {
@@ -1577,7 +1612,7 @@ test('authors on a Reference page and preserves one focused draft through switch
   await expect(editor).toBeFocused();
 
   await clickWithHitEvidence(
-    page.getByRole('button', { name: 'Hide References' }),
+    page.locator('#review-workspace').getByRole('button', { name: 'Hide References', exact: true }),
     'Hide References',
   );
   await expect(editor).toHaveValue(draft);

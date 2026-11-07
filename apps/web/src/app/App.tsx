@@ -100,7 +100,7 @@ import {
   subscribeToReferenceManualScroll,
 } from '../pdf/reference-manual-scroll.js';
 import type { ReviewAnnotation } from '../../../../packages/core/src/pdf-writer.js';
-import { REVIEW_COLLAPSED_RAIL_SIZE, REVIEW_OVERLAY_INSET, REVIEW_OVERLAY_FADE_SIZE } from '../review/use-review-overlay-geometry.js';
+import { REVIEW_OVERLAY_INSET, REVIEW_OVERLAY_FADE_SIZE } from '../review/use-review-overlay-geometry.js';
 import { ReviewIcon } from '../review/ReviewIcon.js';
 import type { PdfSearchResult } from '../pdf/pdf-search-model.js';
 import {
@@ -1125,9 +1125,9 @@ export function App({
           const stage = workspaceElementRef.current?.closest<HTMLElement>('[data-review-stage]');
           const rightFade = stage?.dataset.rightSurfaceOpen === 'true'
             ? REVIEW_OVERLAY_INSET + REVIEW_OVERLAY_FADE_SIZE
-            : stage?.dataset.rightRailPresent === 'true' ? REVIEW_OVERLAY_FADE_SIZE : 0;
-          // The rail or dock is already outside the reading viewport. Balance
-          // text against its clear area, before the remaining decorative fade.
+            : 0;
+          // The dock is already outside the reading viewport. Balance text
+          // against its clear area, before the remaining decorative fade.
           return { left: 36, right: 36 + rightFade };
         },
         fitWidthMargins: () => {
@@ -1136,11 +1136,7 @@ export function App({
             const gap = REVIEW_OVERLAY_INSET + REVIEW_OVERLAY_FADE_SIZE;
             return { left: gap, right: gap };
           }
-          // Layout reserves the collapsed rail. Leave room for its fade
-          // inside the scrollport and match both on the left.
-          return stage?.dataset.rightRailPresent === 'true'
-            ? { left: REVIEW_COLLAPSED_RAIL_SIZE + REVIEW_OVERLAY_FADE_SIZE, right: REVIEW_OVERLAY_FADE_SIZE }
-            : undefined;
+          return undefined;
         },
       });
       mainNavigationRef.current = mainNavigation;

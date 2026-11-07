@@ -347,7 +347,7 @@ test('normal-motion workspace opening and closing refit after the tray settles',
       else resolve(samples);
     };
     sample();
-    document.querySelector<HTMLButtonElement>('button[aria-label="Hide workspace"]')!.click();
+    document.querySelector<HTMLButtonElement>('button[data-workspace-tray-toggle="right"]')!.click();
   }));
   expect(Math.abs(closing.at(-1)!.width - first.width)).toBeLessThan(2);
   for (let index = 1; index < closing.length; index += 1) {
@@ -473,7 +473,7 @@ test('refreshes the current page when workspace occlusion changes without scroll
   await page.getByRole('button', { name: 'Overview, Page 2', exact: true }).click();
   await expect(currentPage).toHaveValue('2');
   await settlePages();
-  await page.getByRole('button', { name: 'Hide workspace', exact: true }).click();
+  await page.getByRole('group', { name: 'Workspace trays', exact: true }).getByRole('button', { name: 'Hide workspace', exact: true }).click();
   await settlePages();
   const zoom = page.getByRole('textbox', { name: /^Current zoom/u });
   await zoom.fill(String(Number(await zoom.inputValue()) + 1));
@@ -519,7 +519,7 @@ test('refreshes the current page when a right workspace narrows mixed-width page
   await page.getByRole('button', { name: 'Finish host bootstrap' }).click();
   const currentPage = page.getByRole('textbox', { name: /^Current page \d+ of 4/u });
   await expect(currentPage).toBeVisible();
-  const hide = page.getByRole('button', { name: 'Hide workspace', exact: true });
+  const hide = page.getByRole('group', { name: 'Workspace trays', exact: true }).getByRole('button', { name: 'Hide workspace', exact: true });
   if (await hide.isVisible()) await hide.click();
   const zoom = page.getByRole('textbox', { name: /^Current zoom/u });
   await zoom.fill('120');

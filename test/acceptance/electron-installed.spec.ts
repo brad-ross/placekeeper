@@ -53,6 +53,18 @@ test('packaged candidate renders and activates a real PDF without system Node', 
       { group: 'history', region: 'no-drag' },
       { group: 'zoom', region: 'no-drag' },
     ]);
+    const trayControls = page.getByRole('group', { name: 'Workspace trays', exact: true });
+    await expect(trayControls).toHaveCSS('-webkit-app-region', 'no-drag');
+    const workspaceToggle = trayControls.getByRole('button', { name: 'Show workspace', exact: true });
+    await expect(workspaceToggle).toHaveAttribute('aria-expanded', 'false');
+    await workspaceToggle.click();
+    const expandedToggle = trayControls.getByRole('button', { name: 'Hide workspace', exact: true });
+    await expect(expandedToggle).toHaveAttribute('aria-expanded', 'true');
+    const tray = page.locator('#review-tools-workspace[data-tools-workspace-open="true"], #review-workspace[data-workspace-open="true"]');
+    await tray.getByRole('button', { name: 'Hide workspace', exact: true }).click();
+    await expect(workspaceToggle).toHaveAttribute('aria-expanded', 'false');
+    await expect(workspaceToggle).toBeFocused();
+
     const pageInput = page.locator('[data-review-chrome] .review-chrome__page-input');
     await pageInput.click();
     await expect(pageInput).toBeFocused();

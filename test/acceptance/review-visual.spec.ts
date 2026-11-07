@@ -556,7 +556,7 @@ test('narrow responsive top-bar menu', async ({ page }) => {
   await openScene(page, 'reading', { width: 390, height: 720 });
   const chrome = page.locator('[data-review-chrome]');
   await expect(chrome).toHaveCSS('height', '50px');
-  await expect(chrome).toHaveAttribute('data-review-chrome-presentation', 'expanded');
+  await expect(chrome.getByRole('group', { name: 'Workspace trays' })).toBeVisible();
   await page.getByRole('button', {
     name: 'Page 4 of 128. Open page navigation',
   }).click();
@@ -613,15 +613,16 @@ test('installed real PDF reading', async ({ page }) => {
 test('wide Annotation Tray', async ({ page }) => {
   const product = await openScene(page, 'tray');
   await expect(page.locator('#review-tools-workspace')).toHaveAttribute('data-workspace-presentation', 'right');
-  const railBox = await page.getByRole('button', { name: 'Hide workspace' }).boundingBox();
+  const hideBox = await page.locator('#review-tools-workspace')
+    .getByRole('button', { name: 'Hide workspace', exact: true }).boundingBox();
   const modesBox = await page.getByRole('tablist', { name: 'Workspace modes' }).boundingBox();
   const headerBox = await page.locator('.review-workspace__header').boundingBox();
   const stripBox = await page.locator('.review-workspace__activity-strip').boundingBox();
-  if (!railBox || !modesBox || !headerBox || !stripBox) {
+  if (!hideBox || !modesBox || !headerBox || !stripBox) {
     throw new Error('Workspace navigation geometry is unavailable.');
   }
   expect(Math.abs(
-    railBox.y + railBox.height / 2 - (modesBox.y + modesBox.height / 2),
+    hideBox.y + hideBox.height / 2 - (modesBox.y + modesBox.height / 2),
   )).toBeLessThanOrEqual(8);
   expect(stripBox.x).toBeGreaterThanOrEqual(headerBox.x);
   expect(stripBox.y).toBeGreaterThanOrEqual(headerBox.y);

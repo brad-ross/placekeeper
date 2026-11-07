@@ -14,7 +14,7 @@ import {
   mainAnnotationPeekCanOpen,
   takeReferenceInspectionForAuthoring,
   workspaceCloseAllowsMainPeek,
-  shouldShowRightWorkspaceRail,
+  shouldShowRightWorkspaceToggle,
 } from '../src/app/ReviewShell.js';
 import {
   authoringSessionInvalidReason,
@@ -264,14 +264,12 @@ describe('Reference authoring continuity', () => {
       nestedLayerOpen: true,
       authoringActive: false,
     })).toBe(false);
-    expect(shouldShowRightWorkspaceRail({
-      rightSurfaceOpen: false,
+    expect(shouldShowRightWorkspaceToggle({
       authoringActive: true,
       referencesAvailable: true,
       referenceDock: 'right',
     })).toBe(true);
-    expect(shouldShowRightWorkspaceRail({
-      rightSurfaceOpen: false,
+    expect(shouldShowRightWorkspaceToggle({
       authoringActive: true,
       referencesAvailable: true,
       referenceDock: 'bottom',

@@ -1,4 +1,4 @@
-import { useId, useLayoutEffect, useRef, useState, type MouseEvent, type PointerEvent, type ReactNode } from 'react';
+import { useId, useLayoutEffect, useRef, useState, type MouseEvent, type PointerEvent, type ReactNode, type Ref } from 'react';
 
 import {
   VIEWER_ZOOM_MAX_PERCENT,
@@ -94,6 +94,15 @@ export function zoomInputWidth(value: string): string {
   return `${Math.max(1, value.length) * 0.62}em`;
 }
 
+export interface ReviewChromeTrayToggle {
+  readonly surface: 'right' | 'bottom';
+  readonly target: 'workspace' | 'References';
+  readonly open: boolean;
+  readonly controls: string;
+  readonly buttonRef: Ref<HTMLButtonElement>;
+  readonly onToggle: () => void;
+}
+
 export interface ReviewChromeProps {
   readonly documentTitle: string;
   /** The PDF's own title when it has one; shown in place of the filename. */
@@ -139,6 +148,7 @@ export interface ReviewChromeProps {
   readonly onNavigateForward?: () => void;
   readonly onSaveOptions?: () => void;
   readonly saveOptionsAvailable?: boolean;
+  readonly workspaceTrayToggles?: readonly ReviewChromeTrayToggle[];
 }
 
 export function ReviewChrome({
@@ -176,6 +186,7 @@ export function ReviewChrome({
   onNavigateForward = () => undefined,
   onSaveOptions = () => undefined,
   saveOptionsAvailable = true,
+  workspaceTrayToggles = [],
 }: ReviewChromeProps) {
   const [compactTouch, setCompactTouch] = useState(false);
   const compactTouchFocusRef = useRef<TopBarMenuId | null>(null);
@@ -1026,6 +1037,27 @@ export function ReviewChrome({
     <div className="review-chrome__viewer-controls" role="group" aria-label="PDF editing and zoom">
       {controlsForPresentation(presentation)}
     </div>
+    {workspaceTrayToggles.length > 0 ? <div
+      className="review-chrome__tray-controls"
+      role="group"
+      aria-label="Workspace trays"
+      inert={saveOptionsOpen}
+      aria-hidden={saveOptionsOpen || undefined}
+    >
+      {workspaceTrayToggles.map(({ surface, target, open, controls: trayControls, buttonRef, onToggle }) => (
+        <ReviewTooltipButton
+          key={surface}
+          ref={buttonRef}
+          label={`${open ? 'Hide' : 'Show'} ${target}`}
+          type="button"
+          className="review-chrome__icon-control review-chrome__tray-toggle"
+          data-workspace-tray-toggle={surface}
+          aria-expanded={open}
+          aria-controls={trayControls}
+          onClick={onToggle}
+        ><ReviewIcon name={surface === 'right' ? 'panel-right' : 'panel-bottom'} /></ReviewTooltipButton>
+      ))}
+    </div> : null}
     <div
       ref={sizingRackRef}
       data-review-chrome-sizing-rack
@@ -1040,7 +1072,8 @@ export function ReviewChrome({
         style={{
           position: 'absolute',
           display: 'inline-grid',
-          gridTemplateColumns: 'max-content max-content',
+          gridTemplateColumns: workspaceTrayToggles.length > 0
+            ? 'max-content max-content max-content' : 'max-content max-content',
           gridTemplateRows: 'max-content',
           width: 'max-content',
           height: 'var(--review-chrome-height)',
@@ -1048,6 +1081,11 @@ export function ReviewChrome({
       >
         {sizingIdentity}
         {sizingCluster(candidate)}
+        {workspaceTrayToggles.length > 0 ? <div className="review-chrome__tray-controls">
+          {workspaceTrayToggles.map(({ surface }) => (
+            <button key={surface} type="button" className="review-chrome__icon-control review-chrome__tray-toggle" />
+          ))}
+        </div> : null}
       </div>)}
     </div>
     {!viewerState.pageReady ? <p id={pageUnavailableId} className="sr-only">{viewerState.pageUnavailableReason}</p> : null}

@@ -286,7 +286,7 @@ test("omits destination copy controls and reopens canonical links without source
   await result.getByRole("button").first().focus();
   await expect(result.locator('.copy-link-control')).toHaveCount(0);
 
-  await page.getByRole("button", { name: "Hide workspace" }).click();
+  await page.getByRole("group", { name: "Workspace trays", exact: true }).getByRole("button", { name: "Hide workspace", exact: true }).click();
   await page.locator("[data-review-stage]").evaluate(async element => {
     await Promise.all(element.getAnimations({ subtree: true }).map(animation => animation.finished.catch(() => undefined)));
   });

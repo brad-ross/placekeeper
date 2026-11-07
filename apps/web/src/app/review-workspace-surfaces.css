@@ -46,49 +46,6 @@
   box-shadow: 0 2px 7px rgb(0 0 0 / 6%);
 }
 
-.workspace-edge-rail {
-  position: absolute;
-  z-index: 4;
-  display: grid;
-  width: var(--review-control-default);
-  min-width: var(--review-control-default);
-  height: var(--review-control-default);
-  padding: 0;
-  place-items: center;
-  border: 0;
-  color: var(--review-ink-muted);
-  background: transparent;
-  pointer-events: auto;
-  transition: transform var(--review-motion-surface) ease-out;
-}
-
-.workspace-edge-rail[data-workspace-edge-rail="right"] {
-  top: 12px;
-  right: var(--review-overlay-inset, 12px);
-}
-
-.workspace-edge-rail[data-workspace-edge-rail="bottom"] {
-  bottom: var(--review-overlay-inset, 12px);
-  left: 12px;
-}
-
-.workspace-edge-rail__glyph {
-  display: grid;
-  width: 22px;
-  height: 22px;
-  place-items: center;
-  border: 1px solid var(--review-border-subtle);
-  border-radius: var(--review-radius-round);
-  background: color-mix(in srgb, var(--review-surface-panel) 88%, transparent);
-  box-shadow: 0 1px 3px rgb(24 27 23 / 8%);
-}
-
-.workspace-edge-rail:hover .workspace-edge-rail__glyph {
-  border-color: var(--review-border-strong);
-  color: var(--review-ink-primary);
-}
-
-.workspace-edge-rail:focus-visible,
 .reference-resize-handle:focus-visible {
   outline: 3px solid var(--review-focus);
   outline-offset: 0;
