@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { desktopExecutable, resolveLauncherRuntime } from './launcher.mjs';
 import { assertSafeInstallDestinationOnDisk, resolveInstallLayout, removeOwnedInstallationFiles } from './install-layout.ts';
 import { activateInstallation, activateRuntimeSelection } from './install-transaction.mjs';
+import { installTransactionRoot } from './install-location.mjs';
 const execute = promisify(execFile);
 export function runtimeRoot(app, platform = process.platform) { return join(app, platform === 'darwin' ? 'Contents/Resources/desktop' : 'resources/desktop'); }
 async function verifyLease(context) {
@@ -91,7 +92,7 @@ export async function installBuiltApp(built, destination, readiness, port, invok
   const guardOptions = isolatedRoot ? { homeDirectory:isolatedRoot, env:{} } : undefined;
   await assertSafeInstallDestinationOnDisk(destination, guardOptions);
   await validateExistingInstallation(destination);
-  const transactionRoot=context.transactionRoot ?? join(dirname(destination), '.placekeeper-install-transactions', createHash('sha256').update(resolve(destination)).digest('hex').slice(0,24));
+  const transactionRoot=context.transactionRoot ?? installTransactionRoot(resolve(destination));
   await assertSafeInstallDestinationOnDisk(transactionRoot, guardOptions);
   const legacyRoot=resolveInstallLayout(guardOptions).legacySourceRoot;
   let previousLocation;
@@ -200,7 +201,7 @@ export async function uninstallApp(built,destination,_readiness,_port,_invoke,is
   if(!isAbsolute(context.backupRoot??''))throw Error('Uninstall requires a verified recovery backup');
   await assertSafeInstallDestinationOnDisk(destination,isolatedRoot?{homeDirectory:isolatedRoot,env:{}}:undefined);
   await resolveLauncherRuntime(runtimeRoot(destination));
-  const transactionRoot=join(dirname(destination),'.placekeeper-install-transactions',createHash('sha256').update(resolve(destination)).digest('hex').slice(0,24),'uninstall-'+Date.now());
+  const transactionRoot=join(installTransactionRoot(resolve(destination)),'uninstall-'+Date.now());
   await assertSafeInstallDestinationOnDisk(transactionRoot,isolatedRoot?{homeDirectory:isolatedRoot,env:{}}:undefined);
   await mkdir(transactionRoot,{recursive:true,mode:0o700});
   const previous=join(transactionRoot,process.platform==='darwin'?'previous.app':'previous');

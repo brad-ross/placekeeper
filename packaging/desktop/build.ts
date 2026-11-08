@@ -85,7 +85,7 @@ export async function prepareDesktopRuntime(target: string): Promise<string> {
   await copyFile(join(repo, "docs/guides/editor-synctex.md"), join(root, "integrations/editors/guide.md"));
   const installer = join(root, "installer");
   await mkdir(installer, { recursive: true });
-  for (const helper of ["installer-entry.mjs", "install-built-app.mjs", "install-transaction.mjs", "install-layout.ts", "launcher.mjs", "linux-dispatcher.mjs", "windows-registration.mjs", "stage-uninstall.mjs"]) {
+  for (const helper of ["installer-entry.mjs", "install-built-app.mjs", "install-transaction.mjs", "install-location.mjs", "install-layout.ts", "launcher.mjs", "linux-dispatcher.mjs", "windows-registration.mjs", "stage-uninstall.mjs"]) {
     await copyFile(join(repo, "packaging/desktop", helper), join(installer, helper));
   }
   for (const helper of ["setup-chrome.mjs", "update-vscode.mjs", "setup-zed.mjs"]) {

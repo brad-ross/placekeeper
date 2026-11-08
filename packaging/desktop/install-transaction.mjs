@@ -99,6 +99,7 @@ export async function activateInstallation(options) {
   const attempt = resumePreflight ? previousAttempt.attempt : randomBytes(24).toString('hex');
   const base = join(options.transactionRoot, attempt);
   const record = { version: 1, attempt, destination: resolve(options.destination), candidateIdentity: options.candidateIdentity, backupRoot: options.backupRoot,
+    installed: previousAttempt?.installed,
     previousLocation: options.previousLocation ?? null, hadPrevious: await exists(options.destination), staged: resumePreflight ? previousAttempt.staged : join(base, stagedName), previous: join(base,previousName), failed: join(base,'failed'), receipt: join(base,'service-ready.json'), shellReceipt: join(base,'shell-ready.json'), phase: 'staging' };
   await mkdir(base, { recursive: true, mode: 0o700 });
   try {
@@ -126,6 +127,10 @@ export async function activateInstallation(options) {
     await transition(options, record, 'starting');
     await options.ready(record, () => atomicJournal(options.transactionRoot, record));
     await transition(options, record, 'committing');
+    if (process.platform === 'darwin') {
+      const { dev, ino } = await lstat(record.destination, { bigint: true });
+      record.installed = { identity: record.candidateIdentity, device: String(dev), inode: String(ino) };
+    }
     await transition(options, record, 'complete');
   } catch (error) {
     const discardStage = record.phase === 'staging' && !record.preflightPending && !resumePreflight;

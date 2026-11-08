@@ -33,6 +33,7 @@ import { alignNativeWindowButtons, nativeTitlebarOptions, trackTitlebarHover } f
 import { parseElectronLocation } from '../../../packages/core/src/electron-shell-protocol.js';
 import { decodePlacekeeperLink } from '../../../packages/core/src/placekeeper-link.js';
 import { REVIEW_COMMAND_IDS } from '../../web/src/review/review-command-surface.js';
+import { macAppHasCompletedInstallation } from '../../../packaging/desktop/install-location.mjs';
 const nativeInstaller = parseInstallerRequest(process.argv.slice(1));
 const installerPreflight = process.argv[1] === '--placekeeper-installer-preflight';
 const installerProfile = nativeInstaller ? isolateInstallerProfile() : undefined;
@@ -48,6 +49,13 @@ const standaloneChooser = parseStandaloneChooser(process.argv.slice(1));
 const installerAction = handleWindowsProtocolInstall(app, { platform: process.platform, argv: process.argv, executable: process.execPath });
 const installerEvent = installerAction.handled;
 const smokePaths = nativeInstaller ? undefined : installedSmokeDaemonPaths(process.argv.slice(1));
+// Open Anyway can launch the staged app with no arguments from a different
+// path. An ordinary launch requires the installer to have committed this copy.
+if (process.platform === 'darwin' && app.isPackaged && !nativeInstaller && !installerPreflight &&
+    !startupRequest && !standaloneChooser && !smokePaths &&
+    !macAppHasCompletedInstallation(resolve(process.resourcesPath, '../..'))) {
+    process.exit(0);
+}
 if (smokePaths && !startupRequest) {
     if (!smokePaths.isolatedTestRoot) throw new Error('Electron installed smoke requires an explicit isolated test root');
     const smokeUserData = join(smokePaths.isolatedTestRoot, 'electron-user-data');

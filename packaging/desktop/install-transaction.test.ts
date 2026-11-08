@@ -3,6 +3,45 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { expect, it } from 'vitest';
 import { activateInstallation, recoverInstallation } from './install-transaction.mjs';
+import { installTransactionRoot, macAppHasCompletedInstallation } from './install-location.mjs';
+
+it.runIf(process.platform === 'darwin')('allows ordinary launch only for the committed app, including after rollback', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'pk-launch-activation-'));
+  try {
+    const built = join(root, 'candidate.app'), destination = join(root, 'Placekeeper.app');
+    const resources = 'Contents/Resources/desktop';
+    const candidateIdentity = 'a'.repeat(64);
+    await mkdir(join(built, resources), { recursive: true });
+    await writeFile(join(built, resources, 'runtime-manifest.json'), JSON.stringify({ installArtifactIdentity: candidateIdentity }));
+    const options = {
+      built, destination, transactionRoot: installTransactionRoot(destination), candidateIdentity, backupRoot: join(root, 'backup'),
+      validate: async (staged: string) => {
+        expect(macAppHasCompletedInstallation(staged)).toBe(false);
+      },
+      beforeStart: async (installed: string) => {
+        expect(macAppHasCompletedInstallation(installed)).toBe(false);
+      },
+      ready: async () => {},
+      retire: async () => { throw Error('No service should start after a blocked launch check'); },
+    };
+    expect(macAppHasCompletedInstallation(built)).toBe(false);
+    await activateInstallation(options);
+    expect(macAppHasCompletedInstallation(destination)).toBe(true);
+    const other = join(root, 'Open Anyway.app');
+    await cp(destination, other, { recursive: true });
+    expect(macAppHasCompletedInstallation(other)).toBe(false);
+    await expect(activateInstallation({
+      ...options,
+      beforeStart: async (installed: string) => {
+        await options.beforeStart(installed);
+        throw Error('Launch blocked');
+      },
+    })).rejects.toThrow('Launch blocked');
+    expect(macAppHasCompletedInstallation(destination)).toBe(true);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
 
 for (const boundary of ['staging', 'retaining', 'activating', 'starting', 'committing']) it(`recovers interruption at ${boundary} without losing previous app or restoring data`, async () => {
  const root = await mkdtemp(join(tmpdir(), 'pk-journal-'));
