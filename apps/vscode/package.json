@@ -2,7 +2,7 @@
   "name": "placekeeper-vscode",
   "displayName": "Placekeeper",
   "description": "Review generated LaTeX PDFs with Placekeeper inside VS Code.",
-  "version": "0.1.1",
+  "version": "0.3.2",
   "type": "module",
   "publisher": "placekeeper-local",
   "icon": "assets/placekeeper.png",

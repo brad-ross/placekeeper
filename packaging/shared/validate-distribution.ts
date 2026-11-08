@@ -827,6 +827,20 @@ export async function validateDistributionManifests(
   await validateCodexPlugin(resolve(repoRoot, "integrations/codex-plugin"));
   const chromeManifest = JSON.parse(await readFile(resolve(repoRoot, "apps/chrome-extension/manifest.json"), "utf8"));
   validateChromeSourceContract(chromeManifest);
+  const [desktopManifest, vscodeManifest, codexManifest] = await Promise.all([
+    "apps/electron/package.json",
+    "apps/vscode/package.json",
+    "integrations/codex-plugin/.codex-plugin/plugin.json",
+  ].map(async (path) => JSON.parse(await readFile(resolve(repoRoot, path), "utf8")) as { version: string }));
+  for (const [name, version] of [
+    ["Chrome extension", chromeManifest.version],
+    ["VS Code extension", vscodeManifest.version],
+    ["Codex plugin", codexManifest.version],
+  ]) {
+    if (version !== desktopManifest.version) {
+      throw new Error(`${name} version ${version} must match Placekeeper ${desktopManifest.version}`);
+    }
+  }
   const noticePath = resolve(repoRoot, "THIRD_PARTY_NOTICES.md");
   validateCatalogThirdPartyNotices(await readFile(noticePath, "utf8"));
   await validateCatalogSourceBaseline(repoRoot);
