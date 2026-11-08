@@ -160,6 +160,33 @@ export async function validateStagedDirectory(directory: string, provenance: Bui
     assertCandidateBinding(provenance, expected);
     return result;
 }
+
+/** Build a correction without changing the original release tag or its other payloads. */
+export async function prepareMacInstallerCorrection(original: string, candidate: string, output: string) {
+    const originalProvenance = JSON.parse(await readFile(join(original, 'desktop-build-provenance.json'), 'utf8')) as BuildProvenance;
+    const correctedProvenance = JSON.parse(await readFile(join(candidate, 'desktop-build-provenance.json'), 'utf8')) as BuildProvenance;
+    if (originalProvenance.version !== correctedProvenance.version ||
+        originalProvenance.commit === correctedProvenance.commit)
+        throw Error('The correction must come from a new build of the same release version');
+    await validateStagedDirectory(original, originalProvenance);
+    await validateStagedDirectory(candidate, correctedProvenance);
+    const corrected = correctedProvenance.assets.filter(asset => asset.target.startsWith('darwin-'));
+    const payloads = [...originalProvenance.sources, ...originalProvenance.assets.filter(asset => !asset.target.startsWith('darwin-')), ...corrected];
+    const checksums = payloads.sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0)
+        .map(asset => `${asset.sha256}  ${asset.name}\n`).join('');
+    await mkdir(output, { recursive: true });
+    for (const asset of corrected)
+        await writeFile(join(output, asset.name), await readFile(join(candidate, asset.name)), { flag: 'wx' });
+    await writeFile(join(output, 'SHA256SUMS'), checksums, { flag: 'wx' });
+    await writeFile(join(output, 'macos-installer-correction.json'), JSON.stringify({
+        schemaVersion: 1,
+        version: correctedProvenance.version,
+        originalCommit: originalProvenance.commit,
+        commit: correctedProvenance.commit,
+        candidateRun: correctedProvenance.candidateRun,
+        assets: corrected,
+    }, null, 2) + '\n', { flag: 'wx' });
+}
 export function assertCandidateBinding(provenance: BuildProvenance, original: BuildProvenance): void {
     const inventory = (value: BuildProvenance) => JSON.stringify({
         schemaVersion: value.schemaVersion,
@@ -184,7 +211,15 @@ async function verifyRemoteInventory(draft: Release, directory: string, version:
     }
 }
 async function main() {
-    const [operation, version, commit, run, input, output] = process.argv.slice(2);
+    const [operation, ...args] = process.argv.slice(2);
+    if (operation === 'prepare-macos-correction') {
+        const [original, candidate, correction] = args;
+        if (args.length !== 3 || !original || !candidate || !correction)
+            throw Error('Usage: desktop-release.ts prepare-macos-correction ORIGINAL CANDIDATE OUTPUT');
+        await prepareMacInstallerCorrection(resolve(original), resolve(candidate), resolve(correction));
+        return;
+    }
+    const [version, commit, run, input, output] = args;
     if (!operation || !version || !commit || !run || !input)
         throw Error('Usage: desktop-release.ts assemble|stage|publish VERSION COMMIT CANDIDATE_RUN INPUT [OUTPUT_OR_TRUSTED_CANDIDATE]');
     const identity = releaseIdentity(version, commit);

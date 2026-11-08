@@ -2,6 +2,11 @@ name: Build desktop installers
 
 on:
   workflow_dispatch:
+    inputs:
+      stage_release:
+        description: Stage a draft for a new version
+        type: boolean
+        default: true
   workflow_call:
 
 permissions:
@@ -188,7 +193,7 @@ jobs:
           retention-days: 30
 
   stage:
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'brad-ross/placekeeper'
+    if: github.event_name == 'workflow_dispatch' && inputs.stage_release && github.ref == 'refs/heads/main' && github.repository == 'brad-ross/placekeeper'
     needs: assemble
     runs-on: ubuntu-24.04
     permissions:

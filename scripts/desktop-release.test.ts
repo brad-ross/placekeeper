@@ -9,7 +9,7 @@ it('hashes the exact bytes deterministically',()=>{const result=verifyReleaseFil
 import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
-import { assembleCandidate, sha256 } from './desktop-release.js';
+import { assembleCandidate, prepareMacInstallerCorrection, sha256 } from './desktop-release.js';
 import { releaseIdentity } from './package-source-release.js';
 it('assembles only successful native results from the same commit/run and authentic source descriptor',async()=>{
  const root=await mkdtemp('/tmp/pk-release-'),input=join(root,'input'),source=join(input,'source'),commit='a'.repeat(40);
@@ -39,6 +39,42 @@ it('assembles only successful native results from the same commit/run and authen
 
 import { assertCandidateBinding } from './desktop-release.js';
 import { buildProvenance } from './desktop-release.js';
+it('prepares a same-version Mac correction with hashes from the original release for other platforms', async () => {
+ const root = await mkdtemp('/tmp/pk-release-correction-');
+ try {
+  const version = '0.3.0';
+  const original = join(root, 'original'), candidate = join(root, 'candidate'), correction = join(root, 'correction');
+  const source = join(root, 'placekeeper-source');
+  await mkdir(source);
+  async function releaseFixture(directory: string, letter: string, run: string) {
+   const commit = letter.repeat(40);
+   await mkdir(directory);
+   await writeFile(join(source, 'release-descriptor.txt'), releaseIdentity(version, commit).descriptor);
+   const sourceName = `placekeeper-source-v${version}.tar.gz`;
+   execFileSync('tar', ['-czf', join(directory, sourceName), '-C', root, 'placekeeper-source']);
+   const payloads = Object.fromEntries(Object.keys(files()).map(name => [name, Buffer.from(`${letter}-${name}`)]));
+   payloads[sourceName] = await readFile(join(directory, sourceName));
+   for (const [name, bytes] of Object.entries(payloads)) await writeFile(join(directory, name), bytes);
+   const inventory = verifyReleaseFiles(payloads, version);
+   await writeFile(join(directory, 'SHA256SUMS'), inventory.checksums);
+   await writeFile(join(directory, 'desktop-build-provenance.json'), JSON.stringify(buildProvenance(version, commit, run, inventory.assets, inventory.sources)));
+   return inventory;
+  }
+  const old = await releaseFixture(original, 'a', '123');
+  const next = await releaseFixture(candidate, 'b', '124');
+  await prepareMacInstallerCorrection(original, candidate, correction);
+  const sums = await readFile(join(correction, 'SHA256SUMS'), 'utf8');
+  const macAssets = next.assets.filter(asset => asset.target.startsWith('darwin-'));
+  for (const asset of [...macAssets, ...old.assets.filter(asset => !asset.target.startsWith('darwin-')), ...old.sources]) {
+   expect(sums).toContain(`${asset.sha256}  ${asset.name}\n`);
+  }
+  expect(JSON.parse(await readFile(join(correction, 'macos-installer-correction.json'), 'utf8'))).toMatchObject({
+   originalCommit: 'a'.repeat(40), commit: 'b'.repeat(40), candidateRun: '124', assets: macAssets,
+  });
+  await writeFile(join(candidate, macAssets[0]!.name), 'changed');
+  await expect(prepareMacInstallerCorrection(original, candidate, join(root, 'tampered'))).rejects.toThrow();
+ } finally { await rm(root, {recursive:true, force:true}); }
+});
 it('binds source and bootstrap to immutable candidate-run provenance, even if current draft metadata changes',()=>{
  const result=verifyReleaseFiles(files(),'0.3.0');const original=buildProvenance('0.3.0','a'.repeat(40),'123',result.assets,result.sources);
  for(const name of ['placekeeper-source-v0.3.0.tar.gz','install-placekeeper.sh']){
