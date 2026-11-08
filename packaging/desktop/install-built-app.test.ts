@@ -22,7 +22,7 @@ async function app(path: string) {
   await writeFile(join(root, "runtime-manifest.json"), JSON.stringify({ schemaVersion: 1, target: { platform: process.platform, arch: process.arch }, daemonIdentity: "a".repeat(64), installArtifactIdentity: "b".repeat(64), node: { path: node, sha256: hash("node") }, service: { path: "service/main.js", sha256: hash("service") }, webAssets: { path: "web", files: [{ path: "pdfium.wasm", sha256: hash("wasm") }] } }));
 }
 describe("desktop replacement transaction", () => {
-  it.runIf(process.platform === "darwin")("keeps the current app in place if macOS blocks the staged runtime", async () => {
+  it.runIf(process.platform === "darwin")("checks the actual launchers and rolls back a Gatekeeper failure at the final app path", async () => {
     const root = await mkdtemp(join(tmpdir(), "pk-install-preflight-"));
     const lease = await acquireLifecycleLock(join(root, "lifecycle.lock"));
     try {
@@ -30,15 +30,25 @@ describe("desktop replacement transaction", () => {
       await app(built);
       await app(destination);
       await writeFile(join(destination, "old"), "previous app");
-      const calls: string[][] = [];
+      const readiness = join(destination, "Contents/MacOS/placekeeper");
+      const context = { lockPath: join(root, "lifecycle.lock"), lockToken: lease.token, backupRoot: join(root, "backup") };
+      const calls: string[] = [];
       await expect(installBuiltApp(built, destination, join(destination, "Contents/MacOS/placekeeper"), undefined,
-        async (_executable: string, args: string[]) => {
-          calls.push(args);
-          throw Error("Gatekeeper rejected the launch");
-        }, root, { lockPath: join(root, "lifecycle.lock"), lockToken: lease.token, backupRoot: join(root, "backup") },
-      )).rejects.toThrow(/Privacy & Security.*Gatekeeper rejected/);
-      expect(calls).toEqual([["--version"]]);
+        async (executable: string, args: string[]) => {
+          calls.push(args[0]!);
+          if (executable === readiness) throw Error("Gatekeeper rejected the final launch");
+          expect(executable).toContain("/Placekeeper.app/Contents/MacOS/");
+          expect(await readFile(join(destination, "old"), "utf8")).toBe("previous app");
+        }, root, context,
+      )).rejects.toThrow(/Privacy & Security/);
+      expect(calls).toEqual(["--installer-preflight", "--placekeeper-installer-preflight", "--installer-preflight"]);
       expect(await readFile(join(destination, "old"), "utf8")).toBe("previous app");
+      const rootHash = hash(destination).slice(0, 24);
+      const transaction = join(root, ".placekeeper-install-transactions", rootHash);
+      const journal = JSON.parse(await readFile(join(transaction, "journal.json"), "utf8"));
+      expect(journal.phase).toBe("restored");
+      expect(journal.serviceLaunchRequested).toBeUndefined();
+      expect((await lstat(journal.staged)).isDirectory()).toBe(true);
     } finally {
       await lease.release();
       await rm(root, { recursive: true, force: true });
@@ -57,7 +67,11 @@ describe("desktop replacement transaction", () => {
       const calls: string[][] = [];
       await installBuiltApp(built, installed, readiness, undefined, async (_executable: string, args: string[], options: {env:NodeJS.ProcessEnv}) => { calls.push(args); if(options.env.PLACEKEEPER_STARTUP_REQUEST){const request=JSON.parse(options.env.PLACEKEEPER_STARTUP_REQUEST);await writeFile(request.receipt,JSON.stringify({...request,pid:2147483647,rendererReady:true}));await writeFile(`${request.receipt}.started`,JSON.stringify({...request,pid:2147483647}));} }, undefined, context);
       await lease.release();
-      expect(calls.map(args => args[1])).toEqual([...(process.platform === "darwin" ? [undefined] : []), "ensure-ready", undefined]);
+      expect(calls.map(args => args[0])).toEqual([
+        ...(process.platform === "darwin" ? ["--installer-preflight", "--placekeeper-installer-preflight", "--installer-preflight", "--placekeeper-installer-preflight"] : []),
+        "daemon", undefined,
+      ]);
+      expect(calls.at(-2)?.[1]).toBe("ensure-ready");
       expect(await readFile(desktopExecutable(runtimeRoot(installed)), "utf8")).toBe("Electron");
     } finally { await rm(root, { recursive: true, force: true }); }
   });
@@ -77,9 +91,38 @@ describe("desktop replacement transaction", () => {
         if (args[1] === "ensure-ready") { await writeFile(args[3]!, JSON.stringify({pid:2147483647})); throw new Error("readiness failure"); }
       }, undefined, context)).rejects.toThrow("readiness failure");
       await lease.release();
-      expect(calls.map(args => args[1])).toEqual([...(process.platform === "darwin" ? [undefined] : []), "ensure-ready", "stop-ready"]);
+      expect(calls.filter(args => args[0] === "daemon").map(args => args[1])).toEqual(["ensure-ready", "stop-ready"]);
       expect(await readFile(join(installed, "old"), "utf8")).toBe("prior installation");
     } finally { await rm(root, { recursive: true, force: true }); }
+  });
+
+  it.runIf(process.platform === "darwin")("prunes only the preceding backup with identical recovery data", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pk-install-backups-"));
+    const lockPath = join(root, "lifecycle.lock");
+    const lease = await acquireLifecycleLock(lockPath);
+    try {
+      const built = join(root, "candidate.app"), destination = join(root, "Placekeeper.app");
+      const readiness = join(destination, "Contents/MacOS/placekeeper");
+      await app(built);
+      const backups = [1, 2, 3].map(index => join(root, "installer", `recovery-backup-${index}`));
+      for (const [index, backup] of backups.entries()) {
+        await mkdir(backup, { recursive: true });
+        await writeFile(join(backup, "draft"), index === 0 ? "unique work" : "same work");
+        await installBuiltApp(built, destination, readiness, undefined, async (_file: string, _args: string[], options: { env: NodeJS.ProcessEnv }) => {
+          if (!options.env.PLACEKEEPER_STARTUP_REQUEST) return;
+          const request = JSON.parse(options.env.PLACEKEEPER_STARTUP_REQUEST);
+          const started = { ...request, pid: 2147483647 };
+          await writeFile(`${request.receipt}.started`, JSON.stringify(started));
+          await writeFile(request.receipt, JSON.stringify({ ...started, rendererReady: true }));
+        }, root, { lockPath, lockToken: lease.token, backupRoot: backup });
+      }
+      expect(await readFile(join(backups[0]!, "draft"), "utf8")).toBe("unique work");
+      await expect(lstat(backups[1]!)).rejects.toMatchObject({ code: "ENOENT" });
+      expect(await readFile(join(backups[2]!, "draft"), "utf8")).toBe("same work");
+    } finally {
+      await lease.release();
+      await rm(root, { recursive: true, force: true });
+    }
   });
 });
 

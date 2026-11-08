@@ -18,7 +18,7 @@ export async function makeMacInstaller(candidate: string, output: string, versio
   await run('/usr/bin/codesign', ['--force', '--deep', '--sign', '-', embedded]);
   await run('/usr/bin/codesign', ['--force', '--sign', '-', wrapper]);
   await run('/usr/bin/codesign', ['--verify', '--deep', '--strict', wrapper]);
-  await writeFile(join(output, 'Read Me.txt'), 'Open Install Placekeeper to install or upgrade. It protects pending work and asks before closing active reviews. This hobby project is unsigned and unnotarized; use normal per-app macOS approval if macOS prompts. Do not replace a running app through Finder. Install does not change your default PDF reader. Previous installations and recovery backups are retained.\n');
+  await writeFile(join(output, 'Read Me.txt'), 'Open Install Placekeeper to install or upgrade. The installer protects pending work and asks before closing active reviews. If macOS blocks this unnotarized build, review the named app in System Settings → Privacy & Security and retry if macOS offers approval. The installer keeps the old app until the new version passes its startup checks and saves a separate recovery backup for your work.\n');
   const target=desktopTarget('darwin',arch);
   if(!target)throw Error('Unsupported macOS installer architecture');
   const dmg = join(output, desktopAssetNames(version)[target]);

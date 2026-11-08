@@ -1,7 +1,8 @@
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { cp, lstat, mkdir, readFile, realpath, rename, writeFile } from 'node:fs/promises';
-import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { createReadStream } from 'node:fs';
+import { cp, lstat, mkdir, mkdtemp, readdir, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
+import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { desktopExecutable, resolveLauncherRuntime } from './launcher.mjs';
@@ -14,6 +15,33 @@ async function verifyLease(context) {
   const record = JSON.parse(await readFile(join(context.lockPath, `owner-${context.lockToken}.json`), 'utf8'));
   if (record.version !== 1 || record.token !== context.lockToken || !Number.isSafeInteger(record.pid) || record.pid <= 0) throw new Error('Invalid coordinator lifecycle lease');
   process.kill(record.pid, 0);
+}
+async function recoveryDigest(path) {
+  const hash = createHash('sha256');
+  async function visit(entry, name) {
+    const info = await lstat(entry);
+    if (info.isDirectory()) {
+      hash.update(JSON.stringify(['directory', name]));
+      for (const child of (await readdir(entry)).sort()) await visit(join(entry, child), join(name, child));
+    } else if (info.isFile()) {
+      const file = createHash('sha256');
+      for await (const chunk of createReadStream(entry)) file.update(chunk);
+      hash.update(JSON.stringify(['file', name, file.digest('hex')]));
+    } else {
+      throw Error('Recovery backup contains an unexpected entry');
+    }
+  }
+  if (!(await lstat(path)).isDirectory()) throw Error('Recovery backup is not a directory');
+  await visit(path, '');
+  return hash.digest('hex');
+}
+async function removeDuplicateBackup(previous, current, lockPath) {
+  const installer = join(dirname(lockPath), 'installer');
+  if (previous === current || ![previous, current].every(path =>
+    dirname(path) === installer && /^recovery-backup-\d+$/u.test(basename(path)))) return;
+  if (!(await lstat(installer)).isDirectory()) return;
+  const old = await recoveryDigest(previous).catch(error => { if(error.code!=='ENOENT') throw error; });
+  if (old && old === await recoveryDigest(current)) await rm(previous, {recursive:true});
 }
 async function validatePublicLegacyMacInstallation(destination) {
   if(process.platform!=='darwin')throw Error('Not a supported legacy installation');
@@ -79,6 +107,17 @@ export async function installBuiltApp(built, destination, readiness, port, invok
   const isolation=port===undefined?[]:['--isolated-installed-smoke','--http-port',port,...(isolatedRoot===undefined?[]:['--isolated-test-root',isolatedRoot])];
   const leaseEnvironment={PLACEKEEPER_LIFECYCLE_LOCK_PATH:context.lockPath,PLACEKEEPER_LIFECYCLE_LOCK_TOKEN:context.lockToken};
   const run=(executable,args,env={...process.env,...leaseEnvironment},timeout=30_000)=>invoke(executable,args,{env,timeout,maxBuffer:65_536});
+  async function checkMacLaunch(app, attemptDirectory) {
+    const profile = await mkdtemp(join(attemptDirectory, 'launch-check-'));
+    try {
+      await run(join(app, 'Contents/MacOS/placekeeper'), ['--installer-preflight'], undefined, 45_000);
+      await run(desktopExecutable(runtimeRoot(app)), ['--placekeeper-installer-preflight', profile], undefined, 45_000);
+    } catch (error) {
+      throw Error('The new Placekeeper app could not start. If macOS blocked it, review the notice in System Settings → Privacy & Security, then retry this installer.', {cause:error});
+    } finally {
+      await rm(profile, {recursive:true, force:true}).catch(error => console.error('Installer check profile could not be removed:', error.message));
+    }
+  }
   return activateInstallation({ built,destination,transactionRoot,copy:process.platform==='darwin' ? async (source,target)=>{await execute('/usr/bin/ditto',['--rsrc','--extattr','--acl','--qtn',source,target]);} : undefined,previousLocation,backupRoot:context.backupRoot,candidateIdentity:candidate.environment.PLACEKEEPER_INSTALL_ARTIFACT_IDENTITY,
     validate:async staged=>{
       await verifyLease(context);
@@ -86,17 +125,18 @@ export async function installBuiltApp(built, destination, readiness, port, invok
       await validateExistingInstallation(destination);
       const runtime=await resolveLauncherRuntime(runtimeRoot(staged));
       if(runtime.environment.PLACEKEEPER_INSTALL_ARTIFACT_IDENTITY!==candidate.environment.PLACEKEEPER_INSTALL_ARTIFACT_IDENTITY)throw Error('Staged candidate changed');
-      return runtime;
     },
     ...(process.platform==='darwin' ? {
       verifyPreflightCopy:async staged=>{await execute('/usr/bin/codesign',['--verify','--deep','--strict',staged]);},
-      preflight:async (_staged,runtime)=>{
-        // Gatekeeper may ask about the copied runtime. Check it while the
-        // incumbent is still at its original path and before starting a daemon.
-        try { await run(runtime.node,['--version'],undefined,90_000); }
-        catch(error) {
-          throw Error(`The new Placekeeper runtime could not start. If macOS blocked it, review the notice in System Settings → Privacy & Security, then retry this installer. ${error.message}`,{cause:error});
-        }
+      preflight:checkMacLaunch,
+      // macOS can assess the same app again at its final path. Until this
+      // succeeds, the journal can restore the old app without retiring a service.
+      beforeStart:checkMacLaunch,
+      removeDuplicateBackup:(previous,current)=>removeDuplicateBackup(previous,current,context.lockPath),
+      cleanup:async record=>{
+        const directory=dirname(record.shellReceipt);
+        await rm(join(directory, 'electron-profile'), {recursive:true, force:true});
+        await rm(join(directory, 'Startup check.pdf'), {force:true});
       },
     } : {}),
     removePrevious:process.platform==='darwin' ? async previous=>{

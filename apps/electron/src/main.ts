@@ -5,7 +5,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { readFile, readdir } from 'node:fs/promises';
-import { basename, join, resolve } from 'node:path';
+import { basename, isAbsolute, join, resolve } from 'node:path';
 import { defaultDaemonPaths, installedSmokeDaemonPaths, installedSmokeDaemonArgs, electronRuntimeThroughDaemon, electronAppControlThroughDaemon, resolveElectronLaunchThroughDaemon, preflightLinkThroughDaemon, openLinkThroughDaemon } from '../../service/src/host/service-daemon.js';
 import { resolvePackagedRuntime, type PackagedRuntimeManifest } from '../../service/src/platform/runtime-layout.js';
 import { encodeElectronHelperFrame } from '../../../packages/core/src/electron-helper-protocol.js';
@@ -34,7 +34,13 @@ import { parseElectronLocation } from '../../../packages/core/src/electron-shell
 import { decodePlacekeeperLink } from '../../../packages/core/src/placekeeper-link.js';
 import { REVIEW_COMMAND_IDS } from '../../web/src/review/review-command-surface.js';
 const nativeInstaller = parseInstallerRequest(process.argv.slice(1));
+const installerPreflight = process.argv[1] === '--placekeeper-installer-preflight';
 const installerProfile = nativeInstaller ? isolateInstallerProfile() : undefined;
+if (installerPreflight) {
+    const profile = process.argv[2];
+    if (process.argv.length !== 3 || !profile || !isAbsolute(profile)) throw new Error('Missing installer check profile');
+    app.setPath('userData', profile);
+}
 const startupRequest = parseStartupRequest(process.env.PLACEKEEPER_STARTUP_REQUEST);
 let startupProbePhase: 'initializing' | 'renderer-navigation' | 'shell-retirement' = 'initializing';
 if (startupRequest) { const deadline = setTimeout(() => { void (startupProbePhase === 'initializing' ? Promise.resolve() : writeStartupLoadFailure(startupRequest, 'Installed startup acknowledgement timed out', startupProbePhase === 'shell-retirement' ? 'shell-retirement-timeout' : 'renderer-ready-timeout')).catch(error => console.error(error)).finally(() => app.exit(2)); }, 20_000); deadline.unref(); writeFileSync(`${startupRequest.receipt}.started`, JSON.stringify({ attempt:startupRequest.attempt, candidateIdentity:startupRequest.candidateIdentity, pid:process.pid }), { flag:'wx', mode:0o600 }); mkdirSync(startupRequest.profile, { recursive:true }); app.setPath('userData', startupRequest.profile); }
@@ -52,7 +58,7 @@ const pendingOpens: string[] = [];
 const invocations = new DesktopInvocationQueue();
 let routeOpen: ((path: string) => void) | undefined;
 if (installerEvent) app.exit(installerAction.exitCode);
-else if (!nativeInstaller && !standaloneChooser) {
+else if (!nativeInstaller && !standaloneChooser && !installerPreflight) {
 if (!app.requestSingleInstanceLock({ argv: process.argv.slice(1) })) app.quit();
 else {
 app.on('open-url', (event, url) => { event.preventDefault(); try { invocations.enqueue([url]); } catch (error) { dialog.showErrorBox('Placekeeper could not open', String(error)); } });
@@ -497,6 +503,7 @@ async function start() {
 
 }
 if (nativeInstaller && installerProfile && !installerEvent) void runInstallerUI(nativeInstaller, installerProfile);
+if (installerPreflight) void app.whenReady().then(() => app.exit(0), () => app.exit(2));
 if (standaloneChooser && !nativeInstaller && !installerEvent) void runStandaloneChooser(standaloneChooser, join(__dirname, 'preload.cjs')).catch(() => app.exit(2));
 if (!nativeInstaller && !standaloneChooser && !installerEvent && app.hasSingleInstanceLock()) void start().catch(async error => { if (startupRequest) { console.error(error); app.exit(2); } else { const recovery = await retainedStartupRecovery(resolve(process.resourcesPath, process.platform === 'darwin' ? '../..' : '..')); dialog.showErrorBox('Placekeeper could not open', `${String(error)}${recovery ? `\n\n${recovery}` : ''}`); app.quit(); } });
 app.on('window-all-closed', () => { if (startupRequest || process.platform !== 'darwin') app.quit(); });

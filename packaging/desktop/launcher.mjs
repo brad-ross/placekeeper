@@ -88,6 +88,7 @@ function capture(invoke, executable, args, environment, { maxBytes = 65536, time
 export async function main(args = process.argv.slice(2), root = dirname(fileURLToPath(import.meta.url)), invoke = spawn) {
   try {
     const runtime = await resolveLauncherRuntime(root);
+    if (args.length === 1 && args[0] === '--installer-preflight') return 0;
     if (['choose-source-folder', 'choose-source-pdf', 'choose-neovim-endpoint'].includes(args[0])) {
       const kind = args[0] === 'choose-source-folder' ? 'folder' : args[0] === 'choose-source-pdf' ? 'pdf' : 'endpoint';
       if (kind === 'endpoint' ? args.length !== 1 : args.length !== 2 || !isAbsolute(args[1]) || args[1].includes('\0')) throw new Error('Invalid desktop chooser arguments');
