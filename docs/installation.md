@@ -88,7 +88,7 @@ Owned registration receipts and choices live under the support root's `integrati
 
 ## Open Chrome PDFs automatically (experimental)
 
-Chrome 151+ is required. After optional setup and loading the extension, pin **Placekeeper PDF Viewer** and turn on **Open PDFs automatically** in its popup. Fresh installations begin paused; updates preserve Chrome's choice. An eligible PDF retains its original tab URL. **Use Chrome viewer** bypasses Placekeeper before activation. A later service failure keeps the PDF visible read-only with explicit reopen/recovery. Pause automatic opening from the popup; other PDF extensions may conflict.
+Chrome 151+ is required. After optional setup and loading the extension, pin **Placekeeper** and turn on **Open PDFs automatically** in its popup. Fresh installations begin paused; updates preserve Chrome's choice. An eligible PDF retains its original tab URL. **Use Chrome viewer** bypasses Placekeeper before activation. A later service failure keeps the PDF visible read-only with explicit reopen/recovery. Pause automatic opening from the popup; other PDF extensions may conflict.
 
 The installed CLI's `doctor --json --chrome` checks registration. `pnpm test:chrome-handoff` and the isolated `pnpm test:chrome-installed` matrix do not replace real-host qualification of the latest artifact.
 
