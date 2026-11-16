@@ -107,6 +107,22 @@ it("repairs an owned previous artifact but refuses edited registrations", async 
   await expect(repairCandidateIntegration({ installationId: "c".repeat(64), receiptPath, files: [{ path, content: "replacement" }] })).rejects.toThrow("changed");
   expect(await readFile(path, "utf8")).toBe("user edit");
 });
+it("keeps owning unchanged registrations after macOS renumbers their volume device", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pk-remount-"));
+  const receiptPath = join(root, "receipt"); const path = join(root, "host");
+  await registerCandidateIntegration({ installationId: "a".repeat(64), receiptPath, files: [{ path, content: "owned" }] });
+  // Simulate a reboot that mounted the same volume under a different st_dev.
+  const renumber = async () => {
+    const receipt = JSON.parse(await readFile(receiptPath, "utf8"));
+    receipt.files = receipt.files.map((file: { device: number }) => ({ ...file, device: file.device + 2 }));
+    await writeFile(receiptPath, JSON.stringify(receipt));
+  };
+  await renumber();
+  expect(await repairCandidateIntegration({ installationId: "a".repeat(64), receiptPath, files: [{ path, content: "owned" }] })).toBe("current");
+  expect(await repairCandidateIntegration({ installationId: "b".repeat(64), receiptPath, files: [{ path, content: "refreshed" }] })).toBe("repaired");
+  await renumber();
+  expect(await unregisterCandidateIntegration(receiptPath, "b".repeat(64))).toEqual({ removed: [path], retained: [] });
+});
 it('checks an unchanged Windows registry receipt without removing its host registration', async () => {
  const root=await mkdtemp(join(tmpdir(),'pk-chrome-current-'));const path=join(root,'host');const receiptPath=join(root,'receipt');
  let writes=0;let removals=0;let inspections=0;

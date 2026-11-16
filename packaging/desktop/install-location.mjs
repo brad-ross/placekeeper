@@ -13,7 +13,10 @@ export function installTransactionRoot(destination) {
 export function macAppHasCompletedInstallation(bundle) {
   try {
     const app = realpathSync(bundle);
-    const { dev, ino } = lstatSync(app, { bigint: true });
+    // The journal still records the device number, but macOS assigns st_dev at
+    // mount time, so it can change across reboots for the same volume. The
+    // realpath match below already pins the volume; the inode pins the copy.
+    const { ino } = lstatSync(app, { bigint: true });
     const identity = JSON.parse(readFileSync(join(app, 'Contents/Resources/desktop/runtime-manifest.json'), 'utf8')).installArtifactIdentity;
     if (!/^[a-f0-9]{64}$/u.test(identity)) return false;
     const root = installTransactionRoot(app);
@@ -24,7 +27,7 @@ export function macAppHasCompletedInstallation(bundle) {
         if (!lstatSync(directory).isDirectory()) return false;
         const record = JSON.parse(readFileSync(join(directory, 'journal.json'), 'utf8'));
         return record.version === 1 && record.installed?.identity === identity &&
-          record.installed.device === String(dev) && record.installed.inode === String(ino) &&
+          record.installed.inode === String(ino) &&
           ['complete', 'staging', 'restored'].includes(record.phase) &&
           realpathSync(record.destination) === app;
       } catch {

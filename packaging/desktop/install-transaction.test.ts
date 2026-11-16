@@ -43,6 +43,34 @@ it.runIf(process.platform === 'darwin')('allows ordinary launch only for the com
   }
 });
 
+it.runIf(process.platform === 'darwin')('keeps launching the committed app after macOS renumbers its volume device', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'pk-launch-remount-'));
+  try {
+    const built = join(root, 'candidate.app'), destination = join(root, 'Placekeeper.app');
+    const resources = 'Contents/Resources/desktop';
+    const candidateIdentity = 'c'.repeat(64);
+    await mkdir(join(built, resources), { recursive: true });
+    await writeFile(join(built, resources, 'runtime-manifest.json'), JSON.stringify({ installArtifactIdentity: candidateIdentity }));
+    const transactionRoot = installTransactionRoot(destination);
+    await activateInstallation({
+      built, destination, transactionRoot, candidateIdentity, backupRoot: join(root, 'backup'),
+      validate: async () => {}, ready: async () => {}, retire: async () => {},
+    });
+    // Simulate a reboot that mounted the same volume under a different st_dev.
+    const journalPath = join(transactionRoot, 'journal.json');
+    const journal = JSON.parse(await readFile(journalPath, 'utf8'));
+    journal.installed.device = String(BigInt(journal.installed.device) + 2n);
+    await writeFile(journalPath, JSON.stringify(journal));
+    expect(macAppHasCompletedInstallation(destination)).toBe(true);
+    // A different copy at another path is still refused.
+    const other = join(root, 'Open Anyway.app');
+    await cp(destination, other, { recursive: true });
+    expect(macAppHasCompletedInstallation(other)).toBe(false);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 for (const boundary of ['staging', 'retaining', 'activating', 'starting', 'committing']) it(`recovers interruption at ${boundary} without losing previous app or restoring data`, async () => {
  const root = await mkdtemp(join(tmpdir(), 'pk-journal-'));
  try {
