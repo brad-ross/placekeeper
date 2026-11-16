@@ -19,6 +19,10 @@ interface RegistrationReceipt {
   readonly files: readonly { readonly path: string; readonly sha256: string; readonly device: number; readonly inode: number }[];
 }
 const digest = (text: string) => createHash("sha256").update(text).digest("hex");
+// Receipts still record the device number, but macOS assigns st_dev at mount
+// time, so it can change across reboots for the same volume. The recorded path
+// already pins the volume; the inode and content digest pin the owned file.
+const sameOwnedFile = (info: { readonly ino: number }, owned: { readonly inode: number }) => info.ino === owned.inode;
 
 function validatePaths(receiptPath: string, files: readonly CandidateIntegrationFile[]): void {
   const paths = [receiptPath, ...files.map(file => file.path)];
@@ -73,7 +77,7 @@ export async function repairCandidateIntegration(options: Parameters<typeof regi
   }
   for (const file of receipt.files) {
     const info = await lstat(file.path);
-    if (!info.isFile() || info.dev !== file.device || info.ino !== file.inode || digest(await readFile(file.path, "utf8")) !== file.sha256) throw new Error("Registration changed; existing files were preserved");
+    if (!info.isFile() || !sameOwnedFile(info, file) || digest(await readFile(file.path, "utf8")) !== file.sha256) throw new Error("Registration changed; existing files were preserved");
   }
   if (receipt.installationId === options.installationId && receipt.files.length === options.files.length && options.files.every(file => receipt.files.some(old => old.path === file.path && old.sha256 === digest(file.content)))) {
     if (receipt.registry) {
@@ -116,13 +120,13 @@ export async function unregisterCandidateIntegration(receiptPath: string, instal
         !registry.owner.startsWith(`${installationId}:`) || !/^[a-f0-9]{64}:[a-f0-9-]{36}$/u.test(registry.owner)) throw new Error("Registry receipt cannot be safely reversed on this host");
     const ownedManifest = receipt.files.find(file => file.path === registry.path)!;
     const manifestIdentity = await lstat(registry.path).catch((error: NodeJS.ErrnoException) => { if (error.code === "ENOENT") return undefined; throw error; });
-    if (manifestIdentity !== undefined && (!manifestIdentity.isFile() || manifestIdentity.dev !== ownedManifest.device || manifestIdentity.ino !== ownedManifest.inode || digest(await readFile(registry.path, "utf8")) !== ownedManifest.sha256)) return { removed, retained: [registry.path, "Chrome native host registry"] };
+    if (manifestIdentity !== undefined && (!manifestIdentity.isFile() || !sameOwnedFile(manifestIdentity, ownedManifest) || digest(await readFile(registry.path, "utf8")) !== ownedManifest.sha256)) return { removed, retained: [registry.path, "Chrome native host registry"] };
     if (!await registryDriver.unregister(registry.path, registry.owner, registry.sha256)) return { removed, retained: ["HKCU\\Software\\Google\\Chrome\\NativeMessagingHosts\\com.placekeeper.chrome", ...receipt.files.map(file => file.path)] };
   }
   for (const file of receipt.files) {
     const info = await lstat(file.path).catch((error: NodeJS.ErrnoException) => { if (error.code === "ENOENT") return undefined; throw error; });
     if (info === undefined) continue;
-    if (!info.isFile() || info.dev !== file.device || info.ino !== file.inode || !/^[a-f0-9]{64}$/u.test(file.sha256) || digest(await readFile(file.path, "utf8")) !== file.sha256) { retained.push(file.path); continue; }
+    if (!info.isFile() || !sameOwnedFile(info, file) || !/^[a-f0-9]{64}$/u.test(file.sha256) || digest(await readFile(file.path, "utf8")) !== file.sha256) { retained.push(file.path); continue; }
     await unlink(file.path); removed.push(file.path);
   }
   if (retained.length === 0) await unlink(receiptPath);
