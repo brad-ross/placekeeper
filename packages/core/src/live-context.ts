@@ -391,7 +391,7 @@ function orderStructuredItems(items: readonly StructuredAnnotation[]): Structure
 }
 
 export function documentSemanticDigest(items: readonly Annotation[]): string {
-  assertUnique(items.map(({ id }) => id), "Review Item IDs");
+  assertUnique(items.map(({ id }) => id), "Annotation IDs");
   const canonical = items.map((item) => {
     assertAnnotation(item);
     return {
@@ -472,7 +472,7 @@ export function createDocumentSnapshot(input: {
   if (!Number.isSafeInteger(input.revision) || input.revision < 0) {
     throw new InvalidLiveContextContractError("revision must be a non-negative safe integer");
   }
-  assertUnique(input.items.map(({ id }) => id), "Review Item IDs");
+  assertUnique(input.items.map(({ id }) => id), "Annotation IDs");
   const ordered = documentOrderedItems(input.items);
   const items = ordered.map((item) => {
     assertAnnotation(item);
@@ -700,7 +700,7 @@ export function createExecutionBaseline(input: {
   assertNonEmpty(input.executionId, "executionId");
   assertIsoDate(input.capturedAt, "capturedAt");
   assertIdentity(input.identity);
-  assertUnique(input.items.map(({ id }) => id), "Baseline Review Item IDs");
+  assertUnique(input.items.map(({ id }) => id), "Baseline annotation IDs");
   assertUnique(input.sourceFingerprints.map(({ path }) => path), "Source fingerprint paths");
   const sourceFingerprints = input.sourceFingerprints.map((fingerprint) => {
     assertNonEmpty(fingerprint.path, "Source fingerprint path");

@@ -398,7 +398,7 @@ export class SourceReconciliationService {
       if (!sameDocumentIdentity(
         await this.#broker.snapshotAtomicSession(binding.documentSessionId),
         captured.baseline.identity,
-      )) throw new Error("Review State changed during source-work baseline capture");
+      )) throw new Error("Annotation state changed during source-work baseline capture");
       const record: ExecutionRecord = {
         taskSessionId: input.taskSessionId,
         documentSessionId: binding.documentSessionId,
@@ -444,7 +444,7 @@ export class SourceReconciliationService {
       }
       const priorItemKey = record.proposalKeyByItem.get(input.proposal.baselineItemId);
       if (priorItemKey !== undefined) {
-        throw new Error("Each baseline Review Item accepts one idempotent proposal per execution");
+        throw new Error("Each baseline annotation accepts one idempotent proposal per execution");
       }
       const canonicalProposal = { ...input.proposal, path: source.fingerprint.path };
       const baselineAnchor = baselineTargetAnchor(source.text, canonicalProposal.expectedText);
@@ -589,7 +589,7 @@ export class SourceReconciliationService {
       if (!sameDocumentIdentity(
         await this.#broker.snapshotAtomicSession(record.documentSessionId),
         report.identity,
-      )) throw new Error("Review State changed during reconciliation");
+      )) throw new Error("Annotation state changed during reconciliation");
       return {
         schemaVersion: 1,
         executionId: record.baseline.executionId,

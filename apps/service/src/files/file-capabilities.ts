@@ -288,7 +288,7 @@ export class FileCapabilityRegistry {
       info.ino !== approved.inode ||
       (await hashFile(canonicalPath)) !== expectedDigest
     ) {
-      throw new FileCapabilityError("SOURCE_CHANGED", "Original changed since review opened");
+      throw new FileCapabilityError("SOURCE_CHANGED", "Original changed since the document opened");
     }
     return canonicalPath;
   }

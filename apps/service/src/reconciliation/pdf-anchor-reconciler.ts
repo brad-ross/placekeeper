@@ -337,7 +337,7 @@ function reconcileItem(
   passageIndex?: DocumentPassageIndex,
 ): Annotation {
   if (item.reconciliation === undefined) {
-    throw new Error(`Generated-output Review Item ${item.id} lacks canonical anchor state`);
+    throw new Error(`Generated-output annotation ${item.id} lacks canonical anchor state`);
   }
   const resolved = reconcilePdfAnchorWithPassageIndex(
     item.reconciliation.anchor,

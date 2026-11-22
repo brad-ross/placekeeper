@@ -150,7 +150,7 @@ function validateDispositionAgainstReconciliation(
         throw new Error(`Disposition ${item.itemId} must preserve the ambiguous manual state`);
       case "removed":
         if (item.status === "removed-before-processing") break;
-        throw new Error(`Disposition ${item.itemId} must report the removed Review Item`);
+        throw new Error(`Disposition ${item.itemId} must report the removed annotation`);
     }
   }
 }
@@ -191,10 +191,10 @@ export class LiveSourceWorkflowService {
       if (
         baseline.identity.documentGeneration !== before.identity.documentGeneration ||
         baseline.identity.stateDigest !== before.identity.stateDigest
-      ) throw new Error("Review State changed during baseline capture; refresh and begin source work again");
+      ) throw new Error("Annotation state changed during baseline capture; refresh and begin source work again");
       const after = await this.#refresh(taskSessionId);
       if (baseline.identity.stateDigest !== after.identity.stateDigest) {
-        throw new Error("Review State changed during baseline capture; refresh and begin source work again");
+        throw new Error("Annotation state changed during baseline capture; refresh and begin source work again");
       }
       const scope = await this.#sourceScope(taskSessionId);
       this.#registerExecution(baseline.executionId, {
@@ -358,7 +358,7 @@ export class LiveSourceWorkflowService {
         plan.baselineItemIds.has(annotation.id) ||
         validatedOwnedIds.has(annotation.id),
       );
-    if (inheritedDocument) throw new Error("The rebuilt PDF still contains review annotations");
+    if (inheritedDocument) throw new Error("The rebuilt PDF still contains Placekeeper annotations");
     const verificationId = this.#id();
     execution.verifiedRebuilds.add(verificationId);
     return {
@@ -498,7 +498,7 @@ export class LiveSourceWorkflowService {
     if (
       report.identity.documentGeneration !== observation.identity.documentGeneration ||
       report.identity.stateDigest !== observation.identity.stateDigest
-    ) throw new Error("Review State changed during reconciliation; refresh before continuing");
+    ) throw new Error("Annotation state changed during reconciliation; refresh before continuing");
   }
 
   async #sourceScope(taskSessionId: string): Promise<{
@@ -528,7 +528,7 @@ export class LiveSourceWorkflowService {
       if (
         snapshot.documentGeneration !== binding.documentGeneration ||
         documentSemanticDigest(snapshot.state.items) !== expectedDigest
-      ) throw new Error("Review State changed before disposition completion");
+      ) throw new Error("Annotation state changed before disposition completion");
       return snapshot.state.items;
     });
     if (items === undefined) throw new Error("The bound PDF session ended before disposition completion");

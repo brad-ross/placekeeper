@@ -235,7 +235,7 @@ it('opens opaque host bytes in the canonical reader, routes reviewed export, and
         return exported;
     });
     try {
-        await expect(host.options[0].call('exportReviewedCopy', {})).rejects.toThrow('Refresh the review before exporting.');
+        await expect(host.options[0].call('exportReviewedCopy', {})).rejects.toThrow('Refresh the document before exporting.');
         expect(exportCopy).not.toHaveBeenCalled();
         await expect(host.options[0].call('exportReviewedCopy', { fence })).resolves.toEqual(exported);
         expect(exportCopy).toHaveBeenCalledWith(nextGrant, fence);

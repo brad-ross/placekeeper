@@ -88,7 +88,7 @@ function upgradePresentation(reason: DaemonUpgradeReason): {
     recoveryAction: "Use the interactive installer to review and approve closing active work, or save and close it manually before retrying",
   };
   if (reason === "review-presence") return {
-    message: "Placekeeper has active reviews. The upgrade was deferred and existing work was preserved.",
+    message: "Placekeeper has open documents. The upgrade was deferred and existing work was preserved.",
     recoveryAction: "Close Placekeeper tabs or windows, then retry",
   };
   if (reason === "codex-task") return {
@@ -104,8 +104,8 @@ function upgradePresentation(reason: DaemonUpgradeReason): {
     recoveryAction: "Close active work, then retry",
   };
   return {
-    message: "Placekeeper is already running an incompatible service build. Existing reviews were preserved.",
-    recoveryAction: "Close Placekeeper reviews and retry",
+    message: "Placekeeper is already running an incompatible service build. Existing documents were preserved.",
+    recoveryAction: "Close Placekeeper documents and retry",
   };
 }
 

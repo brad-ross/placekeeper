@@ -36,7 +36,7 @@ export class DocumentGenerationConflictError extends Error {
     readonly currentGeneration: number,
     readonly currentRevision: number,
   ) {
-    super(`Review generation ${expectedGeneration} is stale; current generation is ${currentGeneration}`);
+    super(`Document generation ${expectedGeneration} is stale; current generation is ${currentGeneration}`);
     this.name = "DocumentGenerationConflictError";
   }
 }

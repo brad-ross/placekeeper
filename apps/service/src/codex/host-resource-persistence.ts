@@ -237,7 +237,7 @@ export class HostResourcePersistence {
             if (expectedDigest !== undefined && digest !== expectedDigest) throw Error('Host recovery source changed');
             const opened = await this.broker.openHostResourceSource({ protocolVersion: 1, sourceHandle: handle, displayName: scope?.sourceDisplayName ?? 'Independent review.pdf', byteLength: bytes.length, sha256: digest }, sources);
             if (opened.kind !== 'opened')
-                throw Error('Independent host review unavailable');
+                throw Error('Independent host document unavailable');
             await this.#persist(opened.launch.sessionId, { schemaVersion: 1, writable: false, digest, forked: true });
             await this.broker.configureImportedDestination(opened.launch.sessionId, false);
             await this.broker.protectChromeDocument(opened.launch.sessionId);

@@ -138,7 +138,7 @@ export class PdfSaveCoordinator {
   #assertExpectedDocumentGeneration(sessionId: string, expected: number | undefined): void {
     if (expected === undefined) return;
     const state = this.#broker.state(sessionId);
-    if (state === undefined) throw new Error("Review session is not active");
+    if (state === undefined) throw new Error("Document session is not active");
     if (state.workflow.documentGeneration !== expected) {
       throw new DocumentGenerationConflictError(expected, state.workflow.documentGeneration, state.revision);
     }
@@ -149,7 +149,7 @@ export class PdfSaveCoordinator {
     if (state?.workflow.mode === "generated-output") {
       throw new PdfWriterError(
         "permission-denied",
-        "Generated output is immutable. Use explicit export to create a reviewed copy.",
+        "Generated output is immutable. Use explicit export to create an Annotated Document.",
       );
     }
     const eligibility = this.#broker.saveStatus(sessionId)?.rewriteEligibility;
@@ -160,7 +160,7 @@ export class PdfSaveCoordinator {
 
   proposal(sessionId: string): SaveCopyProposal {
     const state = this.#broker.state(sessionId);
-    if (state === undefined) throw new Error("Review session is not active");
+    if (state === undefined) throw new Error("Document session is not active");
     if (this.#broker.sourceDisposition(sessionId) === "remote-temporary") {
       return { sourceDisposition: "remote-temporary" };
     }
@@ -175,7 +175,7 @@ export class PdfSaveCoordinator {
 
   async browserProposal(sessionId: string, folder: string | undefined): Promise<SaveCopyProposal> {
     const scope = await this.#broker.sessionScope(sessionId);
-    if (scope === undefined) throw new Error("Review session is not active");
+    if (scope === undefined) throw new Error("Document session is not active");
     const filename = validatePdfFilename(scope.sourceDisplayName);
     return {
       sourceDisposition: scope.sourceDisposition,
@@ -204,7 +204,7 @@ export class PdfSaveCoordinator {
     assertAuthority?: () => void,
   ): Promise<DocumentState | void> {
     const state = this.#broker.state(sessionId);
-    if (state === undefined) throw new Error("Review session is not active");
+    if (state === undefined) throw new Error("Document session is not active");
     const remote = this.#broker.sourceDisposition(sessionId) === "remote-temporary";
     const sourcePath = this.#capabilities.getFilePath(state.source.fileId);
     if (sourcePath === undefined) throw new Error("Original PDF capability is unavailable");
@@ -282,7 +282,7 @@ export class PdfSaveCoordinator {
     this.#assertExpectedDocumentGeneration(sessionId, expectedDocumentGeneration);
     if (status.destination.kind === "original") {
       const state = this.#broker.state(sessionId);
-      if (state === undefined) throw new Error("Review session is not active");
+      if (state === undefined) throw new Error("Document session is not active");
       const fingerprint = status.destination.fingerprint;
       const checkAuthority = () => { assertAuthority?.(); trusted?.assertAuthority?.(); };
       const rebind = () => this.#capabilities.rebindApprovedPdf(state.source.fileId, selected, fingerprint, checkAuthority);
@@ -354,7 +354,7 @@ export class PdfSaveCoordinator {
       throw new Error("A remote browser PDF cannot modify its private temporary source");
     }
     const state = this.#broker.state(sessionId);
-    if (state === undefined) throw new Error("Review session is not active");
+    if (state === undefined) throw new Error("Document session is not active");
     const targetPath = this.#capabilities.getFilePath(state.source.fileId);
     if (targetPath === undefined) throw new Error("Original PDF capability is unavailable");
     const status = await this.#broker.establishSaveDestination(sessionId, {

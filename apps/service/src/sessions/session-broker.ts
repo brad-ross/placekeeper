@@ -412,7 +412,7 @@ export class SessionBroker {
             throw new Error("The protected draft revision is no longer current");
           }
           if (draft.ownerViewId !== input.attachment.attachmentId) {
-            throw new Error("The protected draft belongs to another review attachment");
+            throw new Error("The protected draft belongs to another document attachment");
           }
           const command: DocumentCommand = input.outcome === "applied" ? {
             type: "apply-draft", expectedRevision: session.state.revision, id: draft.id,
@@ -1117,7 +1117,7 @@ export class SessionBroker {
       const session = this.#activeById.get(existingLineageSessionId);
       if (session === undefined) throw new Error("Active output lineage index is inconsistent");
       if (request.workflowMode !== undefined && request.workflowMode !== session.state.workflow.mode) {
-        throw new Error("A review session workflow mode cannot be downgraded or changed");
+        throw new Error("A document session workflow mode cannot be downgraded or changed");
       }
       const navigationSourceRoot = request.sourceRootPath === undefined
         ? session.rootId === undefined ? undefined : this.capabilities.getRootPath(session.rootId)
@@ -1135,7 +1135,7 @@ export class SessionBroker {
       const session = this.#activeById.get(existingSessionId);
       if (session === undefined) throw new Error("Active session index is inconsistent");
       if (request.workflowMode !== undefined && request.workflowMode !== session.state.workflow.mode) {
-        throw new Error("A review session workflow mode cannot be downgraded or changed");
+        throw new Error("A document session workflow mode cannot be downgraded or changed");
       }
       const navigationSourceRoot = request.sourceRootPath === undefined
         ? session.rootId === undefined ? undefined : this.capabilities.getRootPath(session.rootId)
@@ -1184,7 +1184,7 @@ export class SessionBroker {
     const matchingDraft = pathMatches[0] ?? movedOriginalMatches[0];
     if (request.recoveryTargetSessionId !== undefined && (matchingDraft === undefined || request.recoveryDecision === 'resume' && this.#activeById.has(request.recoveryTargetSessionId))) {
       this.capabilities.revokeFile(approvedFile.id);
-      throw new Error("Selected recent review is unavailable; protected work was left unchanged");
+      throw new Error("Selected recent document is unavailable; protected work was left unchanged");
     }
 
     if (matchingDraft !== undefined && request.recoveryDecision === undefined) {
@@ -1501,7 +1501,7 @@ export class SessionBroker {
     await predecessor;
     try {
       await this.#assertReplacementCommitSettled(session);
-      if (session.ending) throw new Error("Review session is ending");
+      if (session.ending) throw new Error("Document session is ending");
       const previousRootId = session.rootId;
       const nextState: DocumentState = {
         ...session.state,
@@ -1932,7 +1932,7 @@ export class SessionBroker {
 
   async protectChromeDocument(sessionId: string): Promise<void> {
     const session = this.#activeById.get(sessionId);
-    if (session === undefined || session.ending) throw new Error("Review session is unavailable");
+    if (session === undefined || session.ending) throw new Error("Document session is unavailable");
     if (session.chromeProtected) return;
     await this.#withSessionTail(session, async () => {
       if (session.chromeProtected) return;
@@ -2130,9 +2130,9 @@ export class SessionBroker {
     },
   ): Promise<{ readonly destination: DurableSaveDestination; readonly sync: DurableSaveSync; readonly state: DocumentState }> {
     const session = this.#activeById.get(sessionId);
-    if (session === undefined || session.ending) throw new Error("Review session is not active");
+    if (session === undefined || session.ending) throw new Error("Document session is not active");
     return this.#withSessionTail(session, async () => {
-      if (session.ending) throw new Error("Review session is ending");
+      if (session.ending) throw new Error("Document session is ending");
       input.assertAuthority?.();
       this.#assertExpectedDocumentGeneration(session, input.expectedDocumentGeneration);
       if (input.expectedDestinationGeneration !== undefined && input.expectedDestinationGeneration !== session.destination.generation) {
@@ -2194,16 +2194,16 @@ export class SessionBroker {
     },
   ): Promise<{ readonly destination: DurableSaveDestination; readonly sync: DurableSaveSync }> {
     const session = this.#activeById.get(sessionId);
-    if (session === undefined || session.ending) throw new Error("Review session is not active");
+    if (session === undefined || session.ending) throw new Error("Document session is not active");
     return this.#withSessionTail(session, async () => {
-      if (session.ending) throw new Error("Review session is ending");
+      if (session.ending) throw new Error("Document session is ending");
       input.assertAuthority?.();
       this.#assertExpectedDocumentGeneration(session, input.expectedDocumentGeneration);
       if (input.expectedDestinationGeneration !== undefined && input.expectedDestinationGeneration !== session.destination.generation) {
         throw new Error("save-destination-conflict");
       }
       const targetPath = input.prepareTargetPath === undefined ? input.targetPath : await input.prepareTargetPath();
-      if (session.ending) throw new Error("Review session is ending");
+      if (session.ending) throw new Error("Document session is ending");
       input.assertAuthority?.();
       this.#assertExpectedDocumentGeneration(session, input.expectedDocumentGeneration);
       this.#assertSaveDestinationAllowed(session, { kind: "original", targetPath });
@@ -2566,7 +2566,7 @@ export class SessionBroker {
     readonly serviceSequenceReserved?: boolean;
   }, imported: boolean, assertAuthority: () => void = () => undefined): Promise<LiveDocumentReplacementResult> {
     const session = this.#activeById.get(input.sessionId);
-    if (session === undefined || session.ending) throw new Error("Review session is not active");
+    if (session === undefined || session.ending) throw new Error("Document session is not active");
     if (session.sourceOwnership.disposition !== (imported ? "remote-temporary" : "local")) {
       throw new Error("Document replacement requires an explicitly owned source");
     }
@@ -3201,14 +3201,14 @@ export class SessionBroker {
     readonly hostReason?: "activation" | "reveal" | "watcher" | "interval";
   }): Promise<LiveDocumentReplacementResult> {
     const session = this.#activeById.get(input.sessionId);
-    if (session === undefined || session.ending) throw new Error("Review session is not active");
+    if (session === undefined || session.ending) throw new Error("Document session is not active");
     const canonicalHintPath = await realpath(input.outputPath).catch(() => undefined);
     if (
       canonicalHintPath === undefined
         ? resolve(input.outputPath) !== resolve(session.canonicalSourcePath)
         : canonicalHintPath !== session.canonicalSourcePath
     ) {
-      throw new Error("A document observation hint cannot retarget its review session");
+      throw new Error("A document observation hint cannot retarget its document session");
     }
     const inspected = input.hostReason === "activation"
       ? await this.#localDocumentObserver.check(session.id, "activation")
@@ -3229,7 +3229,7 @@ export class SessionBroker {
     hostHintToken?: string,
   ): Promise<Awaited<ReturnType<SessionBroker["markLiveDocumentPossiblyStale"]>>> {
     const session = this.#activeById.get(sessionId);
-    if (session === undefined || session.ending) throw new Error("Review session is not active");
+    if (session === undefined || session.ending) throw new Error("Document session is not active");
     void hostHintToken;
     const sequence = await this.#localDocumentObserver.reserveExplicitHint(sessionId);
     try {
@@ -3434,9 +3434,9 @@ export class SessionBroker {
     readonly documentGeneration: number;
   }> {
     const session = this.#activeById.get(sessionId);
-    if (session === undefined || session.ending) throw new Error("Review session is not active");
+    if (session === undefined || session.ending) throw new Error("Document session is not active");
     if (session.state.workflow.mode !== "generated-output") {
-      throw new Error("Freshness observation requires generated-output review mode");
+      throw new Error("Freshness observation requires generated-output workflow mode");
     }
     if (!serviceSequenceReserved) {
       const serviceSequence = await this.#localDocumentObserver.reserveExplicitHint(session.id);
@@ -3454,7 +3454,7 @@ export class SessionBroker {
     }
     let invalidation: { readonly documentGeneration: number; readonly annotationRevision: number } | undefined;
     const result = await this.#withSessionTail(session, async () => {
-      if (session.ending) throw new Error("Review session is ending");
+      if (session.ending) throw new Error("Document session is ending");
       const epoch = observationEpoch ?? session.latestObservationEpoch + 1;
       if (epoch < session.latestObservationEpoch) {
         return {
@@ -3509,14 +3509,14 @@ export class SessionBroker {
   /** Called only by a trusted host after it has admitted its presentation. */
   async createNavigationAttachment(sessionId: string, sourceRootPath?: string, sidecarDirectoryPath?: string): Promise<string> {
     const session = this.#activeById.get(sessionId);
-    if (session === undefined || session.ending) throw new Error("Review session is not active");
+    if (session === undefined || session.ending) throw new Error("Document session is not active");
     let sourceRoot: string | undefined;
     if (sourceRootPath !== undefined) {
       const approved = await this.capabilities.approveRoot(sourceRootPath);
       sourceRoot = approved.canonicalPath;
       this.capabilities.revokeRoot(approved.id);
     }
-    if (session.ending) throw new Error("Review session is ending");
+    if (session.ending) throw new Error("Document session is ending");
     const sidecarDirectory = sidecarDirectoryPath === undefined ? undefined : await realpath(sidecarDirectoryPath);
     if (sidecarDirectory !== undefined && !(await stat(sidecarDirectory)).isDirectory()) throw new Error("SyncTeX directory is unavailable");
     return this.#navigationAttachments.create(sessionId, sourceRoot, sidecarDirectory);
@@ -3668,7 +3668,7 @@ export class SessionBroker {
     request: ReadingLocationResolutionRequestV1,
   ): Promise<ReadingLocationResolutionV1> {
     const session = this.#activeById.get(sessionId);
-    if (session === undefined || session.ending) throw new Error("Review session is unavailable");
+    if (session === undefined || session.ending) throw new Error("Document session is unavailable");
     const generation = session.state.workflow.documentGeneration;
     if (request.generation !== generation) return { status: "stale", generation };
     let cached = this.#readingInspections.get(sessionId);
@@ -3682,7 +3682,7 @@ export class SessionBroker {
     }
     const inspected = await cached.inspection;
     const current = this.#activeById.get(sessionId);
-    if (current === undefined || current.ending) throw new Error("Review session is unavailable");
+    if (current === undefined || current.ending) throw new Error("Document session is unavailable");
     const currentGeneration = current.state.workflow.documentGeneration;
     if (currentGeneration !== generation) return { status: "stale", generation: currentGeneration };
     const resolution = reconcilePdfAnchor(request.anchor, inspected.pages, generation);
@@ -3830,7 +3830,7 @@ export class SessionBroker {
   ): Promise<FrozenDocumentDelivery> {
     const session = this.#activeById.get(sessionId);
     if (session === undefined || session.ending) {
-      throw new Error("Review session is not active");
+      throw new Error("Document session is not active");
     }
     const predecessor = session.writeTail;
     const { promise, resolve: release } = Promise.withResolvers<void>();
@@ -3838,7 +3838,7 @@ export class SessionBroker {
     await predecessor;
     try {
       await this.#assertReplacementCommitSettled(session);
-      if (session.ending) throw new Error("Review session is ending");
+      if (session.ending) throw new Error("Document session is ending");
       this.#assertExpectedDocumentGeneration(session, expectedDocumentGeneration);
       if (fence && (fence.expectedRevision !== session.state.revision || fence.documentGeneration !== session.state.workflow.documentGeneration)) {
         throw new DocumentExportConflictError();
@@ -3927,7 +3927,7 @@ export class SessionBroker {
   ): Promise<DocumentState> {
     const session = this.#activeById.get(sessionId);
     if (session === undefined || session.ending) {
-      throw new Error("Review session is not active");
+      throw new Error("Document session is not active");
     }
 
     const predecessor = session.writeTail;
@@ -3940,7 +3940,7 @@ export class SessionBroker {
     });
     if (session.ending) {
       release();
-      throw new Error("Review session is ending");
+      throw new Error("Document session is ending");
     }
     const write = this.controls.beginWrite(sessionId);
     try {
@@ -3979,7 +3979,7 @@ export class SessionBroker {
   async recordSuccessfulExport(sessionId: string): Promise<void> {
     const session = this.#activeById.get(sessionId);
     if (session === undefined || session.ending) {
-      throw new Error("Review session is not active");
+      throw new Error("Document session is not active");
     }
     const predecessor = session.writeTail;
     const { promise, resolve: release } = Promise.withResolvers<void>();
@@ -3991,7 +3991,7 @@ export class SessionBroker {
     });
     if (session.ending) {
       release();
-      throw new Error("Review session is ending");
+      throw new Error("Document session is ending");
     }
     const write = this.controls.beginWrite(sessionId);
     try {
@@ -4014,7 +4014,7 @@ export class SessionBroker {
   ): Promise<void> {
     const session = this.#activeById.get(sessionId);
     if (session === undefined || session.ending) {
-      throw new Error("Review session is not active");
+      throw new Error("Document session is not active");
     }
     const predecessor = session.writeTail;
     const { promise, resolve: release } = Promise.withResolvers<void>();
@@ -4026,7 +4026,7 @@ export class SessionBroker {
     });
     if (session.ending) {
       release();
-      throw new Error("Review session is ending");
+      throw new Error("Document session is ending");
     }
     const write = this.controls.beginWrite(sessionId);
     try {
@@ -4064,7 +4064,7 @@ export class SessionBroker {
   ): Promise<void> {
     const session = this.#activeById.get(sessionId);
     if (session === undefined || session.ending) {
-      throw new Error("Review session is not active");
+      throw new Error("Document session is not active");
     }
     const predecessor = session.writeTail;
     const { promise, resolve: release } = Promise.withResolvers<void>();
@@ -4076,7 +4076,7 @@ export class SessionBroker {
     });
     if (session.ending) {
       release();
-      throw new Error("Review session is ending");
+      throw new Error("Document session is ending");
     }
     const write = this.controls.beginWrite(sessionId);
     try {

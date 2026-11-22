@@ -104,7 +104,7 @@ async function start() {
     // that operation where Chromium denies custom-scheme clipboard access.
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: Object.freeze({ writeText: (text: string) => bridge.writeClipboard(identity, text) }) });
     const root = document.getElementById('root');
-    if (!root) throw new Error('Missing review root');
+    if (!root) throw new Error('Missing document root');
     root.dataset.productionRoot = 'true';
     if (identity.sourceEndpointToken) {
         const token = identity.sourceEndpointToken;

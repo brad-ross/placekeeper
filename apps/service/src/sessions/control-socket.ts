@@ -261,7 +261,7 @@ export class SessionControlRegistry {
 
   cancel(sessionId: string): void {
     for (const controller of this.#writes.get(sessionId) ?? []) {
-      controller.abort(new Error("Review session ended"));
+      controller.abort(new Error("Document session ended"));
     }
     this.#writes.delete(sessionId);
     this.#graceExpiresAt.delete(sessionId);

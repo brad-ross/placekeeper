@@ -44,7 +44,7 @@ export interface StructuredAnnotation {
 
 function string(item: Annotation, key: string): string {
   const value = item.payload[key];
-  if (typeof value !== "string") throw new Error(`Review item ${item.id} is missing ${key}`);
+  if (typeof value !== "string") throw new Error(`Annotation ${item.id} is missing ${key}`);
   return value;
 }
 

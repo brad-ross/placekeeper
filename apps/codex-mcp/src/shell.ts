@@ -78,7 +78,7 @@ function setConnectionState(state: PanelConnectionState) {
   readerRoot.inert = state !== "connected";
   readerRoot.dataset.connectionState = state;
   readerRoot.setAttribute("aria-busy", String(state !== "connected"));
-  display(state === "connected" ? "" : "Reconnecting to Placekeeper… The displayed review may be out of date. Editing is paused until the connection is verified.");
+  display(state === "connected" ? "" : "Reconnecting to Placekeeper… The displayed document may be out of date. Editing is paused until the connection is verified.");
 }
 async function call(request: CodexAppRequest, attempt: number): Promise<CodexAppResponse> {
   let result;
@@ -198,7 +198,7 @@ function mountPresentation(response: Extract<CodexAppResponse, { status: "active
     setConnectionState("connected");
     unmountProduction = mountCodexProductionDocument(readerRoot, runtime, (error) => {
       if (attempt !== incarnation) return;
-      display(error instanceof ResourceAllocationError ? "The host could not allocate memory for this document. Close other panels and reopen the PDF; accepted work remains recoverable." : "The PDF could not be loaded. Retry opening this review through a fresh native launch; accepted work remains recoverable.");
+      display(error instanceof ResourceAllocationError ? "The host could not allocate memory for this document. Close other panels and reopen the PDF; accepted work remains recoverable." : "The PDF could not be loaded. Retry opening this document through a fresh native launch; accepted work remains recoverable.");
     }, () => { if (attempt === incarnation) { recordDiagnostic("verified"); if (connectionState === "connected") display(""); } });
     let watermark: number | undefined;
     liveness = new PanelLiveness({
@@ -212,7 +212,7 @@ function mountPresentation(response: Extract<CodexAppResponse, { status: "active
         void resumePresentation();
       },
     });
-    display("Placekeeper review connected."); liveness.start();
+    display("Placekeeper document connected."); liveness.start();
 }
 
 async function retirePresentation(presentation: Extract<CodexAppResponse, { status: "active" }>) {

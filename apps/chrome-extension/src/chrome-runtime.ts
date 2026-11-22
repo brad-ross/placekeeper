@@ -177,7 +177,7 @@ function canonicalJson(value: unknown): string {
 }
 
 function aborted(): Error {
-  return new DOMException("The embedded review was cancelled.", "AbortError");
+  return new DOMException("The embedded document was cancelled.", "AbortError");
 }
 
 class NativeRuntimeError extends Error {
@@ -689,9 +689,9 @@ export function createNativeEmbeddedDocument(options: NativeEmbeddedDocumentOpti
           idempotencyKey: options.createId(),
         }, (message) => message.type === "projection" && message.requestId === recoveryRequestId, signal);
       }
-      if (finish.type !== "projection") throw new Error("The service did not return a review projection.");
+      if (finish.type !== "projection") throw new Error("The service did not return a document projection.");
       projection = runtimeProjection(finish.payload);
-      if (projection === undefined) throw new Error("The service returned an invalid review projection.");
+      if (projection === undefined) throw new Error("The service returned an invalid document projection.");
       const documentBytes = local
         ? await readProjectedDocument(channel, projection, options.createId, maxDocumentBytes, signal)
         : concatenate(retained!.chunks, retained!.byteLength);
@@ -710,7 +710,7 @@ export function createNativeEmbeddedDocument(options: NativeEmbeddedDocumentOpti
         ...projection,
         resources: { document: documentUrl, pdfiumWasm, worker },
       });
-      if (!record(initialBootstrap)) throw new Error("The handler could not assemble a safe review bootstrap.");
+      if (!record(initialBootstrap)) throw new Error("The handler could not assemble a safe document bootstrap.");
 
       let bootstrap = initialBootstrap;
       let active = false;
@@ -775,14 +775,14 @@ export function createNativeEmbeddedDocument(options: NativeEmbeddedDocumentOpti
           }, (candidate) => candidate.type === "projection" && candidate.requestId === requestId);
           if (released || disposed || lifecycleFailurePublished) return;
           if (reply.type !== "projection") {
-            throw new NativeRuntimeError("invalid-service-response", "The service did not refresh the review.");
+            throw new NativeRuntimeError("invalid-service-response", "The service did not refresh the document.");
           }
           const next = runtimeProjection(reply.payload);
           const previous = projection!;
           if (next === undefined || next.sessionId !== previous.sessionId ||
             next.generation < previous.generation ||
             (next.generation === previous.generation && next.revision < previous.revision)) {
-            throw new NativeRuntimeError("invalid-service-response", "The service returned a stale review projection.");
+            throw new NativeRuntimeError("invalid-service-response", "The service returned a stale document projection.");
           }
           const reason = chromeRuntimeProjectionChangeReason(previous, next);
           if (reason === undefined) return;
@@ -813,7 +813,7 @@ export function createNativeEmbeddedDocument(options: NativeEmbeddedDocumentOpti
             },
           });
           if (!record(nextBootstrap)) {
-            throw new NativeRuntimeError("invalid-service-response", "The refreshed review projection was unsafe.");
+            throw new NativeRuntimeError("invalid-service-response", "The refreshed document projection was unsafe.");
           }
           if (released || disposed || lifecycleFailurePublished) return;
           if (nextDocumentUrl !== documentUrl) {
@@ -1069,7 +1069,7 @@ export function createNativeEmbeddedDocument(options: NativeEmbeddedDocumentOpti
             documentValidated: true,
           }, (message) => message.type === "active" && message.requestId === requestId, activateSignal);
           if (released || disposed || lifecycleFailurePublished) return;
-          if (reply.type !== "active") throw new Error("The service did not activate the review.");
+          if (reply.type !== "active") throw new Error("The service did not activate the document.");
           const next = runtimeProjection(reply.payload);
           const previous = projection!;
           if (next === undefined || next.sessionId !== previous.sessionId ||
@@ -1111,7 +1111,7 @@ export function createNativeEmbeddedDocument(options: NativeEmbeddedDocumentOpti
               resources: { document: nextDocumentUrl, pdfiumWasm, worker },
             });
             if (!record(nextBootstrap)) {
-              throw new NativeRuntimeError("invalid-service-response", "The active review projection was unsafe.");
+              throw new NativeRuntimeError("invalid-service-response", "The active document projection was unsafe.");
             }
             if (released || disposed || lifecycleFailurePublished) {
               abandonCreatedDocument();

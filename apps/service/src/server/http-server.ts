@@ -212,7 +212,7 @@ function bootstrapHtml(
   const app = await import("/s/${sessionId}/assets/app.js");
   await app.start(window.__placekeeperSession);`
     : `
-  if (!view) throw new Error("Readable review view was not created");
+  if (!view) throw new Error("Readable document view was not created");
   location.replace(view.pathname + "#" + view.locationFragment);`;
   const script = `
 (async () => {
@@ -225,7 +225,7 @@ function bootstrapHtml(
   });
   if (!response.ok) throw new Error("Launch capability was rejected");
   const { credential, view } = await response.json();${start}
-})().catch(() => { document.body.textContent = "Unable to open this review session."; });`;
+})().catch(() => { document.body.textContent = "Unable to open this document."; });`;
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>${htmlAttribute(pageTitle)}</title></head><body><div id="root"></div><script type="module" nonce="${nonce}">${script}</script></body></html>`;
 }
 
@@ -259,7 +259,7 @@ function readableViewHtml(
 let app;
 (async () => {
   const match = /^\\/r\\/([0-9a-f-]{36})\\//u.exec(location.pathname);
-  if (!match) throw new Error("Invalid review view");
+  if (!match) throw new Error("Invalid document view");
   const stylesheet = document.createElement("link");
   stylesheet.rel = "stylesheet";
   stylesheet.href = "/assets/app.css";
@@ -687,7 +687,7 @@ export async function startHttpServer(
 
       if (authenticatedSessionId !== undefined && request.method === 'POST' && /\/(?:commands|export|save\/(?:copy|original|folder|retry|locate)|interactions\/(?:begin|finalize))$/u.test(pathname)) {
         const owners = [...upgradeAttachments.entries()].filter(([, owner]) => owner.sessionId === authenticatedSessionId && owner.credential === bearerCredential(request));
-        if (owners.length === 0 && options.lifecycle?.admissionAllowed() === false) { send(response, 409, 'Review authoring is frozen for upgrade'); return; }
+        if (owners.length === 0 && options.lifecycle?.admissionAllowed() === false) { send(response, 409, 'Document authoring is frozen for upgrade'); return; }
         for (const [incarnation] of owners) options.upgradeParticipants?.assertAuthoring(`control:${incarnation}`);
       }
       if (upgradeMatch !== null) {
@@ -1028,7 +1028,7 @@ export async function startHttpServer(
             attachment.attachmentId !== authority.ownerViewId ||
             !broker.authorizeDocumentAttachment(commandMatch[1]!, attachment)
           ) {
-            send(response, 403, "Current review attachment authority is required");
+            send(response, 403, "Current document attachment authority is required");
             return;
           }
         }
@@ -1173,7 +1173,7 @@ export async function startHttpServer(
         upgradeAttachments.set(interactionAttachment.incarnationId, { sessionId: match[1]!, credential, attachment: interactionAttachment });
         options.upgradeParticipants.attach(upgradeId, {
           generation: () => broker.state(match[1]!)?.workflow.documentGeneration ?? -1,
-          revision: () => { const state = broker.state(match[1]!); if (!state) throw new Error('Review ended'); return `${state.workflow.documentGeneration}:${state.revision}`; },
+          revision: () => { const state = broker.state(match[1]!); if (!state) throw new Error('Document session ended'); return `${state.workflow.documentGeneration}:${state.revision}`; },
           protect: () => options.protectUpgradeDocument!(match[1]!),
         });
       }

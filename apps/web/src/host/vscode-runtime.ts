@@ -224,7 +224,7 @@ export function createRpcHostRuntime(
     }
     if (disposed) {
       resource.dispose();
-      throw new Error("The review runtime is disposed.");
+      throw new Error("The document runtime is disposed.");
     }
     while (host !== "codex" && materializedDocuments.size > 2) {
       const oldest = materializedDocuments.entries().next().value as
@@ -252,7 +252,7 @@ export function createRpcHostRuntime(
     }
     if (disposed) {
       resource.dispose();
-      throw new Error("The review runtime is disposed.");
+      throw new Error("The document runtime is disposed.");
     }
     return resource;
   };
@@ -272,7 +272,7 @@ export function createRpcHostRuntime(
     }
     if (disposed) {
       resource.dispose();
-      throw new Error("The review runtime is disposed.");
+      throw new Error("The document runtime is disposed.");
     }
     return resource;
   };
@@ -374,7 +374,7 @@ export function createRpcHostRuntime(
     if ((host === "codex" || host === "electron") && message.ok === false &&
       !(isObject(message.error) && message.error.kind === "export-conflict" && Object.keys(message.error).length === 1)) {
       pending.delete(message.requestId); current.abort?.();
-      current.reject(new Error("The native review action or resource could not be verified."));
+      current.reject(new Error("The native document action or resource could not be verified."));
       return;
     }
     if (!validIdentity(message)) return;
@@ -406,7 +406,7 @@ export function createRpcHostRuntime(
   });
 
   const invoke = <T>(method: DocumentRuntimeMethod, payload: unknown = {}, signal?: AbortSignal): Promise<T> => {
-    if (disposed) return Promise.reject(new Error("The review runtime is disposed."));
+    if (disposed) return Promise.reject(new Error("The document runtime is disposed."));
     if (!isDocumentRuntimeMethodForHost(host, method)) {
       return Promise.reject(new Error(`The ${method} capability is unavailable in ${host === "chrome" ? "Chrome" : "this host"}.`));
     }
@@ -414,7 +414,7 @@ export function createRpcHostRuntime(
       ? sanitizeChromeDocumentRuntimeRequest(method, payload)
       : host === "electron" ? sanitizeNativeDocumentRuntimeRequest("electron", method, payload) : payload;
     if (outboundPayload === undefined) {
-      return Promise.reject(new Error("The review runtime request was invalid."));
+      return Promise.reject(new Error("The document runtime request was invalid."));
     }
     if (signal?.aborted === true) return Promise.reject(abortError());
     const id = requestId();
@@ -735,7 +735,7 @@ export function createRpcHostRuntime(
       if (disposed) return;
       disposed = true;
       unsubscribe();
-      for (const request of pending.values()) request.reject(new Error("The review runtime was disposed."));
+      for (const request of pending.values()) request.reject(new Error("The document runtime was disposed."));
       for (const resource of materializedPdfium.values()) void resource.then((value) => value.dispose(), () => undefined);
       materializedPdfium.clear();
       for (const resource of materializedDocuments.values()) void resource.then((value) => value.dispose(), () => undefined);
@@ -744,7 +744,7 @@ export function createRpcHostRuntime(
       materializedWorkers.clear();
       for (const request of externalRequests.values()) {
         clearTimeout(request.timer);
-        request.reject(new Error("The review runtime was disposed."));
+        request.reject(new Error("The document runtime was disposed."));
       }
       externalRequests.clear();
       pending.clear();

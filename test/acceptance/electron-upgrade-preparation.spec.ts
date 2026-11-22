@@ -21,7 +21,7 @@ test('packaged consented upgrade exits naturally with the final composer input a
     if (response.kind !== 'upgrade-preparation' || !('token' in response.result)) {
       const status = credentials ? await requestControl(socket, { kind: 'upgrade-preparation', request: { operation: 'status', credentials } }) : undefined;
       if (request.operation === 'begin' && response.kind === 'error' && response.reason === 'unavailable' && status?.kind === 'upgrade-preparation' && 'token' in status.result
-        && status.result.phase === 'canceled' && status.result.reason === 'Review revision changed') return status.result;
+        && status.result.phase === 'canceled' && status.result.reason === 'Annotation revision changed') return status.result;
       const detail = status?.kind === 'upgrade-preparation' ? { phase: status.result.phase, reason: 'reason' in status.result ? status.result.reason : undefined } : { kind: status?.kind };
       throw new Error(`Preparation ${request.operation} did not return controller credentials: ${JSON.stringify({ kind: response.kind, status: detail })}`);
     }
@@ -68,7 +68,7 @@ test('packaged consented upgrade exits naturally with the final composer input a
       credentials = { attemptId: preview.attemptId, token: preview.token, candidate: preview.candidate };
       expect(preview.participants.some(p => p.id.startsWith('app:'))).toBe(true);
       begun = await prepare({ operation: 'begin', credentials, consent: true });
-      if (begun.phase !== 'canceled' || begun.reason !== 'Review revision changed') break;
+      if (begun.phase !== 'canceled' || begun.reason !== 'Annotation revision changed') break;
     }
     if (!credentials) throw new Error('Missing upgrade preview credentials');
     expect(['preparing', 'ready']).toContain(begun?.phase);

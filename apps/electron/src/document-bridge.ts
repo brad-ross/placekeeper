@@ -32,12 +32,12 @@ export class DocumentBridge {
     constructor(readonly exchange: (message: ElectronDocumentHelperMessage, signal?: AbortSignal) => Promise<ElectronDocumentHelperResponse>, readonly documentUrl: (generation: number) => string) { }
     async send(operation: Operation, signal?: AbortSignal) {
         if (this.retired)
-            throw new Error('Retired review');
+            throw new Error('Retired document');
         const result = await this.exchange({ ...operation, protocolVersion: 1, windowId: this.windowId, attemptId: this.attemptId, requestId: randomUUID() } as ElectronDocumentHelperMessage, signal);
         if (this.retired)
-            throw new Error('Retired review');
+            throw new Error('Retired document');
         if (result.type === 'failure')
-            throw new Error(`Review ${result.code}`);
+            throw new Error(`Document ${result.code}`);
         if ('projection' in result)
             this.projection = result.projection;
         return result;
@@ -46,7 +46,7 @@ export class DocumentBridge {
         let result = await this.send(launchId ? { type: 'admit-launch', launchId } : { type: 'admit', sourcePath, ...(navigationHandle ? { navigationHandle } : {}) });
         if (result.type === 'recovery-offered' && decide) result = await this.send({ type: 'recover', decision: await decide(result), offer: result.offer, idempotencyKey: randomUUID() });
         if (result.type !== 'admitted')
-            throw new Error('Recovery requires a native decision before review');
+            throw new Error('Recovery requires a native decision before opening the document');
         this.resourceId = result.resourceId;
         if (launchId) this.pendingLaunchId = launchId;
     }
@@ -110,7 +110,7 @@ export class DocumentBridge {
         if (typeof key !== 'string' || key.length > 128) return Promise.reject(new Error('Invalid request identity'));
         const existing = this.pendingRequests.get(key);
         if (existing) return existing;
-        if (this.pendingRequests.size >= 64) return Promise.reject(new Error('Review request budget exceeded'));
+        if (this.pendingRequests.size >= 64) return Promise.reject(new Error('Document request budget exceeded'));
         const pending = this.performRequest(value).finally(() => this.pendingRequests.delete(key));
         this.pendingRequests.set(key, pending);
         return pending;
@@ -136,7 +136,7 @@ export class DocumentBridge {
         }
         else {
             if (!this.active)
-                throw new Error('Review is not visibly active');
+                throw new Error('Document is not visibly active');
             if (method === 'presence') {
                 await this.send({ type: 'keepalive' });
                 result = {};
@@ -151,7 +151,7 @@ export class DocumentBridge {
                     ? await this.send({ type: 'destination-selection', generation: v.generation as number, revision: v.revision as number, method, selectedPath: await this.chooseDestination(method), idempotencyKey: v.requestId })
                     : await this.send({ type: 'invoke', generation: v.generation as number, revision: v.revision as number, method, payload, idempotencyKey: v.requestId });
                 if (response.type !== 'result')
-                    throw new Error('Unexpected review result');
+                    throw new Error('Unexpected document result');
                 if (method === 'reverseSyncTex' && (response.payload as { status?: unknown })?.status === 'setup-required' && await this.onSourceSetup?.()) {
                     if (this.retired || this.projection?.generation !== v.generation) throw new Error('Source navigation was superseded');
                     response = await this.send({ type: 'invoke', generation: v.generation as number, revision: v.revision as number, method, payload, idempotencyKey: randomUUID() });

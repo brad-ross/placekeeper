@@ -10,7 +10,7 @@ export const extensionTools:Tool[]=[
   {name:EXTENSION_TOOL,description:'Private app-owned review operations.',inputSchema:{type:'object',required:['request'],properties:{request:{type:'object'}},additionalProperties:false},_meta:{ui:{visibility:['app']}}},
 ];
 export async function callExtensionTool(client:NativeServiceClient,name:string,args:unknown,meta:unknown):Promise<CallToolResult>{
-  const unavailable:CallToolResult={isError:true,content:[{type:'text',text:'Placekeeper could not open this review. Reopen the PDF through its file menu.'}]};
+  const unavailable:CallToolResult={isError:true,content:[{type:'text',text:'Placekeeper could not open this document. Reopen the PDF through its file menu.'}]};
   try{
     if(!client.extension)return unavailable;
     let response;

@@ -414,7 +414,7 @@ export async function startRuntime(
   } = {},
 ): Promise<() => void> {
   const root = options.rootElement ?? document.querySelector("#root");
-  if (!(root instanceof HTMLElement)) throw new Error("Production review root is unavailable");
+  if (!(root instanceof HTMLElement)) throw new Error("Production document root is unavailable");
   root.dataset.productionRoot = "true";
   const loaded = await runtime.bootstrap();
   const reactRoot = createRoot(root);
@@ -811,7 +811,7 @@ export async function startChromeRuntime(options: {
     dispose: () => {
       if (!settled) {
         settled = true;
-        ready.reject(new DOMException("The embedded review was disposed.", "AbortError"));
+        ready.reject(new DOMException("The embedded document was disposed.", "AbortError"));
       }
       unmount?.();
       runtime.dispose();

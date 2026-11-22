@@ -151,7 +151,7 @@ function upgradeFailure(): { readonly ok: false; readonly error: LaunchFailure }
     error: {
       kind: "upgrade-required",
       message: "Placekeeper is restarting after an upgrade. Retry this launch.",
-      recoveryAction: "Close Placekeeper reviews and retry",
+      recoveryAction: "Close Placekeeper documents and retry",
     },
   };
 }

@@ -54,7 +54,7 @@ export async function prepareRecoveredDocument(input: {
     request.workflowMode !== undefined &&
     resumedState.workflow.mode !== request.workflowMode
   ) {
-    throw new Error("A review session workflow mode cannot be downgraded or changed");
+    throw new Error("A document session workflow mode cannot be downgraded or changed");
   }
   if (approvedRoot === undefined) delete (resumedState as { sourceRootId?: string }).sourceRootId;
   return { resumedState, geometryMigrated, nativeMigration };

@@ -27,20 +27,20 @@ export function assertAnnotation(
   options: { readonly maxSelectionSegments?: number } = {},
 ): void {
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(item.id)) {
-    throw new InvalidDocumentCommandError("Review item IDs must be UUIDs");
+    throw new InvalidDocumentCommandError("Annotation IDs must be UUIDs");
   }
   if (!Number.isSafeInteger(item.pageIndex) || item.pageIndex < 0) {
-    throw new InvalidDocumentCommandError("Review item pageIndex must be non-negative");
+    throw new InvalidDocumentCommandError("Annotation pageIndex must be non-negative");
   }
   if (
     !["replace", "delete", "insert", "highlight", "pageNote", "pdfAnnotation"].includes(
       item.kind,
     )
   ) {
-    throw new InvalidDocumentCommandError("Review item kind is not supported");
+    throw new InvalidDocumentCommandError("Annotation kind is not supported");
   }
   if (!Number.isFinite(Date.parse(item.createdAt)) || !Number.isFinite(Date.parse(item.updatedAt))) {
-    throw new InvalidDocumentCommandError("Review item dates must be valid timestamps");
+    throw new InvalidDocumentCommandError("Annotation dates must be valid timestamps");
   }
 
   const keys = Object.keys(item.payload);
@@ -53,7 +53,7 @@ export function assertAnnotation(
     pdfAnnotation: ['position', 'comment', 'subtype', 'author', 'contentsLocked', 'deletionLocked', 'identityProvenance', 'sourceObjectPageIndex', 'sourceObjectAnnotationIndex'],
   };
   if (keys.some((key) => !allowedByKind[item.kind].includes(key))) {
-    throw new InvalidDocumentCommandError("Review item payload has unsupported fields");
+    throw new InvalidDocumentCommandError("Annotation payload has unsupported fields");
   }
   const text = (field: string, allowEmpty = true) =>
     typeof item.payload[field] === 'string' && (allowEmpty || item.payload[field] !== '');
@@ -89,7 +89,7 @@ export function assertAnnotation(
     (item.kind === 'insert' && item.payload.reliable === true && geometry('position') && text('leftContext') && text('rightContext') && text('proposedText', false) && item.payload.quote === undefined) ||
     (item.kind === 'highlight' && selection() && (item.payload.comment === undefined || text('comment'))) ||
     (item.kind === 'pageNote' && geometry('position') && text('comment', false) && (item.payload.nearbyText === undefined || text('nearbyText')));
-  if (!valid) throw new InvalidDocumentCommandError("Review item payload does not match its kind");
+  if (!valid) throw new InvalidDocumentCommandError("Annotation payload does not match its kind");
   if (item.reconciliation !== undefined) {
     const reconciliation = item.reconciliation;
     if (
@@ -97,7 +97,7 @@ export function assertAnnotation(
       reconciliation.ownerViewId.length === 0 ||
       !Number.isSafeInteger(reconciliation.baseGeneration) || reconciliation.baseGeneration < 0 ||
       !Number.isSafeInteger(reconciliation.revision) || reconciliation.revision < 0
-    ) throw new InvalidDocumentCommandError("Review item reconciliation is malformed");
+    ) throw new InvalidDocumentCommandError("Annotation reconciliation is malformed");
     assertDocumentAnchorEvidence(reconciliation.anchor);
     assertDisposition(reconciliation.disposition);
   }
@@ -112,7 +112,7 @@ export function assertAnnotation(
       if (error instanceof PortableAnnotationGroupError) {
         throw new InvalidDocumentCommandError(error.message);
       }
-      throw new InvalidDocumentCommandError('Review selection evidence is malformed');
+      throw new InvalidDocumentCommandError('Annotation selection evidence is malformed');
     }
   }
 }
@@ -120,18 +120,18 @@ export function assertAnnotation(
 export function assertDisposition(value: { readonly kind: string; readonly generation?: number; readonly reason?: string }): void {
   if (value.kind === "resolved") {
     if (!Number.isSafeInteger(value.generation) || (value.generation ?? -1) < 0) {
-      throw new InvalidDocumentCommandError("Resolved review anchors require a generation");
+      throw new InvalidDocumentCommandError("Resolved annotation anchors require a generation");
     }
     return;
   }
   if (!["ambiguous", "missing", "unsupported"].includes(value.kind) || typeof value.reason !== "string" || value.reason.length === 0) {
-    throw new InvalidDocumentCommandError("Review anchor disposition is malformed");
+    throw new InvalidDocumentCommandError("Annotation anchor disposition is malformed");
   }
 }
 
 function assertRect(value: { readonly x: number; readonly y: number; readonly width: number; readonly height: number }): void {
   if (![value.x, value.y, value.width, value.height].every(Number.isFinite) || value.width <= 0 || value.height <= 0) {
-    throw new InvalidDocumentCommandError("Review anchor geometry is malformed");
+    throw new InvalidDocumentCommandError("Annotation anchor geometry is malformed");
   }
 }
 
@@ -202,7 +202,7 @@ function assertSelectionAnchorEvidence(
 
 export function assertDocumentAnchorEvidence(anchor: DocumentAnchorEvidenceV1): void {
   if (!Number.isSafeInteger(anchor.pageIndex) || anchor.pageIndex < 0) {
-    throw new InvalidDocumentCommandError("Review anchor pageIndex must be non-negative");
+    throw new InvalidDocumentCommandError("Annotation anchor pageIndex must be non-negative");
   }
   assertRect(anchor.rect);
   switch (anchor.kind) {
@@ -226,6 +226,6 @@ export function assertDocumentAnchorEvidence(anchor: DocumentAnchorEvidenceV1): 
       }
       return;
     default:
-      throw new InvalidDocumentCommandError("Review anchor kind is not supported");
+      throw new InvalidDocumentCommandError("Annotation anchor kind is not supported");
   }
 }

@@ -71,7 +71,7 @@ it('rejects malformed stored entries and extra authority fields rather than usin
   const stored = JSON.parse(await readFile(path, 'utf8'));
   stored.entries[0].grant = 'unexpected-runtime-authority';
   await writeFile(path, JSON.stringify(stored));
-  await expect(new ExtensionRecentDocuments(f.root).list()).rejects.toThrow('Invalid recent review store');
+  await expect(new ExtensionRecentDocuments(f.root).list()).rejects.toThrow('Invalid recent document store');
 });
 
 it('loads a store an earlier release wrote under the frozen extension-recent-reviews.json name', async () => {

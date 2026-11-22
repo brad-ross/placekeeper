@@ -95,7 +95,7 @@ async function loadSharedStylesheet(signal: AbortSignal): Promise<void> {
       signal.removeEventListener("abort", onAbort);
     };
     const onLoad = () => { cleanup(); resolve(); };
-    const onError = () => { cleanup(); reject(new Error("Shared review styles failed to load.")); };
+    const onError = () => { cleanup(); reject(new Error("Shared reader styles failed to load.")); };
     const onAbort = () => { cleanup(); reject(signal.reason); };
     stylesheet.addEventListener("load", onLoad, { once: true });
     stylesheet.addEventListener("error", onError, { once: true });
