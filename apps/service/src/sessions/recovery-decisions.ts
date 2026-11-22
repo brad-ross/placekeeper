@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import {
   RecoveryOfferUnavailableError,
-  type OpenReviewResult,
+  type OpenDocumentResult,
   type RecoveryDecision,
   type RecoveryOfferIdentity,
 } from "./session-contracts.js";
@@ -98,8 +98,8 @@ export class RecoveryDecisions {
     operationId: string,
     offerId: string,
     fingerprint: string,
-    open: () => Promise<OpenReviewResult>,
-  ): Promise<OpenReviewResult> {
+    open: () => Promise<OpenDocumentResult>,
+  ): Promise<OpenDocumentResult> {
     const offered = this.#offers.get(offerId);
     const result = open();
     this.#operations.set(operationId, {

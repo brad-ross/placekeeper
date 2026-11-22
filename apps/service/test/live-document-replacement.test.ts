@@ -9,26 +9,26 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { SessionBroker as RawSessionBroker } from "../src/sessions/session-broker.js";
 import type { SessionBrokerOptions } from "../src/sessions/session-broker.js";
 import {
-  REVIEW_RUNTIME_PROTOCOL,
-  REVIEW_RUNTIME_VERSION,
+  DOCUMENT_RUNTIME_PROTOCOL,
+  DOCUMENT_RUNTIME_VERSION,
 } from "../../../packages/core/src/review-runtime-protocol.js";
-import type { ReviewCommand, ReviewItem } from "../../../packages/core/src/review-model.js";
-import { reviewSemanticDigest } from "../../../packages/core/src/live-context.js";
+import type { DocumentCommand, Annotation } from "../../../packages/core/src/review-model.js";
+import { documentSemanticDigest } from "../../../packages/core/src/live-context.js";
 import {
-  anchorEvidenceFromReviewItem,
-  createReviewState,
-  reviewSelectionPayload,
+  anchorEvidenceFromAnnotation,
+  createDocumentState,
+  documentSelectionPayload,
 } from "../../../packages/core/src/review-model.js";
 import {
-  assertReviewItem,
-  reduceReview,
+  assertAnnotation,
+  reduceDocument,
 } from "../../../packages/core/src/review-reducer.js";
 import {
-  projectReviewItem,
-  projectReviewItemProjections,
+  projectAnnotation,
+  projectAnnotationProjections,
 } from "../../../packages/core/src/annotation-projection.js";
 import { createSelectedPdfWriter } from "../../../packages/pdf-backends/src/selected-writer.js";
-import { readEditableReviewItems } from "../../../packages/pdf-backends/src/embedpdf-adapter.js";
+import { readEditableAnnotations } from "../../../packages/pdf-backends/src/embedpdf-adapter.js";
 import { DraftSnapshotStore } from "../src/recovery/draft-snapshot.js";
 import { PdfEvidenceService } from "../src/context/pdf-evidence-service.js";
 import {
@@ -36,10 +36,10 @@ import {
   reconcilePdfAnchorState,
 } from "../src/reconciliation/pdf-anchor-reconciler.js";
 import { SessionControlRegistry } from "../src/sessions/control-socket.js";
-import { prepareReplacementReview } from "../src/sessions/document-replacement-preparation.js";
+import { prepareReplacementDocument } from "../src/sessions/document-replacement-preparation.js";
 import {
   attachmentOrderedInteractionTransport,
-  beginReviewInteraction,
+  beginDocumentInteraction,
 } from "../../web/src/review/authoring-session.js";
 import { createRpcHostRuntime } from "../../web/src/host/vscode-runtime.js";
 
@@ -92,7 +92,7 @@ async function fixture(
   return { broker, directory, pdfPath, original, successor, launch: opened.launch };
 }
 
-function selectionItem(id: string, quote: string, prefix = "", suffix = ""): ReviewItem {
+function selectionItem(id: string, quote: string, prefix = "", suffix = ""): Annotation {
   return {
     id,
     kind: "highlight",
@@ -173,7 +173,7 @@ describe("atomic live document replacement", () => {
     })).resolves.toEqual({ status: "fallback", generation, pageCount: pages.length });
   });
   it("adopts verified successor native geometry while preserving authored comments and tombstones", () => {
-    const native = (id: string, pageIndex: number, x: number, comment: string): ReviewItem => ({
+    const native = (id: string, pageIndex: number, x: number, comment: string): Annotation => ({
       id,
       kind: "pdfAnnotation",
       pageIndex,
@@ -189,7 +189,7 @@ describe("atomic live document replacement", () => {
     });
     const retainedId = "00000000-0000-4000-8000-000000000020";
     const deletedId = "00000000-0000-4000-8000-000000000021";
-    const initial = createReviewState({
+    const initial = createDocumentState({
       sessionId: "00000000-0000-4000-8000-000000000022",
       source: { fileId: "00000000-0000-4000-8000-000000000023", digest: "a".repeat(64), byteLength: 10 },
     });
@@ -197,7 +197,7 @@ describe("atomic live document replacement", () => {
       native(retainedId, 0, 10, "Authored in session"),
       native(deletedId, 0, 30, "Deleted in session"),
     ] };
-    const successor = prepareReplacementReview(
+    const successor = prepareReplacementDocument(
       state,
       2,
       state.source.fileId,
@@ -220,7 +220,7 @@ describe("atomic live document replacement", () => {
   it("does not transfer edits or deletion between independently promoted ordinal objects", () => {
     const predecessorId = "00000000-0000-4000-8000-000000000024";
     const candidateId = "00000000-0000-4000-8000-000000000025";
-    const item = (id: string, comment: string): ReviewItem => ({
+    const item = (id: string, comment: string): Annotation => ({
       id, kind: "pdfAnnotation", pageIndex: 0,
       createdAt: "2026-09-15T12:00:00.000Z", updatedAt: "2026-09-15T12:00:00.000Z",
       payload: {
@@ -229,11 +229,11 @@ describe("atomic live document replacement", () => {
         sourceObjectPageIndex: 0, sourceObjectAnnotationIndex: 0,
       },
     });
-    const base = createReviewState({
+    const base = createDocumentState({
       sessionId: "00000000-0000-4000-8000-000000000026",
       source: { fileId: "00000000-0000-4000-8000-000000000027", digest: "a".repeat(64), byteLength: 10 },
     });
-    const successor = prepareReplacementReview(
+    const successor = prepareReplacementDocument(
       { ...base, items: [item(predecessorId, "Prior authored edit")] },
       2, base.source.fileId, { digest: "b".repeat(64), byteLength: 20 }, [],
       [item(candidateId, "Independent candidate")], new Set([predecessorId]),
@@ -298,9 +298,9 @@ describe("atomic live document replacement", () => {
       },
     });
 
-    const item: ReviewItem = {
+    const item: Annotation = {
       ...selectionItem(ITEM_IDS.stable, anchor.quote, anchor.prefix, anchor.suffix),
-      payload: { ...reviewSelectionPayload(anchor, { canonical: true }), comment: "Keep this" },
+      payload: { ...documentSelectionPayload(anchor, { canonical: true }), comment: "Keep this" },
       reconciliation: {
         schemaVersion: 1,
         ownerViewId: "panel-a",
@@ -312,7 +312,7 @@ describe("atomic live document replacement", () => {
       },
     };
     const reconciled = reconcilePdfAnchorState({
-      ...createReviewState({
+      ...createDocumentState({
         sessionId: "00000000-0000-4000-8000-000000000100",
         source: { fileId: "source", digest: "a".repeat(64), byteLength: 1 },
         workflowMode: "generated-output",
@@ -331,8 +331,8 @@ describe("atomic live document replacement", () => {
         { pageIndex: 2, quote: "beta" },
       ],
     });
-    expect(() => assertReviewItem(reconciledItem)).not.toThrow();
-    expect(projectReviewItemProjections(reconciledItem)).toHaveLength(3);
+    expect(() => assertAnnotation(reconciledItem)).not.toThrow();
+    expect(projectAnnotationProjections(reconciledItem)).toHaveLength(3);
   });
 
   it("keeps a rebuilt cross-page anchor unsupported when it would skip a blank page", () => {
@@ -547,7 +547,7 @@ describe("atomic live document replacement", () => {
       segmentRects: [{ x: 1, y: 1, width: 20, height: 8 }],
     };
     const state = {
-      ...createReviewState({
+      ...createDocumentState({
         sessionId: "00000000-0000-4000-8000-000000000100",
         source: { fileId: "00000000-0000-4000-8000-000000000101", digest: "a".repeat(64), byteLength: 1 },
         workflowMode: "generated-output",
@@ -586,7 +586,7 @@ describe("atomic live document replacement", () => {
       status: "protected",
       disposition: { kind: "resolved", generation: 2 },
     });
-    expect(() => reduceReview(reconciled, {
+    expect(() => reduceDocument(reconciled, {
       type: "apply-draft",
       expectedRevision: reconciled.revision,
       id: reconciled.pendingDrafts[0]!.id,
@@ -702,14 +702,14 @@ describe("atomic live document replacement", () => {
     const embeddableSource = new Uint8Array(
       await readFile("test/fixtures/pdfs/text-native.pdf"),
     );
-    const reviewed = await writer.write({
+    const annotated = await writer.write({
       sourcePdf: embeddableSource,
       sourceSha256: createHash("sha256").update(embeddableSource).digest("hex"),
       revision: 1,
-      annotations: [projectReviewItem(item)],
+      annotations: [projectAnnotation(item)],
     });
-    const replacementBytes = reviewed.pdfBytes;
-    expect(await readEditableReviewItems(replacementBytes)).toMatchObject([{ id: item.id }]);
+    const replacementBytes = annotated.pdfBytes;
+    expect(await readEditableAnnotations(replacementBytes)).toMatchObject([{ id: item.id }]);
     await writeFile(value.pdfPath, replacementBytes);
 
     await expect(value.broker.replaceLiveDocument({
@@ -1005,7 +1005,7 @@ describe("atomic live document replacement", () => {
         kind: "highlight",
         pageIndex: 0,
         text: "protected ordinary draft",
-        anchor: anchorEvidenceFromReviewItem(withItem.items[0]!),
+        anchor: anchorEvidenceFromAnnotation(withItem.items[0]!),
         disposition: { kind: "resolved", generation: 1 },
         status: "protected",
         createdAt: "2026-09-15T12:00:00.000Z",
@@ -1076,7 +1076,7 @@ describe("atomic live document replacement", () => {
         kind: "highlight",
         pageIndex: 0,
         text: "draft retained after its window disappears",
-        anchor: anchorEvidenceFromReviewItem(selectionItem(ITEM_IDS.protected, "Original generated output")),
+        anchor: anchorEvidenceFromAnnotation(selectionItem(ITEM_IDS.protected, "Original generated output")),
         disposition: { kind: "resolved", generation: 1 },
         status: "protected",
         createdAt: "2026-09-15T12:00:00.000Z",
@@ -1094,7 +1094,7 @@ describe("atomic live document replacement", () => {
       workflow: { documentGeneration: 1 },
       pendingDrafts: [{ id: draftId, status: "protected" }],
     });
-    await value.broker.releaseReviewInteraction({
+    await value.broker.releaseDocumentInteraction({
       sessionId: value.launch.sessionId, attachment: second,
       interactionToken: "interaction_window_b", order: 2,
     });
@@ -1137,7 +1137,7 @@ describe("atomic live document replacement", () => {
       kind: "highlight" as const,
       pageIndex: 0,
       text,
-      anchor: anchorEvidenceFromReviewItem(selectionItem(ITEM_IDS.protected, "Original generated output")),
+      anchor: anchorEvidenceFromAnnotation(selectionItem(ITEM_IDS.protected, "Original generated output")),
       disposition: { kind: "resolved" as const, generation: 1 },
       status: "protected" as const,
       createdAt: "2026-09-17T12:00:00.000Z",
@@ -1168,7 +1168,7 @@ describe("atomic live document replacement", () => {
       .toEqual([liveDraftId]);
 
     invalidated.mockClear();
-    await value.broker.releaseReviewInteraction({
+    await value.broker.releaseDocumentInteraction({
       sessionId: value.launch.sessionId,
       attachment: owner,
       interactionToken: "interaction_exact_draft",
@@ -1192,19 +1192,19 @@ describe("atomic live document replacement", () => {
       beginInteraction: (input) => value.broker.beginReviewInteraction({
         ...input, sessionId: value.launch.sessionId, attachment,
       }),
-      finalizeInteraction: (input) => value.broker.finalizeReviewInteraction({
+      finalizeInteraction: (input) => value.broker.finalizeDocumentInteraction({
         ...input, sessionId: value.launch.sessionId, attachment,
       }),
-      releaseInteraction: (input) => value.broker.releaseReviewInteraction({
+      releaseInteraction: (input) => value.broker.releaseDocumentInteraction({
         ...input, sessionId: value.launch.sessionId, attachment,
       }),
-      acknowledgeInteraction: (input) => value.broker.acknowledgeReviewInteraction({
+      acknowledgeInteraction: (input) => value.broker.acknowledgeDocumentInteraction({
         ...input, sessionId: value.launch.sessionId, attachment,
       }),
     });
 
-    const first = await beginReviewInteraction(transport, 1, "interaction_overlap_first");
-    const second = await beginReviewInteraction(transport, 1, "interaction_overlap_second");
+    const first = await beginDocumentInteraction(transport, 1, "interaction_overlap_first");
+    const second = await beginDocumentInteraction(transport, 1, "interaction_overlap_second");
     expect(value.broker.interactions.held(value.launch.sessionId)).toBe(true);
     await expect(first.release()).resolves.toBeUndefined();
     expect(value.broker.interactions.held(value.launch.sessionId)).toBe(true);
@@ -1232,7 +1232,7 @@ describe("atomic live document replacement", () => {
         kind: "highlight",
         pageIndex: 0,
         text: "cancelled edit",
-        anchor: anchorEvidenceFromReviewItem(selectionItem(ITEM_IDS.protected, "Original generated output")),
+        anchor: anchorEvidenceFromAnnotation(selectionItem(ITEM_IDS.protected, "Original generated output")),
         disposition: { kind: "resolved", generation: 1 },
         status: "protected",
         createdAt: "2026-09-16T12:00:00.000Z",
@@ -1241,7 +1241,7 @@ describe("atomic live document replacement", () => {
     });
     invalidated.mockClear();
 
-    await expect(value.broker.finalizeReviewInteraction({
+    await expect(value.broker.finalizeDocumentInteraction({
       sessionId: value.launch.sessionId, attachment, interactionToken, order: 2,
       outcome: "discarded", draftId, expectedDraftRevision: 0,
     })).resolves.toMatchObject({ status: "finalized", outcome: "discarded", reviewRevision: 2 });
@@ -1288,7 +1288,7 @@ describe("atomic live document replacement", () => {
         kind: "highlight",
         pageIndex: 0,
         text: "uncertain cancelled edit",
-        anchor: anchorEvidenceFromReviewItem(selectionItem(ITEM_IDS.protected, "Original generated output")),
+        anchor: anchorEvidenceFromAnnotation(selectionItem(ITEM_IDS.protected, "Original generated output")),
         disposition: { kind: "resolved", generation: 1 },
         status: "protected",
         createdAt: "2026-09-16T12:00:00.000Z",
@@ -1298,7 +1298,7 @@ describe("atomic live document replacement", () => {
     invalidated.mockClear();
     failAfterRename = true;
 
-    await expect(value.broker.finalizeReviewInteraction({
+    await expect(value.broker.finalizeDocumentInteraction({
       sessionId: value.launch.sessionId, attachment, interactionToken, order: 2,
       outcome: "discarded", draftId, expectedDraftRevision: 0,
     })).rejects.toThrow(/commit outcome remains uncertain/iu);
@@ -1308,8 +1308,8 @@ describe("atomic live document replacement", () => {
     const listeners = new Set<(message: unknown) => void>();
     const emit = (message: unknown) => listeners.forEach((listener) => listener(message));
     invalidated.mockImplementation((publishedSessionId, event) => emit({
-      protocol: REVIEW_RUNTIME_PROTOCOL,
-      version: REVIEW_RUNTIME_VERSION,
+      protocol: DOCUMENT_RUNTIME_PROTOCOL,
+      version: DOCUMENT_RUNTIME_VERSION,
       kind: "event",
       event: "session-invalidated",
       panelId: "panel_uncertain_recovery",
@@ -1364,7 +1364,7 @@ describe("atomic live document replacement", () => {
               ok = false;
               payload = { kind: "stale-presentation" };
             } else {
-              payload = await value.broker.acknowledgeReviewInteraction({
+              payload = await value.broker.acknowledgeDocumentInteraction({
                 ...(request.payload as { interactionToken: string; order: number }),
                 sessionId: value.launch.sessionId,
                 attachment,
@@ -1374,8 +1374,8 @@ describe("atomic live document replacement", () => {
             throw new Error(`Unexpected runtime method: ${request.method}`);
           }
           emit({
-            protocol: REVIEW_RUNTIME_PROTOCOL,
-            version: REVIEW_RUNTIME_VERSION,
+            protocol: DOCUMENT_RUNTIME_PROTOCOL,
+            version: DOCUMENT_RUNTIME_VERSION,
             kind: "response",
             panelId: "panel_uncertain_recovery",
             sessionId: value.launch.sessionId,
@@ -1434,8 +1434,8 @@ describe("atomic live document replacement", () => {
     const emit = (message: unknown) => listeners.forEach((listener) => listener(message));
     vi.spyOn(controls, "publishStateInvalidation").mockImplementation((publishedSessionId, event) => {
       emit({
-        protocol: REVIEW_RUNTIME_PROTOCOL,
-        version: REVIEW_RUNTIME_VERSION,
+        protocol: DOCUMENT_RUNTIME_PROTOCOL,
+        version: DOCUMENT_RUNTIME_VERSION,
         kind: "event",
         event: "session-invalidated",
         panelId: "panel_runtime_delivery",
@@ -1479,7 +1479,7 @@ describe("atomic live document replacement", () => {
               },
             };
           } else if (request.method === "command") {
-            payload = await value.broker.acceptMutation(sessionId, request.payload as ReviewCommand);
+            payload = await value.broker.acceptMutation(sessionId, request.payload as DocumentCommand);
           } else if (request.method === "beginInteraction") {
             payload = await value.broker.beginReviewInteraction({
               ...(request.payload as { generation: number; interactionToken: string; order: number }),
@@ -1487,7 +1487,7 @@ describe("atomic live document replacement", () => {
               attachment,
             });
           } else if (request.method === "finalizeInteraction") {
-            payload = await value.broker.finalizeReviewInteraction({
+            payload = await value.broker.finalizeDocumentInteraction({
               ...(request.payload as {
                 interactionToken: string;
                 order: number;
@@ -1503,8 +1503,8 @@ describe("atomic live document replacement", () => {
           }
           const responseState = value.broker.state(sessionId)!;
           emit({
-            protocol: REVIEW_RUNTIME_PROTOCOL,
-            version: REVIEW_RUNTIME_VERSION,
+            protocol: DOCUMENT_RUNTIME_PROTOCOL,
+            version: DOCUMENT_RUNTIME_VERSION,
             kind: "response",
             panelId: "panel_runtime_delivery",
             sessionId,
@@ -1532,7 +1532,7 @@ describe("atomic live document replacement", () => {
       kind: "highlight" as const,
       pageIndex: 0,
       text,
-      anchor: anchorEvidenceFromReviewItem(selectionItem(ITEM_IDS.protected, "Original generated output")),
+      anchor: anchorEvidenceFromAnnotation(selectionItem(ITEM_IDS.protected, "Original generated output")),
       disposition: { kind: "resolved" as const, generation: 1 },
       status: "protected" as const,
       createdAt: "2026-09-16T12:00:00.000Z",
@@ -1590,21 +1590,21 @@ describe("atomic live document replacement", () => {
         }
         return accepted;
       },
-      finalizeInteraction: (input) => value.broker.finalizeReviewInteraction({
+      finalizeInteraction: (input) => value.broker.finalizeDocumentInteraction({
         ...input, sessionId: value.launch.sessionId, attachment,
       }),
-      releaseInteraction: (input) => value.broker.releaseReviewInteraction({
+      releaseInteraction: (input) => value.broker.releaseDocumentInteraction({
         ...input, sessionId: value.launch.sessionId, attachment,
       }),
-      acknowledgeInteraction: (input) => value.broker.acknowledgeReviewInteraction({
+      acknowledgeInteraction: (input) => value.broker.acknowledgeDocumentInteraction({
         ...input, sessionId: value.launch.sessionId, attachment,
       }),
     });
 
-    await expect(beginReviewInteraction(transport, 1, "interaction_lost_begin"))
+    await expect(beginDocumentInteraction(transport, 1, "interaction_lost_begin"))
       .rejects.toThrow("after broker admission");
     expect(value.broker.interactions.held(value.launch.sessionId)).toBe(false);
-    const retry = await beginReviewInteraction(transport, 1, "interaction_fresh_begin");
+    const retry = await beginDocumentInteraction(transport, 1, "interaction_fresh_begin");
     expect(value.broker.interactions.held(value.launch.sessionId)).toBe(true);
     await retry.release();
     expect(value.broker.interactions.held(value.launch.sessionId)).toBe(false);
@@ -1622,7 +1622,7 @@ describe("atomic live document replacement", () => {
           ...input, sessionId: value.launch.sessionId, attachment,
         });
       },
-      finalizeInteraction: (input) => value.broker.finalizeReviewInteraction({
+      finalizeInteraction: (input) => value.broker.finalizeDocumentInteraction({
         ...input, sessionId: value.launch.sessionId, attachment,
       }),
       releaseInteraction: async (input) => {
@@ -1631,17 +1631,17 @@ describe("atomic live document replacement", () => {
           failedReleaseAttempts += 1;
           throw new Error("connection reset before broker acceptance");
         }
-        return value.broker.releaseReviewInteraction({
+        return value.broker.releaseDocumentInteraction({
           ...input, sessionId: value.launch.sessionId, attachment,
         });
       },
-      acknowledgeInteraction: (input) => value.broker.acknowledgeReviewInteraction({
+      acknowledgeInteraction: (input) => value.broker.acknowledgeDocumentInteraction({
         ...input, sessionId: value.launch.sessionId, attachment,
       }),
     });
 
-    const first = await beginReviewInteraction(transport, 1, "interaction_uncertain_first");
-    const second = await beginReviewInteraction(transport, 1, "interaction_uncertain_second");
+    const first = await beginDocumentInteraction(transport, 1, "interaction_uncertain_first");
+    const second = await beginDocumentInteraction(transport, 1, "interaction_uncertain_second");
     await expect(first.release()).rejects.toThrow("connection reset");
     await expect(second.release()).resolves.toBeUndefined();
     await expect(first.release()).resolves.toBeUndefined();
@@ -1968,7 +1968,7 @@ describe("atomic live document replacement", () => {
       documentGeneration: 1,
       source: before.source,
       reviewRevision: before.revision,
-      stateDigest: reviewSemanticDigest(before.items),
+      stateDigest: documentSemanticDigest(before.items),
     })).toBe(true);
     const evidence = new PdfEvidenceService({
       bindings: value.broker.taskBindings,
@@ -1981,7 +1981,7 @@ describe("atomic live document replacement", () => {
         documentGeneration: 1,
         source: before.source,
         reviewRevision: before.revision,
-        stateDigest: reviewSemanticDigest(before.items),
+        stateDigest: documentSemanticDigest(before.items),
       },
       pageCount: 1,
       sourceByteLength: before.source.byteLength,

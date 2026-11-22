@@ -1,5 +1,5 @@
-import { ReviewIcon } from './ReviewIcon.js';
-import { ReviewTooltipButton } from './ReviewTooltipButton.js';
+import { ReaderIcon } from './ReviewIcon.js';
+import { ReaderTooltipButton } from './ReviewTooltipButton.js';
 
 export interface OutlineExpansionToggleProps {
   readonly restorePending: boolean;
@@ -16,7 +16,7 @@ export function OutlineExpansionToggle({
     ? 'Restore previous outline expansion'
     : 'Collapse all outline entries';
   return (
-    <ReviewTooltipButton
+    <ReaderTooltipButton
       label={label}
       type="button"
       className="review-workspace__move review-workspace__move--activity review-workspace__move--header-action review-workspace__outline-toggle"
@@ -26,7 +26,7 @@ export function OutlineExpansionToggle({
       disabled={disabled}
       onClick={onToggle}
     >
-      <ReviewIcon name={restorePending ? 'unfold-vertical' : 'fold-vertical'} />
-    </ReviewTooltipButton>
+      <ReaderIcon name={restorePending ? 'unfold-vertical' : 'fold-vertical'} />
+    </ReaderTooltipButton>
   );
 }

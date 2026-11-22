@@ -8,10 +8,10 @@ import { createRequire } from "node:module";
 import { promisify } from "node:util";
 import { describe, expect, it, vi } from "vitest";
 import { PDFDocument } from "pdf-lib";
-import { createReviewState } from "../../../packages/core/src/review-model.js";
+import { createDocumentState } from "../../../packages/core/src/review-model.js";
 import {
-  REVIEW_RUNTIME_PROTOCOL,
-  REVIEW_RUNTIME_VERSION,
+  DOCUMENT_RUNTIME_PROTOCOL,
+  DOCUMENT_RUNTIME_VERSION,
 } from "../../../packages/core/src/review-runtime-protocol.js";
 import { startHttpServer } from "../../service/src/server/http-server.js";
 import { SessionBroker } from "../../service/src/sessions/session-broker.js";
@@ -32,12 +32,12 @@ import {
 } from "../src/local-workspace.js";
 import {
   RECOVERY_CHOICE_LABELS,
-  buildReviewPanelReattachmentHtml,
-  buildReviewWebviewHtml,
+  buildDocumentPanelReattachmentHtml,
+  buildDocumentWebviewHtml,
   parseSharedAssetManifest,
   parseLaunchResponse,
   recoveryDecisionForLabel,
-  reviewPanelOptions,
+  documentPanelOptions,
 } from "../src/review-panel.js";
 import {
   createPrivateSnapshotDirectory,
@@ -253,7 +253,7 @@ describe("VS Code local host adapter", () => {
       module.exports.activate(context);
       await deserialize!(panel, { panelKey });
       const panelId = /startVscode\(\{ panelId: "([^"]+)"/u.exec(html)![1];
-      await receive!({ protocol: REVIEW_RUNTIME_PROTOCOL, version: REVIEW_RUNTIME_VERSION, kind: "request",
+      await receive!({ protocol: DOCUMENT_RUNTIME_PROTOCOL, version: DOCUMENT_RUNTIME_VERSION, kind: "request",
         panelId, requestId: "bootstrap_request_123456", method: "bootstrap", payload: {} });
       const forward = commands.get("placekeeper.forwardSyncTex")!;
       await forward(uri(outputPath));
@@ -604,7 +604,7 @@ describe("VS Code local host adapter", () => {
     if (!result.ok) throw new Error("expected a successful launch");
     if (result.kind === "recovery-offered") throw new Error("expected a scoped URL");
     expect(result.kind).toBe("focused");
-    const html = buildReviewWebviewHtml({
+    const html = buildDocumentWebviewHtml({
       nonce: "nonce-value",
       panelId: "panel_identifier_1234",
       panelKey: "opaque-panel-key",
@@ -624,21 +624,21 @@ describe("VS Code local host adapter", () => {
     expect(html).not.toContain("127.0.0.1");
     expect(html).not.toContain("localhost");
     expect(html).not.toContain("cap=secret");
-    expect(() => buildReviewWebviewHtml({
+    expect(() => buildDocumentWebviewHtml({
       nonce: "nonce-value",
       panelId: "panel_identifier_1234",
       scriptUri: "https://file+.vscode-resource.vscode-cdn.net/assets/app.js",
       styleUri: "https://file+.vscode-resource.vscode-cdn.net/assets/app.css",
       cspSource: "'self' https://*.vscode-cdn.net",
     })).not.toThrow();
-    expect(() => buildReviewWebviewHtml({
+    expect(() => buildDocumentWebviewHtml({
       nonce: "nonce-value",
       panelId: "panel_identifier_1234",
       scriptUri: "vscode-webview://authority/assets/app.js",
       styleUri: "vscode-webview://authority/assets/app.css",
       cspSource: "'self' https://*.vscode-cdn.net https://example.com",
     })).toThrow(/CSP source/u);
-    const options = reviewPanelOptions([]);
+    const options = documentPanelOptions([]);
     expect(options.localResourceRoots).toEqual([]);
     expect(options.enableScripts).toBe(true);
     expect(options.retainContextWhenHidden).toBe(false);
@@ -647,7 +647,7 @@ describe("VS Code local host adapter", () => {
   });
 
   it("records the panel key before the shared application can fail to import", () => {
-    const html = buildReviewWebviewHtml({
+    const html = buildDocumentWebviewHtml({
       nonce: "nonce-value",
       panelId: "panel_identifier_1234",
       panelKey: "opaque-panel-key",
@@ -684,7 +684,7 @@ describe("VS Code local host adapter", () => {
     const waiting = bridge.whenReady().then(ready);
     await Promise.resolve();
     expect(ready).not.toHaveBeenCalled();
-    await bridge.receive({ protocol: REVIEW_RUNTIME_PROTOCOL, version: REVIEW_RUNTIME_VERSION,
+    await bridge.receive({ protocol: DOCUMENT_RUNTIME_PROTOCOL, version: DOCUMENT_RUNTIME_VERSION,
       kind: "request", panelId, requestId: "request_identifier_1234", method: "bootstrap", payload: {} });
     await waiting;
     expect(ready).toHaveBeenCalledWith(true);
@@ -704,7 +704,7 @@ describe("VS Code local host adapter", () => {
       identity: { panelId, sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", generation: 1, revision: 0 },
       bootstrap, invoke, dispose: vi.fn(),
     }, post);
-    await bridge.receive({ protocol: REVIEW_RUNTIME_PROTOCOL, version: 1, kind: "request", panelId,
+    await bridge.receive({ protocol: DOCUMENT_RUNTIME_PROTOCOL, version: 1, kind: "request", panelId,
       requestId: "request_identifier_1234", method: "bootstrap", payload: {} });
     expect(post).toHaveBeenCalledWith(expect.objectContaining({ ok: false, error: { kind: "runtime-version-mismatch" } }));
     expect(bootstrap).not.toHaveBeenCalled();
@@ -720,8 +720,8 @@ describe("VS Code local host adapter", () => {
       revision: 7,
     };
     const request = {
-      protocol: REVIEW_RUNTIME_PROTOCOL,
-      version: REVIEW_RUNTIME_VERSION,
+      protocol: DOCUMENT_RUNTIME_PROTOCOL,
+      version: DOCUMENT_RUNTIME_VERSION,
       kind: "request",
       panelId: expected.panelId,
       requestId: "request_identifier_1234",
@@ -756,7 +756,7 @@ describe("VS Code local host adapter", () => {
     const identity = { panelId, sessionId, generation: 1, revision: 0 };
     const listeners = new Set<(message: unknown) => void>();
     const bootstrap = vi.fn(async () => {
-      const state = createReviewState({
+      const state = createDocumentState({
         sessionId,
         source: {
           fileId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
@@ -824,8 +824,8 @@ describe("VS Code local host adapter", () => {
       revision: 7,
     };
     const valid = {
-      protocol: REVIEW_RUNTIME_PROTOCOL,
-      version: REVIEW_RUNTIME_VERSION,
+      protocol: DOCUMENT_RUNTIME_PROTOCOL,
+      version: DOCUMENT_RUNTIME_VERSION,
       kind: "request",
       panelId: expected.panelId,
       requestId: "request_identifier_1234",
@@ -847,8 +847,8 @@ describe("VS Code local host adapter", () => {
       revision: 7,
     };
     const request = {
-      protocol: REVIEW_RUNTIME_PROTOCOL,
-      version: REVIEW_RUNTIME_VERSION,
+      protocol: DOCUMENT_RUNTIME_PROTOCOL,
+      version: DOCUMENT_RUNTIME_VERSION,
       kind: "request",
       panelId: expected.panelId,
       requestId: "request_identifier_1234",
@@ -944,7 +944,7 @@ describe("VS Code local host adapter", () => {
   });
 
   it("renders an inert neutral reattachment surface for a disconnected panel", () => {
-    const html = buildReviewPanelReattachmentHtml();
+    const html = buildDocumentPanelReattachmentHtml();
 
     expect(html).toContain("Reconnect this document");
     expect(html).toContain("Placekeeper: View PDF");
@@ -1014,7 +1014,7 @@ describe("VS Code local host adapter", () => {
   });
 
   it("pins bootstrap document bytes to the state generation", async () => {
-    const state = createReviewState({
+    const state = createDocumentState({
       sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
       source: {
         fileId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
@@ -1127,7 +1127,7 @@ describe("VS Code local host adapter", () => {
     const bridge = new VersionedWebviewBridge(client, vi.fn());
     let requestNumber = 0;
     const send = async (payload: unknown) => bridge.receive({
-      protocol: REVIEW_RUNTIME_PROTOCOL, version: REVIEW_RUNTIME_VERSION, kind: "request", ...client.identity,
+      protocol: DOCUMENT_RUNTIME_PROTOCOL, version: DOCUMENT_RUNTIME_VERSION, kind: "request", ...client.identity,
       requestId: `request_identifier_${++requestNumber}`, method: "forwardSyncTex", payload,
     });
     for (const payload of [

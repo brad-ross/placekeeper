@@ -19,7 +19,7 @@ import {
   type PdfWriteResult,
   type PdfWriteRequest,
   type PdfWriterErrorCode,
-  type ReviewAnnotation,
+  type PdfWriterAnnotation,
 } from "../../../packages/core/src/pdf-writer.js";
 import { addPageNote } from "../../../packages/core/src/review-commands.js";
 import { FileCapabilityRegistry } from "../src/files/file-capabilities.js";
@@ -44,12 +44,12 @@ async function replacementFixture() {
   const originalPath = join(directory, "paper.pdf");
   const snapshotPath = join(directory, "snapshot.pdf");
   const original = Buffer.from("%PDF-1.7\noriginal immutable bytes\n%%EOF");
-  const reviewed = Buffer.from("%PDF-1.7\nreviewed replacement\n%%EOF");
+  const annotated = Buffer.from("%PDF-1.7\nreviewed replacement\n%%EOF");
   await writeFile(originalPath, original, { mode: 0o640 });
   await writeFile(snapshotPath, original);
   const capabilities = new FileCapabilityRegistry();
   const approved = await capabilities.approvePdf(originalPath);
-  const annotation: ReviewAnnotation = {
+  const annotation: PdfWriterAnnotation = {
     kind: "pageNote",
     id: randomUUID(),
     pageIndex: 0,
@@ -60,12 +60,12 @@ async function replacementFixture() {
     modifiedAt: "2026-08-07T12:00:00.000Z",
   };
   const result: PdfWriteResult = {
-    pdfBytes: reviewed,
+    pdfBytes: annotated,
     evidence: {
       backend: "embedpdf",
       backendVersion: "2.14.4",
       originalSha256: sha256(original),
-      outputSha256: sha256(reviewed),
+      outputSha256: sha256(annotated),
       pageCount: 1,
       structurallyValid: true,
       preexistingAnnotationIds: [],
@@ -90,7 +90,7 @@ async function replacementFixture() {
     originalPath,
     snapshotPath,
     original,
-    reviewed,
+    reviewed: annotated,
     capabilities,
     approved,
     annotation,
@@ -359,7 +359,7 @@ describe("explicit original replacement", () => {
     temporaryDirectories.push(directory);
     const originalPath = join(directory, "paper.pdf");
     const original = Buffer.from("%PDF-1.7\ncrash source\n%%EOF");
-    const reviewed = Buffer.from("%PDF-1.7\ncommitted before crash\n%%EOF");
+    const annotated = Buffer.from("%PDF-1.7\ncommitted before crash\n%%EOF");
     await writeFile(originalPath, original);
     const recoveryRoot = join(directory, "recovery");
     const broker = new SessionBroker({ recoveryRoot });
@@ -378,12 +378,12 @@ describe("explicit original replacement", () => {
     const coordinator = new ExportCoordinator({
       writer: {
         write: async (request) => ({
-          pdfBytes: reviewed,
+          pdfBytes: annotated,
           evidence: {
             backend: "embedpdf",
             backendVersion: "2.14.4",
             originalSha256: request.sourceSha256,
-            outputSha256: sha256(reviewed),
+            outputSha256: sha256(annotated),
             pageCount: 1,
             structurallyValid: true,
             preexistingAnnotationIds: [],
@@ -406,7 +406,7 @@ describe("explicit original replacement", () => {
 
     const result = await coordinator.replaceOriginal(frozen);
     expect(result.warning).toContain("original was replaced");
-    expect(await readFile(originalPath)).toEqual(reviewed);
+    expect(await readFile(originalPath)).toEqual(annotated);
     const restarted = new SessionBroker({ recoveryRoot });
     await expect(restarted.openReview({ pdfPath: originalPath })).resolves.toEqual({
       kind: "recovery-offered",

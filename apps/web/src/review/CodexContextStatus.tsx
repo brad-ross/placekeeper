@@ -1,7 +1,7 @@
 import { useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import type { LiveContextBindingStatus } from '../../../../packages/core/src/live-context.js';
-import { ReviewIcon } from './ReviewIcon.js';
-import { placeLinkActionPopover, visibleReviewViewport } from './LinkActionPopover.js';
+import { ReaderIcon } from './ReviewIcon.js';
+import { placeLinkActionPopover, visibleDocumentViewport } from './LinkActionPopover.js';
 
 export interface CodexContextStatusProps {
   readonly status: LiveContextBindingStatus;
@@ -41,7 +41,7 @@ export function CodexContextStatus({ status }: CodexContextStatusProps) {
     const next = placeLinkActionPopover({
       anchor: anchor.getBoundingClientRect(),
       menu: { width: bounds.width, height: bounds.height },
-      viewport: visibleReviewViewport(),
+      viewport: visibleDocumentViewport(),
       gap: 6,
       margin: 6,
     });
@@ -69,7 +69,7 @@ export function CodexContextStatus({ status }: CodexContextStatusProps) {
       onPointerEnter={positionTooltip}
       onFocus={positionTooltip}
     >
-      <ReviewIcon name="agent" size={16} />
+      <ReaderIcon name="agent" size={16} />
       <span ref={tooltipRef} className="codex-context-status__tooltip" role="tooltip" style={placement}>
         <strong className="codex-context-status__tooltip-title">
           <span className="codex-context-status__tooltip-dot" aria-hidden="true" />

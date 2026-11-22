@@ -1,7 +1,7 @@
-import type { ReviewItemKind } from './review-model.js';
+import type { AnnotationKind } from './review-model.js';
 import type { NativePdfAnnotationIdentityProvenance } from './native-pdf-annotation.js';
 
-export type ReviewAnnotationKind = ReviewItemKind;
+export type PdfWriterAnnotationKind = AnnotationKind;
 
 export type PdfWriterErrorCode =
   | 'backend-error'
@@ -24,8 +24,8 @@ export interface PdfRect {
   height: number;
 }
 
-interface ReviewAnnotationBase {
-  kind: ReviewAnnotationKind;
+interface PdfWriterAnnotationBase {
+  kind: PdfWriterAnnotationKind;
   /** Deterministic identity of this page-local physical projection. */
   id: string;
   /** Canonical Review Item identity shared by every page-local projection. */
@@ -46,7 +46,7 @@ interface ReviewAnnotationBase {
   nativeSourceObject?: { readonly pageIndex: number; readonly annotationIndex: number };
 }
 
-export type ReviewAnnotation = ReviewAnnotationBase & {
+export type PdfWriterAnnotation = PdfWriterAnnotationBase & {
   quadPoints?: readonly PdfRect[];
 };
 
@@ -54,7 +54,7 @@ export interface PdfWriteRequest {
   sourcePdf: Uint8Array;
   sourceSha256: string;
   revision: number;
-  annotations: readonly ReviewAnnotation[];
+  annotations: readonly PdfWriterAnnotation[];
   /** The request contains the complete editable source-annotation inventory. */
   manageNativeAnnotations?: boolean;
 }
@@ -126,7 +126,7 @@ export class PdfWriterError extends Error {
   }
 }
 
-export const SEMANTIC_MARKUP_KINDS: ReadonlySet<ReviewAnnotationKind> = new Set([
+export const SEMANTIC_MARKUP_KINDS: ReadonlySet<PdfWriterAnnotationKind> = new Set([
   'replace',
   'delete',
   'insert',

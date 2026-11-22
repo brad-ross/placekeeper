@@ -13,7 +13,7 @@ import { createPortal } from 'react-dom';
 
 import {
   placeLinkActionPopover,
-  visibleReviewViewport,
+  visibleDocumentViewport,
   type LinkActionPopoverPlacement,
 } from './LinkActionPopover.js';
 import { enabledMenuItems, menuRovingFocusIndex } from './menu-focus.js';
@@ -85,7 +85,7 @@ export function TopBarMenu({
     const next = placeLinkActionPopover({
       anchor,
       menu: { width: bounds.width, height: bounds.height },
-      viewport: visibleReviewViewport(),
+      viewport: visibleDocumentViewport(),
       alignment: 'end',
       // The top bar's end controls sit 9px from the window edge; keep the
       // window inset smaller so menus can still align under them.

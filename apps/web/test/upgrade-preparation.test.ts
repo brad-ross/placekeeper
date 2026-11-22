@@ -1,12 +1,12 @@
 import { expect, it } from 'vitest';
-import { ReviewUpgradePreparation } from '../src/host/upgrade-preparation.js';
-import type { UpgradeReviewStatus } from '../../../packages/core/src/upgrade-review-protocol.js';
+import { DocumentUpgradePreparation } from '../src/host/upgrade-preparation.js';
+import type { UpgradeDocumentStatus } from '../../../packages/core/src/upgrade-review-protocol.js';
 
 it('flushes current input after freezing, keeps the view open until commit, and unfreezes a declined or canceled attempt', async () => {
   const attemptId = 'a'.repeat(43);
-  let status: UpgradeReviewStatus = { phase: 'preview', attemptId };
+  let status: UpgradeDocumentStatus = { phase: 'preview', attemptId };
   let text = 'typed immediately before acceptance'; let durable = ''; let frozen = false; let closed = 0;
-  const view = new ReviewUpgradePreparation({
+  const view = new DocumentUpgradePreparation({
     poll: async () => status,
     settle: async request => { expect(request).toEqual({ attemptId }); expect(durable).toBe(text); return status; },
     protectInput: async () => { expect(frozen).toBe(true); durable = text; },
@@ -24,7 +24,7 @@ it('flushes current input after freezing, keeps the view open until commit, and 
 
 it('does not acknowledge or close a retired frame after its delayed flush completes', async () => {
   const flush = Promise.withResolvers<void>(); let acknowledgements = 0; let closed = 0;
-  const view = new ReviewUpgradePreparation({
+  const view = new DocumentUpgradePreparation({
     poll: async () => ({ phase: 'preparing', attemptId: 'b'.repeat(43) }),
     settle: async () => { acknowledgements++; return { phase: 'committed', attemptId: 'b'.repeat(43) }; },
     protectInput: () => flush.promise, frozen: () => {}, close: async () => { closed++; },
@@ -36,7 +36,7 @@ it('does not acknowledge or close a retired frame after its delayed flush comple
 
 it('reports failed input protection to the service and keeps the failed view open', async () => {
   const attemptId = 'c'.repeat(43); let frozen = false; let closed = 0;
-  const view = new ReviewUpgradePreparation({
+  const view = new DocumentUpgradePreparation({
     poll: async () => ({ phase: 'preparing', attemptId }),
     settle: async request => { expect(request).toEqual({ attemptId, error: 'disk full' }); return { phase: 'canceled', attemptId }; },
     protectInput: async () => { throw new Error('disk full'); }, frozen: value => { frozen = value; }, close: async () => { closed++; },
@@ -61,8 +61,8 @@ it('drops native and host command tokens observed while frozen instead of replay
 it('protects local input once per frozen attempt while re-proving newer shared revisions', async () => {
   const attemptId = 'd'.repeat(43);
   let protections = 0, settlements = 0;
-  let status: UpgradeReviewStatus = { phase: 'preparing', attemptId, settlementRequired: true };
-  const view = new ReviewUpgradePreparation({ poll: async () => status,
+  let status: UpgradeDocumentStatus = { phase: 'preparing', attemptId, settlementRequired: true };
+  const view = new DocumentUpgradePreparation({ poll: async () => status,
     settle: async () => { settlements++; return status; },
     protectInput: async () => { protections++; }, frozen: () => {}, close: async () => {},
   });
@@ -75,8 +75,8 @@ it('protects local input once per frozen attempt while re-proving newer shared r
 
 it('continues observing cancellation while native app closure is still pending', async () => {
   const attemptId = 'e'.repeat(43); let frozen = false;
-  let status: UpgradeReviewStatus = { phase: 'preparing', attemptId };
-  const view = new ReviewUpgradePreparation({ poll: async () => status,
+  let status: UpgradeDocumentStatus = { phase: 'preparing', attemptId };
+  const view = new DocumentUpgradePreparation({ poll: async () => status,
     settle: async () => status, protectInput: async () => {},
     frozen: value => { frozen = value; }, close: async () => false,
   });

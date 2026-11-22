@@ -1,21 +1,21 @@
 import { useEffect, useRef, useState, type Dispatch, type RefObject, type SetStateAction } from 'react';
 import { setAnnotationName } from '../../../../packages/core/src/review-commands.js';
-import type { ReviewStateView } from '../../../../packages/core/src/review-model.js';
-import { createReviewStateSummary } from '../../../../packages/core/src/live-context.js';
+import type { DocumentStateView } from '../../../../packages/core/src/review-model.js';
+import { createDocumentStateSummary } from '../../../../packages/core/src/live-context.js';
 import type { ProductionSessionApi } from '../host/session-contracts.js';
 import type { GenerationRefreshStatus } from '../generation-status.js';
 import { authoringAuthorityFor, authoringAuthorityMatches, type AuthoringAuthority } from '../review/authoring-session.js';
-import { reviewExportPresentation, type ReviewExportResult } from '../review/DocumentActionsMenu.js';
+import { documentExportPresentation, type DocumentExportResult } from '../review/DocumentActionsMenu.js';
 
 interface ExportRequest {
   readonly authority: AuthoringAuthority;
   readonly confirmPossiblyStale?: true;
-  readonly resolve: (result: ReviewExportResult) => void;
+  readonly resolve: (result: DocumentExportResult) => void;
 }
 
-export function useAnnotationExport(api: ProductionSessionApi, state: ReviewStateView,
-  stateRef: RefObject<ReviewStateView>, generationRef: RefObject<number>,
-  setState: Dispatch<SetStateAction<ReviewStateView>>, refreshStatus: GenerationRefreshStatus) {
+export function useAnnotationExport(api: ProductionSessionApi, state: DocumentStateView,
+  stateRef: RefObject<DocumentStateView>, generationRef: RefObject<number>,
+  setState: Dispatch<SetStateAction<DocumentStateView>>, refreshStatus: GenerationRefreshStatus) {
   const [request, setRequest] = useState<ExportRequest | null>(null);
   const activeRef = useRef<ExportRequest | null>(null);
   const busyRef = useRef(false);
@@ -25,7 +25,7 @@ export function useAnnotationExport(api: ProductionSessionApi, state: ReviewStat
   const [error, setError] = useState<string>();
   const isCurrent = (captured: ExportRequest) => activeRef.current === captured
     && authoringAuthorityMatches(captured.authority, authoringAuthorityFor(stateRef.current, generationRef.current));
-  const finish = (captured: ExportRequest, result: ReviewExportResult) => {
+  const finish = (captured: ExportRequest, result: DocumentExportResult) => {
     if (activeRef.current !== captured) return;
     activeRef.current = null;
     busyRef.current = false;
@@ -42,7 +42,7 @@ export function useAnnotationExport(api: ProductionSessionApi, state: ReviewStat
     activeRef.current?.resolve({ kind: 'cancelled' });
     activeRef.current = null;
   }, []);
-  const open = (confirmPossiblyStale?: true): Promise<ReviewExportResult> => {
+  const open = (confirmPossiblyStale?: true): Promise<DocumentExportResult> => {
     if (activeRef.current) return Promise.resolve({ kind: 'cancelled' });
     return new Promise((resolve) => {
       const next: ExportRequest = {
@@ -61,7 +61,7 @@ export function useAnnotationExport(api: ProductionSessionApi, state: ReviewStat
     const captured = activeRef.current;
     if (!captured || busyRef.current) return;
     if (!isCurrent(captured)) { finish(captured, { kind: 'cancelled' }); return; }
-    const eligibility = reviewExportPresentation({ refreshStatus: refreshStatusRef.current, summary: createReviewStateSummary(stateRef.current) });
+    const eligibility = documentExportPresentation({ refreshStatus: refreshStatusRef.current, summary: createDocumentStateSummary(stateRef.current) });
     if (!eligibility.canExport || (eligibility.requiresStaleConfirmation && !captured.confirmPossiblyStale)) {
       setError(eligibility.message);
       return;
@@ -86,10 +86,10 @@ export function useAnnotationExport(api: ProductionSessionApi, state: ReviewStat
         stateRef.current = named;
         setState(named);
       }
-      const currentEligibility = reviewExportPresentation({
+      const currentEligibility = documentExportPresentation({
         // The acknowledged name command itself invalidates the bootstrap. Its transient
         // refresh must not block export; the host fence checks revision and generation.
-        refreshStatus: 'idle', summary: createReviewStateSummary(named),
+        refreshStatus: 'idle', summary: createDocumentStateSummary(named),
       });
       if (!currentEligibility.canExport || (currentEligibility.requiresStaleConfirmation && !captured.confirmPossiblyStale)) {
         setError(currentEligibility.message);

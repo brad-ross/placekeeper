@@ -6,8 +6,8 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { controlledWorkspaceSurfaceAction } from "../src/review/workspace-surface-policy.js";
 import {
-  handleReviewActionShortcut,
-  ReviewShell,
+  handleDocumentActionShortcut,
+  ReaderShell,
 } from "../src/app/ReviewShell.js";
 import { AnnotationList } from '../src/review/AnnotationList.js';
 import { AnnotationPeek } from '../src/review/AnnotationPeek.js';
@@ -19,7 +19,7 @@ import {
   FullAnnotationReaderMetadata,
 } from '../src/review/FullAnnotationReader.js';
 import {
-  ReviewChrome,
+  ReaderChrome,
   resolveTopBarMenuRequest,
   resolveZoomDraft,
   validPageNumber,
@@ -31,7 +31,7 @@ import {
   enabledMenuItems,
   menuRovingFocusIndex,
 } from '../src/review/menu-focus.js';
-import { ReviewIcon } from '../src/review/ReviewIcon.js';
+import { ReaderIcon } from '../src/review/ReviewIcon.js';
 import {
   ROW_ACTION_CONTAINER_NAME,
 } from '../src/review/RowActionGroup.js';
@@ -40,11 +40,11 @@ import {
   VIEWER_ZOOM_MIN_PERCENT,
   type ViewerControls,
 } from '../src/pdf/viewer-controls.js';
-import { createReviewState, type ReviewItem } from '../../../packages/core/src/review-model.js';
+import { createDocumentState, type Annotation } from '../../../packages/core/src/review-model.js';
 import { projectReconciliationDraftReader } from '../src/review/ReconciliationWorkspace.js';
 import {
-  INITIAL_REVIEW_SURFACE_STATE,
-  reduceReviewSurface,
+  INITIAL_READER_SURFACE_STATE,
+  reduceReaderSurface,
 } from '../src/review/review-surface-state.js';
 import {
   createReferenceWorkspaceLayout,
@@ -55,12 +55,12 @@ import {
   reduceReferenceNavigation,
 } from '../src/review/reference-navigation-state.js';
 
-const state = createReviewState({
+const state = createDocumentState({
   sessionId: 'layout-test',
   source: { fileId: 'file', digest: 'a'.repeat(64), byteLength: 10 },
 });
 
-const generatedState = createReviewState({
+const generatedState = createDocumentState({
   sessionId: 'generated-layout-test',
   source: { fileId: 'generated-file', digest: 'b'.repeat(64), byteLength: 10 },
   workflowMode: 'generated-output',
@@ -79,7 +79,7 @@ const layoutStyles = readCssSource(
 const neutralStyles = readCssSource(
   new URL('../src/app/neutral-chrome.css', import.meta.url));
 
-const ownedAnnotation: ReviewItem = {
+const ownedAnnotation: Annotation = {
   id: 'owned-highlight',
   kind: 'highlight',
   pageIndex: 3,
@@ -88,7 +88,7 @@ const ownedAnnotation: ReviewItem = {
   payload: { comment: 'Clarify the identifying variation behind this claim.' },
 };
 
-const unresolvedAnnotation: ReviewItem = {
+const unresolvedAnnotation: Annotation = {
   id: 'unresolved-highlight',
   kind: 'highlight',
   pageIndex: 0,
@@ -119,7 +119,7 @@ describe('review shell layout and accessibility contract', () => {
     const invoked: string[] = [];
     const prevented: string[] = [];
     for (const key of ['d', 'h', 'r', 'n']) {
-      expect(handleReviewActionShortcut({
+      expect(handleDocumentActionShortcut({
         key,
         altKey: true,
         shiftKey: true,
@@ -133,7 +133,7 @@ describe('review shell layout and accessibility contract', () => {
     expect(invoked).toEqual([]);
     expect(prevented).toEqual(['blocked:d', 'blocked:h', 'blocked:r', 'blocked:n']);
 
-    expect(handleReviewActionShortcut({
+    expect(handleDocumentActionShortcut({
       key: 'h',
       altKey: true,
       shiftKey: true,
@@ -238,7 +238,7 @@ describe('review shell layout and accessibility contract', () => {
 
   it('stacks generated-PDF status and command errors as top-left viewer toasts', () => {
     const html = renderToStaticMarkup(
-      <ReviewShell
+      <ReaderShell
         state={generatedState}
         generationRefreshStatus="reconciling"
         locationRestoreStatus="restoring"
@@ -254,7 +254,7 @@ describe('review shell layout and accessibility contract', () => {
         workspace={{}}
       >
         <div>Document canvas</div>
-      </ReviewShell>,
+      </ReaderShell>,
     );
 
     expect(html).toContain('data-review-toast-stack');
@@ -286,7 +286,7 @@ describe('review shell layout and accessibility contract', () => {
   ] as const)('uses a truthful generated status icon for $refresh / $restore', ({ refresh, restore, stale, icon, busy }) => {
     const currentState = { ...generatedState, workflow: { ...generatedState.workflow,
       freshness: stale ? 'possibly-stale' as const : 'current' as const } };
-    const html = renderToStaticMarkup(<ReviewShell state={currentState}
+    const html = renderToStaticMarkup(<ReaderShell state={currentState}
       generationRefreshStatus={refresh} locationRestoreStatus={restore}
       save={{}} selection={{ selectionUpdate: { kind: 'cleared', generation: 0 } }}
       authoring={{ onCommand: async () => currentState }} viewer={{}} workspace={{}} />);
@@ -309,7 +309,7 @@ describe('review shell layout and accessibility contract', () => {
       text: 'The rebuilt PDF could not be loaded safely. The last successful PDF remains reviewable.',
     },
   ])('shows genuine standard-workflow $refresh feedback in the top-left toast', ({ refresh, role, text }) => {
-    const html = renderToStaticMarkup(<ReviewShell state={state}
+    const html = renderToStaticMarkup(<ReaderShell state={state}
       generationRefreshStatus={refresh} locationRestoreStatus="idle"
       save={{}} selection={{ selectionUpdate: { kind: 'cleared', generation: 0 } }}
       authoring={{ onCommand: async () => state }} viewer={{}} workspace={{}} />);
@@ -322,7 +322,7 @@ describe('review shell layout and accessibility contract', () => {
 
   it('persistently exposes the focused PDF copy owner when selections compete', () => {
     const html = renderToStaticMarkup(
-      <ReviewShell
+      <ReaderShell
         state={state}
         save={{}}
         selection={{
@@ -354,7 +354,7 @@ describe('review shell layout and accessibility contract', () => {
         workspace={{}}
       >
         <div>Document canvas</div>
-      </ReviewShell>,
+      </ReaderShell>,
     );
 
     expect(html).toContain('data-pdf-copy-owner="reference"');
@@ -362,7 +362,7 @@ describe('review shell layout and accessibility contract', () => {
     expect(html).toContain('role="status"');
 
     const revokedHtml = renderToStaticMarkup(
-      <ReviewShell
+      <ReaderShell
         state={state}
         save={{}}
         selection={{
@@ -385,7 +385,7 @@ describe('review shell layout and accessibility contract', () => {
         }}
         viewer={{}}
         workspace={{}}
-      ><div>Document canvas</div></ReviewShell>,
+      ><div>Document canvas</div></ReaderShell>,
     );
     expect(revokedHtml).toContain('data-pdf-copy-owner="none"');
     expect(revokedHtml).toContain('Copy source: No PDF focused');
@@ -393,7 +393,7 @@ describe('review shell layout and accessibility contract', () => {
 
   it('floats a reversible outline expansion toggle opposite the active workspace navbar', () => {
     const html = renderToStaticMarkup(
-      <ReviewShell
+      <ReaderShell
         state={state}
         save={{}}
         selection={{
@@ -426,7 +426,7 @@ describe('review shell layout and accessibility contract', () => {
         }}
       >
         <div>Document canvas</div>
-      </ReviewShell>,
+      </ReaderShell>,
     );
 
     expect(html.match(/data-outline-expansion-toggle/g)).toHaveLength(1);
@@ -747,7 +747,7 @@ describe('review shell layout and accessibility contract', () => {
       mode: 'references',
     });
     expect(openedAction).toEqual({ type: 'open-workspace', mode: 'references' });
-    const opened = reduceReviewSurface(INITIAL_REVIEW_SURFACE_STATE, openedAction!);
+    const opened = reduceReaderSurface(INITIAL_READER_SURFACE_STATE, openedAction!);
     expect(opened).toMatchObject({ baseSurface: 'workspace', transientSurface: 'none' });
 
     const hiddenAction = controlledWorkspaceSurfaceAction({
@@ -756,7 +756,7 @@ describe('review shell layout and accessibility contract', () => {
       transientSurface: opened.transientSurface,
       mode: 'references',
     });
-    expect(reduceReviewSurface(opened, hiddenAction!)).toMatchObject({
+    expect(reduceReaderSurface(opened, hiddenAction!)).toMatchObject({
       baseSurface: 'reading',
       transientSurface: 'none',
     });
@@ -764,7 +764,7 @@ describe('review shell layout and accessibility contract', () => {
 
   it('keeps selection actions available beside an externally opened workspace', () => {
     const html = renderToStaticMarkup(
-      <ReviewShell
+      <ReaderShell
         state={state}
         save={{}}
         selection={{
@@ -791,7 +791,7 @@ describe('review shell layout and accessibility contract', () => {
         }}
       >
         <div>Document canvas</div>
-      </ReviewShell>,
+      </ReaderShell>,
     );
     expect(html).toContain('data-tools-workspace-open="true"');
     expect(html).toContain('aria-label="Selection actions"');
@@ -800,7 +800,7 @@ describe('review shell layout and accessibility contract', () => {
 
   it('shows an insertion caret without exposing an insertion action', () => {
     const html = renderToStaticMarkup(
-      <ReviewShell
+      <ReaderShell
         state={state}
         save={{}}
         selection={{
@@ -821,7 +821,7 @@ describe('review shell layout and accessibility contract', () => {
         workspace={{}}
       >
         <div>Document canvas</div>
-      </ReviewShell>,
+      </ReaderShell>,
     );
 
     expect(html).toContain('data-review-insertion-caret="true"');
@@ -837,7 +837,7 @@ describe('review shell layout and accessibility contract', () => {
 
   it('keeps the insertion caret visible beside an open workspace', () => {
     const html = renderToStaticMarkup(
-      <ReviewShell
+      <ReaderShell
         state={state}
         save={{}}
         selection={{
@@ -860,7 +860,7 @@ describe('review shell layout and accessibility contract', () => {
         }}
       >
         <div>Document canvas</div>
-      </ReviewShell>,
+      </ReaderShell>,
     );
 
     expect(html).toContain('data-tools-workspace-open="true"');
@@ -869,7 +869,7 @@ describe('review shell layout and accessibility contract', () => {
 
   it('yields the modal layer to save options without unmounting nested review state', () => {
     const html = renderToStaticMarkup(
-      <ReviewShell
+      <ReaderShell
         state={state}
         save={{
           saveOptionsOpen: true,
@@ -884,7 +884,7 @@ describe('review shell layout and accessibility contract', () => {
         workspace={{}}
       >
         <div>Document canvas</div>
-      </ReviewShell>,
+      </ReaderShell>,
     );
 
     expect(html).toMatch(/data-review-nested-host="true" hidden="" inert=""/u);
@@ -909,7 +909,7 @@ describe('review shell layout and accessibility contract', () => {
   };
 
   const renderChrome = (pageReady: boolean, fitWidthReady = false) => renderToStaticMarkup(
-    <ReviewChrome
+    <ReaderChrome
       documentTitle="paper.pdf"
       controls={viewerControls}
       viewerState={pageReady ? viewerControls.snapshot() : {
@@ -932,7 +932,7 @@ describe('review shell layout and accessibility contract', () => {
 
   it('places the document Copy Link control after the page box and before zoom', () => {
     const html = renderToStaticMarkup(
-      <ReviewChrome
+      <ReaderChrome
         documentTitle="paper.pdf"
         controls={viewerControls}
         viewerState={viewerControls.snapshot()}
@@ -964,7 +964,7 @@ describe('review shell layout and accessibility contract', () => {
   it('keeps review icons decorative and button labels authoritative', () => {
     const html = renderToStaticMarkup(
       <button type="button" aria-label="Previous page">
-        <ReviewIcon name="chevron-left" />
+        <ReaderIcon name="chevron-left" />
       </button>,
     );
 
@@ -976,7 +976,7 @@ describe('review shell layout and accessibility contract', () => {
 
   it('keeps document navigation on the left and edit history with zoom on the right', () => {
     const html = renderToStaticMarkup(
-      <ReviewChrome
+      <ReaderChrome
         documentTitle="paper.pdf"
         controls={viewerControls}
         viewerState={viewerControls.snapshot()}
@@ -1007,7 +1007,7 @@ describe('review shell layout and accessibility contract', () => {
 
   it('keeps document-history controls mounted but inert while navigation is pending', () => {
     const html = renderToStaticMarkup(
-      <ReviewChrome
+      <ReaderChrome
         documentTitle="paper.pdf"
         controls={viewerControls}
         viewerState={viewerControls.snapshot()}
@@ -1044,7 +1044,7 @@ describe('review shell layout and accessibility contract', () => {
 
   it('measures every fixed identity and icon footprint in the sizing rack', () => {
     const html = renderToStaticMarkup(
-      <ReviewChrome
+      <ReaderChrome
         documentTitle="A very long paper title that must be allowed to truncate.pdf"
         savePendingDestination
         codexContext={{ status: 'unbound' }}
@@ -1338,7 +1338,7 @@ describe('review shell layout and accessibility contract', () => {
 
   it('exposes keyboard-equivalent controls, live status, and state-preserving drawer semantics', () => {
     const html = renderToStaticMarkup(
-      <ReviewShell
+      <ReaderShell
         state={state}
         documentTitle="paper.pdf"
         save={{}}
@@ -1366,7 +1366,7 @@ describe('review shell layout and accessibility contract', () => {
         workspace={{}}
       >
         <div>Document canvas</div>
-      </ReviewShell>,
+      </ReaderShell>,
     );
 
     expect(html).toContain('role="toolbar"');
@@ -1434,7 +1434,7 @@ describe('review shell layout and accessibility contract', () => {
     layout = reduceReferenceWorkspaceLayout(layout, { type: 'show-references' });
     layout = reduceReferenceWorkspaceLayout(layout, { type: 'show-right-workspace' });
     const html = renderToStaticMarkup(
-      <ReviewShell
+      <ReaderShell
         state={state}
         save={{}}
         selection={{
@@ -1448,7 +1448,7 @@ describe('review shell layout and accessibility contract', () => {
           referenceLayoutState: layout,
           referenceTabs: [{ identity: 'reference', label: 'Reference', pageContext: 'Page 2' }],
         }}
-      ><div>Document canvas</div></ReviewShell>,
+      ><div>Document canvas</div></ReaderShell>,
     );
     expect(html).toContain('data-reference-layout="wide-split"');
     expect(html).toContain('aria-label="Outline, search, and annotations"');
@@ -1468,7 +1468,7 @@ describe('review shell layout and accessibility contract', () => {
     });
 
     const html = renderToStaticMarkup(
-      <ReviewShell
+      <ReaderShell
         state={state}
         save={{}}
         selection={{
@@ -1482,7 +1482,7 @@ describe('review shell layout and accessibility contract', () => {
           referenceLayoutState: layout,
           referenceTabs: [{ identity: 'reference', label: 'Reference', pageContext: 'Page 2' }],
         }}
-      ><div>Document canvas</div></ReviewShell>,
+      ><div>Document canvas</div></ReaderShell>,
     );
 
     expect(layout.bottomReferenceHeight).toBe(510);
@@ -1514,7 +1514,7 @@ describe('review shell layout and accessibility contract', () => {
       { type: 'open-reference', target: originalTarget, settledLocation },
     );
     const html = renderToStaticMarkup(
-      <ReviewShell
+      <ReaderShell
         state={state}
         save={{}}
         selection={{
@@ -1530,7 +1530,7 @@ describe('review shell layout and accessibility contract', () => {
           referenceReturn: { tabIdentity: 'lemma-origin', available: true, pending: false },
           onReferenceReturn: () => undefined,
         }}
-      ><div>Document canvas</div></ReviewShell>,
+      ><div>Document canvas</div></ReaderShell>,
     );
 
     expect(html.match(/data-reference-return=/g)).toHaveLength(1);
@@ -1739,7 +1739,7 @@ describe('review shell layout and accessibility contract', () => {
     if (kind === 'wide-right') layout = reduceReferenceWorkspaceLayout(layout, { type: 'move-references-right' });
     if (kind === 'narrow-unified') layout = reduceReferenceWorkspaceLayout(layout, { type: 'set-regime', regime: 'narrow' });
     const html = renderToStaticMarkup(
-      <ReviewShell
+      <ReaderShell
         state={state}
         save={{}}
         selection={{
@@ -1753,7 +1753,7 @@ describe('review shell layout and accessibility contract', () => {
           referenceLayoutState: layout,
           referenceTabs: [{ identity: 'reference', label: 'Reference', pageContext: 'Page 2' }],
         }}
-      ><div>Document canvas</div></ReviewShell>,
+      ><div>Document canvas</div></ReaderShell>,
     );
 
     expect(html).toContain(`data-reference-layout="${kind}"`);
@@ -1771,7 +1771,7 @@ describe('review shell layout and accessibility contract', () => {
 
   it('keeps annotations task-first and source annotations explicitly read-only', () => {
     const html = renderToStaticMarkup(
-      <ReviewShell
+      <ReaderShell
         state={state}
         documentTitle="paper.pdf"
         existingAnnotations={{
@@ -1822,7 +1822,7 @@ describe('review shell layout and accessibility contract', () => {
         }}
       >
         <div>Document canvas</div>
-      </ReviewShell>,
+      </ReaderShell>,
     );
 
     expect(html).toContain('data-existing-annotations-state="ready"');
@@ -1850,7 +1850,7 @@ describe('review shell layout and accessibility contract', () => {
     'orders %s attention before one document-ordered owned and source population without duplicating unresolved items',
     (workflowMode) => {
       const html = renderToStaticMarkup(
-        <ReviewShell
+        <ReaderShell
           state={{
             ...generatedState,
             workflow: { ...generatedState.workflow, mode: workflowMode },
@@ -1907,7 +1907,7 @@ describe('review shell layout and accessibility contract', () => {
           workspace={{}}
         >
           <div>Document canvas</div>
-        </ReviewShell>,
+        </ReaderShell>,
       );
 
       const annotations = html.indexOf('<section class="annotation-drawer__owned"');
@@ -1938,7 +1938,7 @@ describe('review shell layout and accessibility contract', () => {
 
   it('keeps Annotations as the stable empty core and omits optional sections', () => {
     const html = renderToStaticMarkup(
-      <ReviewShell
+      <ReaderShell
         state={state}
         documentTitle="paper.pdf"
         existingAnnotations={{ status: 'empty', generation: 1, items: [] }}
@@ -1957,7 +1957,7 @@ describe('review shell layout and accessibility contract', () => {
         }}
       >
         <div>Document canvas</div>
-      </ReviewShell>,
+      </ReaderShell>,
     );
 
     expect(html).toContain('aria-label="Annotations"');
@@ -1973,7 +1973,7 @@ describe('review shell layout and accessibility contract', () => {
 
   it('keeps populated Annotations available and suppresses injected outline context for an empty outline', () => {
     const html = renderToStaticMarkup(
-      <ReviewShell
+      <ReaderShell
         state={{ ...state, items: [ownedAnnotation] }}
         existingAnnotations={{
           status: 'ready',
@@ -2005,7 +2005,7 @@ describe('review shell layout and accessibility contract', () => {
         }}
       >
         <div>Document canvas</div>
-      </ReviewShell>,
+      </ReaderShell>,
     );
 
     expect(html).not.toContain('id="workspace-mode-outline"');
@@ -2022,7 +2022,7 @@ describe('review shell layout and accessibility contract', () => {
 
   it('does not hide Outline for a stale empty result from another document generation', () => {
     const html = renderToStaticMarkup(
-      <ReviewShell
+      <ReaderShell
         state={state}
         save={{}}
         selection={{
@@ -2038,7 +2038,7 @@ describe('review shell layout and accessibility contract', () => {
         }}
       >
         <div>Document canvas</div>
-      </ReviewShell>,
+      </ReaderShell>,
     );
 
     expect(html).toContain('id="workspace-mode-outline"');
@@ -2048,7 +2048,7 @@ describe('review shell layout and accessibility contract', () => {
 
   it('fails viewer controls safely when capabilities are absent', () => {
     const html = renderToStaticMarkup(
-      <ReviewShell
+      <ReaderShell
         state={state}
         documentTitle="paper.pdf"
         save={{}}
@@ -2062,7 +2062,7 @@ describe('review shell layout and accessibility contract', () => {
         workspace={{}}
       >
         <div>Document canvas</div>
-      </ReviewShell>,
+      </ReaderShell>,
     );
 
     expect(html).toContain('Page controls become available when PDF navigation is ready.');

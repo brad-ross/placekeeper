@@ -1,4 +1,4 @@
-import { ReviewTooltipButton } from '../review/ReviewTooltipButton.js';
+import { ReaderTooltipButton } from '../review/ReviewTooltipButton.js';
 import { classifyPdfExternalLink } from './pdf-external-link.js';
 import {
   PdfAnnotationBorderStyle,
@@ -242,7 +242,7 @@ export function PdfLinkControl({
       ...linkBorderStyle(annotation),
     },
   };
-  return externalUrl === null ? <button {...buttonProps} title={buttonProps.title} /> : <ReviewTooltipButton {...buttonProps}
+  return externalUrl === null ? <button {...buttonProps} title={buttonProps.title} /> : <ReaderTooltipButton {...buttonProps}
     label={`Open web link: ${externalUrl}`} tooltip={externalUrl} />;
 }
 

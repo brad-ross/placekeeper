@@ -12,20 +12,20 @@ import {
   type ChromeRuntimeHostMessage,
 } from "../../../../packages/core/src/chrome-native-runtime-protocol.js";
 import {
-  REVIEW_RUNTIME_VERSION,
-  ReviewExportConflictError,
-  sanitizeChromeReviewRuntimeResponse,
-  type ReviewRuntimeBrokerMethod,
+  DOCUMENT_RUNTIME_VERSION,
+  DocumentExportConflictError,
+  sanitizeChromeDocumentRuntimeResponse,
+  type DocumentRuntimeBrokerMethod,
 } from "../../../../packages/core/src/review-runtime-protocol.js";
 import { deadlineWasSubstantiallyDelayed } from "../../../../packages/core/src/suspend-aware-deadline.js";
 import { CHROME_EXTENSION_ORIGIN } from "./chrome-handoff.js";
 import { canonicalJson } from "../runtime/canonical-json.js";
 import { ChromeRuntimeOperationJournal } from "./runtime-operation-journal.js";
-import type { ReviewInteractionAttachment } from "../sessions/review-interactions.js";
+import type { DocumentInteractionAttachment } from "../sessions/review-interactions.js";
 export { ChromeRuntimeOperationJournal } from "./runtime-operation-journal.js";
 
 const SHA256 = /^[a-f0-9]{64}$/u;
-const NON_IDEMPOTENT_METHODS = new Set<ReviewRuntimeBrokerMethod>([
+const NON_IDEMPOTENT_METHODS = new Set<DocumentRuntimeBrokerMethod>([
   "command", "beginInteraction", "finalizeInteraction", "releaseInteraction", "acknowledgeInteraction",
   "chooseCopy", "chooseFolder", "chooseOriginal", "retrySave", "locateSave",
   "exportReviewedCopy",
@@ -61,7 +61,7 @@ export interface ChromeRuntimeStageRequest {
   readonly initialWorkflowMode?: "generated-output";
 }
 
-export interface ChromeRuntimeStagedReview {
+export interface ChromeRuntimeStagedDocument {
   readonly canonicalKey: string;
   readonly projection: ChromeRuntimeProjection;
 }
@@ -72,12 +72,12 @@ export interface ChromeRuntimeRecovery {
   choose(
     decision: "resume" | "discard" | "fork",
     operationId: string,
-  ): Promise<ChromeRuntimeStagedReview>;
+  ): Promise<ChromeRuntimeStagedDocument>;
 }
 
 export interface ChromeRuntimeSourceSink {
   append(bytes: Uint8Array, signal?: AbortSignal): Promise<void>;
-  finish(claim?: { readonly sha256: string; readonly byteLength: number }, signal?: AbortSignal): Promise<ChromeRuntimeStagedReview | ChromeRuntimeRecovery>;
+  finish(claim?: { readonly sha256: string; readonly byteLength: number }, signal?: AbortSignal): Promise<ChromeRuntimeStagedDocument | ChromeRuntimeRecovery>;
   cancel(): Promise<void>;
 }
 
@@ -100,7 +100,7 @@ export interface ChromeRuntimeBackend {
   current(canonicalKey: string, signal?: AbortSignal): Promise<ChromeRuntimeProjection>;
   invoke(
     canonicalKey: string,
-    method: ReviewRuntimeBrokerMethod,
+    method: DocumentRuntimeBrokerMethod,
     payload: unknown,
     operation: RuntimeOperation,
     signal?: AbortSignal,
@@ -110,13 +110,13 @@ export interface ChromeRuntimeBackend {
   release(canonicalKey: string): Promise<void>;
   interaction?(
     canonicalKey: string,
-    attachment: ReviewInteractionAttachment,
+    attachment: DocumentInteractionAttachment,
     action: "begin" | "finalize" | "release" | "acknowledge",
     payload: unknown,
     presentationLease?: string,
   ): Promise<unknown>;
-  registerInteraction?(canonicalKey: string, authenticatedOwnerKey: string): ReviewInteractionAttachment;
-  disconnectInteraction?(canonicalKey: string, attachment: ReviewInteractionAttachment): void;
+  registerInteraction?(canonicalKey: string, authenticatedOwnerKey: string): DocumentInteractionAttachment;
+  disconnectInteraction?(canonicalKey: string, attachment: DocumentInteractionAttachment): void;
 }
 
 export interface ChromeRuntimeAggregateQuotaOptions {
@@ -204,7 +204,7 @@ export class ChromeRuntimeServiceAuthority implements ChromeRuntimeBackend {
   }
   invoke(
     canonicalKey: string,
-    method: ReviewRuntimeBrokerMethod,
+    method: DocumentRuntimeBrokerMethod,
     payload: unknown,
     operation: RuntimeOperation,
     signal?: AbortSignal,
@@ -225,7 +225,7 @@ export class ChromeRuntimeServiceAuthority implements ChromeRuntimeBackend {
   release(canonicalKey: string): Promise<void> { return this.#delegate.release(canonicalKey); }
   interaction(
     canonicalKey: string,
-    attachment: ReviewInteractionAttachment,
+    attachment: DocumentInteractionAttachment,
     action: "begin" | "finalize" | "release" | "acknowledge",
     payload: unknown,
     presentationLease?: string,
@@ -234,16 +234,16 @@ export class ChromeRuntimeServiceAuthority implements ChromeRuntimeBackend {
       ? Promise.resolve({ status: "unauthorized" })
       : this.#delegate.interaction(canonicalKey, attachment, action, payload, presentationLease);
   }
-  registerInteraction(canonicalKey: string, authenticatedOwnerKey: string): ReviewInteractionAttachment {
+  registerInteraction(canonicalKey: string, authenticatedOwnerKey: string): DocumentInteractionAttachment {
     if (this.#delegate.registerInteraction === undefined) throw new Error("interaction-unavailable");
     return this.#delegate.registerInteraction(canonicalKey, authenticatedOwnerKey);
   }
-  disconnectInteraction(canonicalKey: string, attachment: ReviewInteractionAttachment): void {
+  disconnectInteraction(canonicalKey: string, attachment: DocumentInteractionAttachment): void {
     this.#delegate.disconnectInteraction?.(canonicalKey, attachment);
   }
 }
 
-export interface CanonicalReviewResolution<T> {
+export interface CanonicalDocumentResolution<T> {
   readonly review: T;
   readonly canonicalKey: string;
   readonly joined: boolean;
@@ -251,28 +251,28 @@ export interface CanonicalReviewResolution<T> {
 
 /** Single-flight resolution keyed by all three service-verified coordinates.
  * A source URL identity by itself can never join a review. */
-export class ChromeCanonicalReviewIndex<T> {
-  readonly #reviews = new Map<string, Promise<T>>();
+export class ChromeCanonicalDocumentIndex<T> {
+  readonly #documentSessions = new Map<string, Promise<T>>();
 
-  get size(): number { return this.#reviews.size; }
+  get size(): number { return this.#documentSessions.size; }
 
-  async resolve(input: { readonly sourceIdentity: string; readonly sha256: string; readonly generation: number }, create: () => Promise<T>): Promise<CanonicalReviewResolution<T>> {
+  async resolve(input: { readonly sourceIdentity: string; readonly sha256: string; readonly generation: number }, create: () => Promise<T>): Promise<CanonicalDocumentResolution<T>> {
     if (!SHA256.test(input.sourceIdentity) || !SHA256.test(input.sha256) ||
       !Number.isSafeInteger(input.generation) || input.generation < 1) throw new Error("invalid-canonical-identity");
     const canonicalKey = `${input.sourceIdentity}:${input.sha256}:${input.generation}`;
-    const existing = this.#reviews.get(canonicalKey);
+    const existing = this.#documentSessions.get(canonicalKey);
     if (existing !== undefined) return { review: await existing, canonicalKey, joined: true };
     const pending = create();
-    this.#reviews.set(canonicalKey, pending);
+    this.#documentSessions.set(canonicalKey, pending);
     try {
       return { review: await pending, canonicalKey, joined: false };
     } catch (error) {
-      if (this.#reviews.get(canonicalKey) === pending) this.#reviews.delete(canonicalKey);
+      if (this.#documentSessions.get(canonicalKey) === pending) this.#documentSessions.delete(canonicalKey);
       throw error;
     }
   }
 
-  delete(canonicalKey: string): void { this.#reviews.delete(canonicalKey); }
+  delete(canonicalKey: string): void { this.#documentSessions.delete(canonicalKey); }
 }
 
 interface AcquisitionState {
@@ -326,10 +326,10 @@ export class ChromeRuntimeConnection {
   #connectionId: string | undefined;
   #acquisition: AcquisitionState | undefined;
   #resource: ResourceState | undefined;
-  #staged: ChromeRuntimeStagedReview | undefined;
+  #staged: ChromeRuntimeStagedDocument | undefined;
   #recovery: ChromeRuntimeRecovery | undefined;
   #idleTimer: ReturnType<typeof setTimeout> | undefined;
-  #interactionAttachment: ReviewInteractionAttachment | undefined;
+  #interactionAttachment: DocumentInteractionAttachment | undefined;
   #portHeld = false;
 
   constructor(options: ChromeRuntimeConnectionOptions) {
@@ -360,7 +360,7 @@ export class ChromeRuntimeConnection {
     const rawRecord = typeof raw === "object" && raw !== null && !Array.isArray(raw)
       ? raw as Record<string, unknown> : undefined;
     if (rawRecord?.protocolVersion !== CHROME_RUNTIME_PROTOCOL_VERSION ||
-      (rawRecord.type === "hello" && rawRecord.reviewRuntimeVersion !== REVIEW_RUNTIME_VERSION)) {
+      (rawRecord.type === "hello" && rawRecord.reviewRuntimeVersion !== DOCUMENT_RUNTIME_VERSION)) {
       return this.#versionFailure(typeof rawRecord?.requestId === "string" ? rawRecord.requestId : undefined);
     }
     const message = parseChromeRuntimeExtensionMessage(raw);
@@ -424,7 +424,7 @@ export class ChromeRuntimeConnection {
     this.#connectionId = message.connectionId;
     this.#phase = "acquiring";
     this.#armIdleDeadline();
-    return { type: "hello-ack", reviewRuntimeVersion: REVIEW_RUNTIME_VERSION, protocol: CHROME_RUNTIME_PROTOCOL, protocolVersion: 2, connectionId: message.connectionId, leaseMs: this.#idleLeaseMs };
+    return { type: "hello-ack", reviewRuntimeVersion: DOCUMENT_RUNTIME_VERSION, protocol: CHROME_RUNTIME_PROTOCOL, protocolVersion: 2, connectionId: message.connectionId, leaseMs: this.#idleLeaseMs };
   }
 
   async #acquisitionMessage(message: Extract<ChromeRuntimeExtensionMessage, { readonly lane: "acquisition" }>): Promise<ChromeRuntimeHostMessage> {
@@ -490,7 +490,7 @@ export class ChromeRuntimeConnection {
       return this.#failure("acquisition", "out-of-order", message.requestId);
     }
     const sha256 = acquisition.digest.digest("hex");
-    let staged: ChromeRuntimeStagedReview | undefined;
+    let staged: ChromeRuntimeStagedDocument | undefined;
     try {
       const finished = await acquisition.sink.finish(
         acquisition.disposition === "remote-temporary" ? { sha256, byteLength: acquisition.byteLength } : undefined,
@@ -667,11 +667,11 @@ export class ChromeRuntimeConnection {
             message.payload,
             this.#presentationLease,
           );
-      const payload = sanitizeChromeReviewRuntimeResponse(message.method, result);
+      const payload = sanitizeChromeDocumentRuntimeResponse(message.method, result);
       if (payload === undefined) return this.#failure("runtime", "invalid-service-response", message.requestId);
       return { type: "result", lane: "runtime", protocolVersion: 2, connectionId: this.#connectionId!, requestId: message.requestId, method: message.method, payload };
     } catch (error) {
-      return this.#failure("runtime", error instanceof ReviewExportConflictError ? "export-conflict" : error instanceof Error && error.message === "idempotency-conflict" ? "idempotency-conflict" : "operation-rejected", message.requestId);
+      return this.#failure("runtime", error instanceof DocumentExportConflictError ? "export-conflict" : error instanceof Error && error.message === "idempotency-conflict" ? "idempotency-conflict" : "operation-rejected", message.requestId);
     }
   }
 

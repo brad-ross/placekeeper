@@ -1,14 +1,14 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { createReviewState } from '../../../packages/core/src/review-model.js';
+import { createDocumentState } from '../../../packages/core/src/review-model.js';
 import {
   attachmentOrderedInteractionTransport,
   authoringAuthorityFor,
-  beginReviewInteraction,
-  type ReviewInteractionHandle,
-  type ReviewInteractionReceipt,
+  beginDocumentInteraction,
+  type DocumentInteractionHandle,
+  type DocumentInteractionReceipt,
 } from '../src/review/authoring-session.js';
-import { ReviewInteractions } from '../../service/src/sessions/review-interactions.js';
+import { DocumentInteractions } from '../../service/src/sessions/review-interactions.js';
 import {
   AuthoringAcknowledgementQueue,
   canonicalStateForFinalizedInteraction,
@@ -17,7 +17,7 @@ import {
   releaseDeletedAuthoringInteraction,
 } from '../src/review/use-authoring-session.js';
 
-function receipt(interactionToken: string): ReviewInteractionReceipt {
+function receipt(interactionToken: string): DocumentInteractionReceipt {
   return {
     status: 'finalized',
     interactionToken,
@@ -29,8 +29,8 @@ function receipt(interactionToken: string): ReviewInteractionReceipt {
 
 function interaction(
   interactionToken: string,
-  overrides: Partial<ReviewInteractionHandle> = {},
-): ReviewInteractionHandle {
+  overrides: Partial<DocumentInteractionHandle> = {},
+): DocumentInteractionHandle {
   return {
     interactionToken,
     generation: 4,
@@ -43,8 +43,8 @@ function interaction(
   };
 }
 
-function reviewState(documentGeneration: number, sessionId = 'canonical-session') {
-  return createReviewState({
+function documentState(documentGeneration: number, sessionId = 'canonical-session') {
+  return createDocumentState({
     sessionId,
     source: { fileId: `paper-${documentGeneration}`, digest: String(documentGeneration).repeat(64), byteLength: 12 },
     documentGeneration,
@@ -54,7 +54,7 @@ function reviewState(documentGeneration: number, sessionId = 'canonical-session'
 describe('authoring interaction lifecycle ownership', () => {
   it('keeps finalized authoring open until the canonical state reaches its receipt revision', () => {
     const finalized = receipt('canonical-state-gate');
-    const state = { ...reviewState(finalized.generation), revision: finalized.reviewRevision - 1 };
+    const state = { ...documentState(finalized.generation), revision: finalized.reviewRevision - 1 };
     const authority = authoringAuthorityFor(state, finalized.generation);
 
     expect(canonicalStateForFinalizedInteraction(
@@ -76,8 +76,8 @@ describe('authoring interaction lifecycle ownership', () => {
     'settles a finalized %s receipt from authoritative same-session successor state',
     (outcome) => {
       const finalized = { ...receipt(`successor-${outcome}`), outcome };
-      const source = reviewState(finalized.generation);
-      const successor = reviewState(finalized.generation + 1);
+      const source = documentState(finalized.generation);
+      const successor = documentState(finalized.generation + 1);
 
       expect(canonicalStateForFinalizedInteraction(
         successor,
@@ -90,8 +90,8 @@ describe('authoring interaction lifecycle ownership', () => {
 
   it('never binds a receipt to an unrelated successor that arrived before settlement', () => {
     const finalized = receipt('unrelated-successor-gate');
-    const source = reviewState(finalized.generation);
-    const unrelated = reviewState(finalized.generation + 1, 'another-session');
+    const source = documentState(finalized.generation);
+    const unrelated = documentState(finalized.generation + 1, 'another-session');
 
     expect(canonicalStateForFinalizedInteraction(
       unrelated,
@@ -105,8 +105,8 @@ describe('authoring interaction lifecycle ownership', () => {
     'settles a %s receipt when unrelated state won the race before receipt delivery',
     (outcome) => {
       const finalized = { ...receipt(`pre-receipt-replacement-${outcome}`), outcome };
-      const source = reviewState(finalized.generation);
-      const unrelated = reviewState(finalized.generation + 1, 'replacement-session');
+      const source = documentState(finalized.generation);
+      const unrelated = documentState(finalized.generation + 1, 'replacement-session');
       const announce = vi.fn();
       const close = vi.fn();
 
@@ -128,8 +128,8 @@ describe('authoring interaction lifecycle ownership', () => {
 
   it('never consumes replaced source state at the receipt generation', () => {
     const finalized = receipt('replaced-source-gate');
-    const source = { ...reviewState(finalized.generation), revision: finalized.reviewRevision };
-    const replaced = createReviewState({
+    const source = { ...documentState(finalized.generation), revision: finalized.reviewRevision };
+    const replaced = createDocumentState({
       sessionId: source.sessionId,
       source: { fileId: 'replacement', digest: 'f'.repeat(64), byteLength: 18 },
       documentGeneration: finalized.generation,
@@ -229,7 +229,7 @@ describe('authoring interaction lifecycle ownership', () => {
 
   it('reacquires the same open editor on a real replacement attachment before finalizing', async () => {
     const sessionId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
-    const broker = new ReviewInteractions({ currentGeneration: () => 4 });
+    const broker = new DocumentInteractions({ currentGeneration: () => 4 });
     let attachment = broker.register(sessionId, 'browser-view');
     const authenticated = (input: { interactionToken: string; order: number }) => ({
       ...input,
@@ -250,7 +250,7 @@ describe('authoring interaction lifecycle ownership', () => {
       releaseInteraction: (input) => broker.release(authenticated(input)),
       acknowledgeInteraction: (input) => broker.acknowledge(authenticated(input)),
     });
-    const active = await beginReviewInteraction(
+    const active = await beginDocumentInteraction(
       transport, 4, 'open-editor-token', 1, '00000000-0000-4000-8000-000000000446',
     );
     expect(broker.held(sessionId)).toBe(true);
@@ -278,7 +278,7 @@ describe('authoring interaction lifecycle ownership', () => {
 
 import { requireProtectedAuthoringInput, settleAuthoringBeforeClose } from '../src/review/use-authoring-session.js';
 it('close rejects a rejected new put-draft even if its prior protected draft remains', () => {
-  const state = { ...reviewState(4), pendingDrafts: [{ id: 'draft-1', text: 'old acknowledged input' }] } as unknown as ReturnType<typeof reviewState>;
+  const state = { ...documentState(4), pendingDrafts: [{ id: 'draft-1', text: 'old acknowledged input' }] } as unknown as ReturnType<typeof documentState>;
   expect(() => requireProtectedAuthoringInput(state, 'draft-1', 'latest input', false)).toThrow('not acknowledged');
   expect(() => requireProtectedAuthoringInput(state, 'draft-1', 'old acknowledged input', false)).toThrow('not acknowledged');
 });

@@ -33,7 +33,7 @@ import type {
   ReferenceReturnControlState,
 } from './ReferenceWorkspace.js';
 import type { PlacekeeperLinkLocation } from '../../../../packages/core/src/placekeeper-link.js';
-import type { ReviewLocationHistoryPort } from './review-location-history.js';
+import type { DocumentLocationHistoryPort } from './review-location-history.js';
 import {
   annotationReaderIdentityMatches,
   type AnnotationReaderIdentity,
@@ -166,7 +166,7 @@ export interface NavigationCoordinatorDependencies {
   /** Active document page count used to rehydrate generation-free destinations. */
   readonly getPageCount: () => number;
   /** May become available when a host's loading shell finishes bootstrapping. */
-  readonly locationHistory?: ReviewLocationHistoryPort | undefined;
+  readonly locationHistory?: DocumentLocationHistoryPort | undefined;
   readonly resolvePortableItem?: (itemId: string) => {
     readonly pageIndex: number;
     readonly point: PdfNaturalPoint | null;

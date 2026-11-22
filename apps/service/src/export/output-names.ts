@@ -1,6 +1,6 @@
 import { basename, extname } from "node:path";
 
-export function reviewedPdfFilename(
+export function annotatedPdfFilename(
   originalPath: string,
   collisionIndex = 0,
 ): string {

@@ -1,11 +1,11 @@
-import type { UpgradeReviewParticipants } from "../host/upgrade-review-participants.js";
-import { isUpgradeReviewSettlement } from "../../../../packages/core/src/upgrade-review-protocol.js";
+import type { UpgradeDocumentParticipants } from "../host/upgrade-review-participants.js";
+import { isUpgradeDocumentSettlement } from "../../../../packages/core/src/upgrade-review-protocol.js";
 import {
-  ReviewExportConflictError,
+  DocumentExportConflictError,
   isReadingLocationResolutionRequest,
-  isReviewExportFence,
+  isDocumentExportFence,
   isSaveDestinationConfirmation,
-  type ReviewExportFence,
+  type DocumentExportFence,
 } from "../../../../packages/core/src/review-runtime-protocol.js";
 import { rejectedDestinationName } from "../saving/pdf-save-coordinator.js";
 import { createHash, randomBytes } from "node:crypto";
@@ -18,17 +18,17 @@ import {
   digestSecretHex,
   validateRequestSecurity,
 } from "../../../../packages/core/src/session-security.js";
-import type { ReviewCommand } from "../../../../packages/core/src/review-model.js";
+import type { DocumentCommand } from "../../../../packages/core/src/review-model.js";
 import {
-  InvalidReviewCommandError,
-  ReviewConflictError,
-  ReviewDraftConflictError,
+  InvalidDocumentCommandError,
+  DocumentConflictError,
+  DocumentDraftConflictError,
 } from "../../../../packages/core/src/review-reducer.js";
 import { isContained } from "../files/file-capabilities.js";
 import {
   isRecoveryDecision,
   RecoveryOfferUnavailableError,
-  ReviewGenerationConflictError,
+  DocumentGenerationConflictError,
   type RecoveryOfferIdentity,
   type SessionBroker,
 } from "../sessions/session-broker.js";
@@ -36,7 +36,7 @@ import type { PdfSaveCoordinator } from "../saving/pdf-save-coordinator.js";
 import type { DaemonLifecycleCoordinator } from "../host/daemon-lifecycle.js";
 import { ExportCoordinatorError, type ExportCoordinator } from "../export/export-coordinator.js";
 import { openPlacekeeperLink, parsePlacekeeperReadableViewRoute } from "../links/placekeeper-link.js";
-import type { ReviewInteractionAttachment } from "../sessions/review-interactions.js";
+import type { DocumentInteractionAttachment } from "../sessions/review-interactions.js";
 
 const MAX_BODY_BYTES = 256 * 1024;
 const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}";
@@ -45,7 +45,7 @@ const RECOVERY_ID = /^[A-Za-z0-9_-]{16,128}$/u;
 const ATTACHMENT_ID = /^[A-Za-z0-9_-]{8,128}$/u;
 const ATTACHMENT_RECOVERY_CREDENTIAL = /^[A-Za-z0-9_-]{43}$/u;
 
-function interactionAttachment(value: unknown, sessionId: string): ReviewInteractionAttachment | undefined {
+function interactionAttachment(value: unknown, sessionId: string): DocumentInteractionAttachment | undefined {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
   const record = value as Record<string, unknown>;
   if (Object.keys(record).some((key) => ![
@@ -55,7 +55,7 @@ function interactionAttachment(value: unknown, sessionId: string): ReviewInterac
     typeof record.incarnationId !== "string" || !ATTACHMENT_ID.test(record.incarnationId) ||
     typeof record.capability !== "string" || !/^[A-Za-z0-9_-]{32,128}$/u.test(record.capability) ||
     !Array.isArray(record.capabilities)) return undefined;
-  return record as unknown as ReviewInteractionAttachment;
+  return record as unknown as DocumentInteractionAttachment;
 }
 
 function ownerScopedCommandAttachment(
@@ -306,7 +306,7 @@ export interface WebAssetOptions {
 }
 
 export interface LocalHttpServerOptions {
-  readonly upgradeParticipants?: UpgradeReviewParticipants;
+  readonly upgradeParticipants?: UpgradeDocumentParticipants;
   readonly protectUpgradeReview?: (sessionId: string) => Promise<void>;
   readonly port?: number;
   readonly webAssets?: WebAssetOptions;
@@ -333,7 +333,7 @@ export async function startHttpServer(
   const webAssetRoot = options.webAssets === undefined
     ? undefined
     : await realpath(options.webAssets.root);
-  const upgradeAttachments = new Map<string, { sessionId: string; credential: string; attachment: ReviewInteractionAttachment }>();
+  const upgradeAttachments = new Map<string, { sessionId: string; credential: string; attachment: DocumentInteractionAttachment }>();
   const assetCapabilities = new Map<string, Set<string>>();
   const serveWebAsset = async (response: ServerResponse, assetName: string): Promise<void> => {
     if (webAssetRoot === undefined) {
@@ -360,8 +360,8 @@ export async function startHttpServer(
     let admissionPath: string;
     try { admissionPath = new URL(request.url ?? "/", origin).pathname; }
     catch { send(response, 400, "Invalid request URL"); return; }
-    const admitsReview = /\/(?:bootstrap|exchange|resume|reopen)$/u.test(admissionPath);
-    const activity = options.lifecycle?.enterActivity({ settlement: !admitsReview });
+    const admitsDocument = /\/(?:bootstrap|exchange|resume|reopen)$/u.test(admissionPath);
+    const activity = options.lifecycle?.enterActivity({ settlement: !admitsDocument });
     if (options.lifecycle !== undefined && activity === undefined) {
       send(response, 503, "Placekeeper is restarting; retry shortly.");
       return;
@@ -696,8 +696,8 @@ export async function startHttpServer(
         const owned = attachment === undefined ? undefined : upgradeAttachments.get(attachment.incarnationId);
         if (!attachment || !owned || owned.sessionId !== upgradeMatch[1] || owned.credential !== bearerCredential(request) || JSON.stringify(owned.attachment) !== JSON.stringify(attachment)) { send(response, 403, 'Upgrade connection unavailable'); return; }
         const id = `control:${attachment.incarnationId}`;
-        if (upgradeMatch[2] === 'settle' && !isUpgradeReviewSettlement(body.request)) { send(response, 400, 'Invalid upgrade settlement'); return; }
-        sendJson(response, 200, upgradeMatch[2] === 'poll' ? options.upgradeParticipants.poll(id) : await options.upgradeParticipants.settle(id, body.request as import('../../../../packages/core/src/upgrade-review-protocol.js').UpgradeReviewSettlement));
+        if (upgradeMatch[2] === 'settle' && !isUpgradeDocumentSettlement(body.request)) { send(response, 400, 'Invalid upgrade settlement'); return; }
+        sendJson(response, 200, upgradeMatch[2] === 'poll' ? options.upgradeParticipants.poll(id) : await options.upgradeParticipants.settle(id, body.request as import('../../../../packages/core/src/upgrade-review-protocol.js').UpgradeDocumentSettlement));
         return;
       }
       if (stateMatch !== null && request.method === "GET") {
@@ -799,9 +799,9 @@ export async function startHttpServer(
           send(response, 503, "Export service is unavailable");
           return;
         }
-        const body = await readJson(request) as { confirmPossiblyStale?: unknown; fence?: ReviewExportFence };
+        const body = await readJson(request) as { confirmPossiblyStale?: unknown; fence?: DocumentExportFence };
         if ((body.confirmPossiblyStale !== undefined && body.confirmPossiblyStale !== true) ||
-          (body.fence !== undefined && !isReviewExportFence(body.fence))) {
+          (body.fence !== undefined && !isDocumentExportFence(body.fence))) {
           send(response, 400, "Invalid request");
           return;
         }
@@ -944,11 +944,11 @@ export async function startHttpServer(
           return;
         }
         if (action === "release") {
-          sendJson(response, 200, await broker.releaseReviewInteraction(common));
+          sendJson(response, 200, await broker.releaseDocumentInteraction(common));
           return;
         }
         if (action === "acknowledge") {
-          sendJson(response, 200, await broker.acknowledgeReviewInteraction(common));
+          sendJson(response, 200, await broker.acknowledgeDocumentInteraction(common));
           return;
         }
         if ((body.outcome !== "applied" && body.outcome !== "discarded") ||
@@ -957,7 +957,7 @@ export async function startHttpServer(
           send(response, 400, "Invalid interaction finalization");
           return;
         }
-        const finalized = await broker.finalizeReviewInteraction({
+        const finalized = await broker.finalizeDocumentInteraction({
           ...common,
           outcome: body.outcome,
           draftId: body.draftId,
@@ -1018,14 +1018,14 @@ export async function startHttpServer(
           Object.hasOwn(body, "command")
           ? body as { readonly command?: unknown; readonly attachment?: unknown }
           : undefined;
-        const command = (envelope?.command ?? body) as ReviewCommand;
+        const command = (envelope?.command ?? body) as DocumentCommand;
         const authority = ownerScopedCommandAttachment(command);
         if (authority !== undefined) {
           const attachment = interactionAttachment(envelope?.attachment, commandMatch[1]!);
           if (
             attachment === undefined ||
             attachment.attachmentId !== authority.ownerViewId ||
-            !broker.authorizeReviewAttachment(commandMatch[1]!, attachment)
+            !broker.authorizeDocumentAttachment(commandMatch[1]!, attachment)
           ) {
             send(response, 403, "Current review attachment authority is required");
             return;
@@ -1044,9 +1044,9 @@ export async function startHttpServer(
       }
       send(response, 404, "Not found");
     } catch (error) {
-      if (error instanceof ReviewExportConflictError) {
+      if (error instanceof DocumentExportConflictError) {
         sendJson(response, 409, { ok: false, error: { kind: "export-conflict", message: error.message } });
-      } else if (error instanceof ReviewGenerationConflictError) {
+      } else if (error instanceof DocumentGenerationConflictError) {
         sendJson(response, 409, {
           ok: false,
           error: {
@@ -1055,12 +1055,12 @@ export async function startHttpServer(
             reviewRevision: error.currentRevision,
           },
         });
-      } else if (error instanceof ReviewConflictError || error instanceof ReviewDraftConflictError) {
+      } else if (error instanceof DocumentConflictError || error instanceof DocumentDraftConflictError) {
         sendJson(response, 409, {
           ok: false,
           error: { kind: "review-revision-conflict" },
         });
-      } else if (error instanceof InvalidReviewCommandError) {
+      } else if (error instanceof InvalidDocumentCommandError) {
         sendJson(response, 422, {
           ok: false,
           error: { kind: "invalid-review-command", message: error.message },

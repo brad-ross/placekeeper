@@ -1,5 +1,5 @@
 /** Geometry of the compositor-owned edge paint inside the native scrollport. */
-export function reviewEdgeGeometry(stage: Element) {
+export function documentEdgeGeometry(stage: Element) {
   const backing = stage.querySelector('.pdf-workspace__scrollbar-backing')!;
   const bounds = backing.getBoundingClientRect();
   const style = getComputedStyle(backing);

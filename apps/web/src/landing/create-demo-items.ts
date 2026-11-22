@@ -1,10 +1,10 @@
-import type { ReviewItem } from '../../../../packages/core/src/review-model.js';
+import type { Annotation } from '../../../../packages/core/src/review-model.js';
 
 /** User-authored examples on original page 14 of arXiv:2312.07520v3.
  * Top-origin anchors preserve the selections and caret from the live demo.
  */
-export async function createDemoItems(): Promise<ReviewItem[]> {
-  const samples: Pick<ReviewItem, 'kind' | 'payload'>[] = [
+export async function createDemoItems(): Promise<Annotation[]> {
+  const samples: Pick<Annotation, 'kind' | 'payload'>[] = [
     {
       kind: 'highlight',
       payload: {

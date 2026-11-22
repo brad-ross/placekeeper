@@ -263,8 +263,8 @@ export class RestartReconnectStore {
     await this.#removeMatching("taskSessionHash", digestSecretHex(taskSessionId));
   }
 
-  async revokeSession(reviewSessionId: string): Promise<void> {
-    await this.#removeMatching("reviewSessionHash", digestSecretHex(reviewSessionId));
+  async revokeSession(documentSessionId: string): Promise<void> {
+    await this.#removeMatching("reviewSessionHash", digestSecretHex(documentSessionId));
   }
 
   #nowMs(): number {

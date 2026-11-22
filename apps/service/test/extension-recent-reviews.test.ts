@@ -2,14 +2,14 @@ import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, it } from 'vitest';
-import { ExtensionRecentReviews } from '../src/codex/extension-recent-reviews.js';
+import { ExtensionRecentDocuments } from '../src/codex/extension-recent-reviews.js';
 
 const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'recent-reviews-')); roots.push(root);
   let now = Date.parse('2026-11-05T00:00:00Z');
-  return { root, store: new ExtensionRecentReviews(root, () => now), advance: () => { now += 1000; } };
+  return { root, store: new ExtensionRecentDocuments(root, () => now), advance: () => { now += 1000; } };
 }
 const local = (sessionId: string) => ({ sessionId, title: 'Paper', source: { kind: 'local' as const, path: '/papers/paper.pdf' } });
 
@@ -21,7 +21,7 @@ it('retains stable review identity and reading position across restart and subse
   f.advance(); await f.store.position('session-one', 9);
   f.advance(); const reopened = await f.store.remember({ ...local('session-one'), title: 'Renamed paper' });
   expect(reopened).toMatchObject({ id: first.id, page: 9, title: 'Renamed paper', updatedAt: '2026-11-05T00:00:02.000Z' });
-  const restarted = new ExtensionRecentReviews(f.root);
+  const restarted = new ExtensionRecentDocuments(f.root);
   expect(await restarted.get(first.id)).toEqual(reopened);
   expect(await restarted.get('/papers/paper.pdf')).toBeUndefined();
   expect(await restarted.list()).toEqual([reopened]);
@@ -33,7 +33,7 @@ it('keeps independent reviews distinct and persists host file identity without r
   const one = await f.store.remember(local('session-one'));
   f.advance(); const two = await f.store.remember({ sessionId: 'session-two', title: 'Paper', source: { kind: 'host', file: { name: 'paper.pdf', resourceUri: 'host-file:///paper' } } });
   expect(two.id).not.toBe(one.id);
-  expect(await new ExtensionRecentReviews(f.root).list()).toEqual([two, one]);
+  expect(await new ExtensionRecentDocuments(f.root).list()).toEqual([two, one]);
   const raw = JSON.parse(await readFile(join(f.root, 'extension-recent-reviews.json'), 'utf8'));
   expect(Object.keys(raw.entries[0]).sort()).toEqual(['id', 'sessionId', 'source', 'title', 'updatedAt']);
   two.source = { kind: 'local', path: '/not-the-stored-path.pdf' };
@@ -71,5 +71,5 @@ it('rejects malformed stored entries and extra authority fields rather than usin
   const stored = JSON.parse(await readFile(path, 'utf8'));
   stored.entries[0].grant = 'unexpected-runtime-authority';
   await writeFile(path, JSON.stringify(stored));
-  await expect(new ExtensionRecentReviews(f.root).list()).rejects.toThrow('Invalid recent review store');
+  await expect(new ExtensionRecentDocuments(f.root).list()).rejects.toThrow('Invalid recent review store');
 });

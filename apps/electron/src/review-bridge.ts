@@ -1,8 +1,8 @@
 import { nativeSyncTexResponse } from '../../../packages/core/src/native-synctex-protocol.js';
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
-import type { ElectronReviewHelperMessage, ElectronReviewHelperResponse, ElectronRuntimeProjection } from '../../../packages/core/src/electron-helper-protocol.js';
-import { REVIEW_RUNTIME_PROTOCOL, REVIEW_RUNTIME_VERSION, isReviewRuntimeMethodForHost, sanitizeNativeReviewRuntimeRequest, sanitizeNativeReviewRuntimeResponse, type ReviewRuntimeMethod } from '../../../packages/core/src/review-runtime-protocol.js';
+import type { ElectronDocumentHelperMessage, ElectronDocumentHelperResponse, ElectronRuntimeProjection } from '../../../packages/core/src/electron-helper-protocol.js';
+import { DOCUMENT_RUNTIME_PROTOCOL, DOCUMENT_RUNTIME_VERSION, isDocumentRuntimeMethodForHost, sanitizeNativeDocumentRuntimeRequest, sanitizeNativeDocumentRuntimeResponse, type DocumentRuntimeMethod } from '../../../packages/core/src/review-runtime-protocol.js';
 export function acceptsRenderer(binding: {
     frame: unknown;
     windowId: string;
@@ -11,12 +11,12 @@ export function acceptsRenderer(binding: {
 }, frame: unknown, windowId: unknown, attemptId: unknown): boolean {
     return !binding.retired && binding.frame === frame && binding.windowId === windowId && binding.attemptId === attemptId;
 }
-type Operation = ElectronReviewHelperMessage extends infer M ? M extends ElectronReviewHelperMessage ? Omit<M, 'protocolVersion' | 'windowId' | 'attemptId' | 'requestId'> : never : never;
-const MUTATING_METHODS = new Set<ReviewRuntimeMethod>([
+type Operation = ElectronDocumentHelperMessage extends infer M ? M extends ElectronDocumentHelperMessage ? Omit<M, 'protocolVersion' | 'windowId' | 'attemptId' | 'requestId'> : never : never;
+const MUTATING_METHODS = new Set<DocumentRuntimeMethod>([
     'command', 'beginInteraction', 'finalizeInteraction', 'releaseInteraction', 'acknowledgeInteraction',
     'chooseCopy', 'chooseFolder', 'chooseOriginal', 'retrySave', 'locateSave', 'exportReviewedCopy',
 ]);
-export class ReviewBridge {
+export class DocumentBridge {
     readonly windowId = randomUUID();
     readonly attemptId = randomUUID();
     readonly helperId = randomUUID();
@@ -29,11 +29,11 @@ export class ReviewBridge {
     active = false;
     pendingLaunchId?: string;
     private launchSequence = 0;
-    constructor(readonly exchange: (message: ElectronReviewHelperMessage, signal?: AbortSignal) => Promise<ElectronReviewHelperResponse>, readonly documentUrl: (generation: number) => string) { }
+    constructor(readonly exchange: (message: ElectronDocumentHelperMessage, signal?: AbortSignal) => Promise<ElectronDocumentHelperResponse>, readonly documentUrl: (generation: number) => string) { }
     async send(operation: Operation, signal?: AbortSignal) {
         if (this.retired)
             throw new Error('Retired review');
-        const result = await this.exchange({ ...operation, protocolVersion: 1, windowId: this.windowId, attemptId: this.attemptId, requestId: randomUUID() } as ElectronReviewHelperMessage, signal);
+        const result = await this.exchange({ ...operation, protocolVersion: 1, windowId: this.windowId, attemptId: this.attemptId, requestId: randomUUID() } as ElectronDocumentHelperMessage, signal);
         if (this.retired)
             throw new Error('Retired review');
         if (result.type === 'failure')
@@ -42,7 +42,7 @@ export class ReviewBridge {
             this.projection = result.projection;
         return result;
     }
-    async admit(sourcePath: string, decide?: (offer: Extract<ElectronReviewHelperResponse, { type: 'recovery-offered' }>) => Promise<'resume' | 'discard' | 'fork'>, launchId?: string, navigationHandle?: string) {
+    async admit(sourcePath: string, decide?: (offer: Extract<ElectronDocumentHelperResponse, { type: 'recovery-offered' }>) => Promise<'resume' | 'discard' | 'fork'>, launchId?: string, navigationHandle?: string) {
         let result = await this.send(launchId ? { type: 'admit-launch', launchId } : { type: 'admit', sourcePath, ...(navigationHandle ? { navigationHandle } : {}) });
         if (result.type === 'recovery-offered' && decide) result = await this.send({ type: 'recover', decision: await decide(result), offer: result.offer, idempotencyKey: randomUUID() });
         if (result.type !== 'admitted')
@@ -77,7 +77,7 @@ export class ReviewBridge {
             const state = nativeSyncTexResponse('forwardSyncTex', response.payload);
             if (state === undefined || isDeepStrictEqual(state, this.lastNavigation)) return;
             this.lastNavigation = state;
-            this.onInvalidation?.({ protocol: REVIEW_RUNTIME_PROTOCOL, version: REVIEW_RUNTIME_VERSION, kind: 'event', runtimeId: this.windowId, event: 'host-command', payload: { command: 'source-navigation', state } });
+            this.onInvalidation?.({ protocol: DOCUMENT_RUNTIME_PROTOCOL, version: DOCUMENT_RUNTIME_VERSION, kind: 'event', runtimeId: this.windowId, event: 'host-command', payload: { command: 'source-navigation', state } });
         } catch (error) { if (!this.retired) throw error; } finally { this.navigationPolling = false; }
     }
     chooseDestination?: (method: 'chooseFolder' | 'locateSave') => Promise<string | null>;
@@ -95,7 +95,7 @@ export class ReviewBridge {
             const next = this.projection;
             if (!previous || !next || isDeepStrictEqual(previous, next)) return;
             this.onInvalidation?.({
-                protocol: REVIEW_RUNTIME_PROTOCOL, version: REVIEW_RUNTIME_VERSION, kind: 'event',
+                protocol: DOCUMENT_RUNTIME_PROTOCOL, version: DOCUMENT_RUNTIME_VERSION, kind: 'event',
                 runtimeId: this.windowId, event: 'session-invalidated',
                 payload: { sessionId: next.sessionId, generation: next.generation, revision: next.revision,
                     reason: next.generation !== previous.generation ? 'generation' : next.revision !== previous.revision ? 'revision' : 'freshness',
@@ -119,13 +119,13 @@ export class ReviewBridge {
         if (typeof value !== 'object' || value === null)
             throw new Error('Invalid request');
         const v = value as Record<string, unknown>;
-        if (v.protocol !== REVIEW_RUNTIME_PROTOCOL || v.version !== REVIEW_RUNTIME_VERSION || v.kind !== 'request' || v.runtimeId !== this.windowId || typeof v.requestId !== 'string' || !/^[A-Za-z0-9_-]{16,128}$/u.test(v.requestId) || typeof v.method !== 'string' || !isReviewRuntimeMethodForHost('electron', v.method))
+        if (v.protocol !== DOCUMENT_RUNTIME_PROTOCOL || v.version !== DOCUMENT_RUNTIME_VERSION || v.kind !== 'request' || v.runtimeId !== this.windowId || typeof v.requestId !== 'string' || !/^[A-Za-z0-9_-]{16,128}$/u.test(v.requestId) || typeof v.method !== 'string' || !isDocumentRuntimeMethodForHost('electron', v.method))
             throw new Error('Invalid request');
-        const method = v.method as ReviewRuntimeMethod;
+        const method = v.method as DocumentRuntimeMethod;
         const allowed = new Set(['protocol', 'version', 'kind', 'runtimeId', 'requestId', 'method', 'payload', 'sessionId', 'generation', 'revision']);
         if (Object.keys(v).some(key => !allowed.has(key)) || JSON.stringify(value).length > 4 * 1024 * 1024)
             throw new Error('Invalid request fields');
-        const payload = sanitizeNativeReviewRuntimeRequest('electron', method, v.payload);
+        const payload = sanitizeNativeDocumentRuntimeRequest('electron', method, v.payload);
         if (payload === undefined)
             throw new Error('Invalid payload');
         let result: unknown;
@@ -160,10 +160,10 @@ export class ReviewBridge {
                 result = response.payload;
             }
         }
-        const clean = sanitizeNativeReviewRuntimeResponse('electron', method, result);
+        const clean = sanitizeNativeDocumentRuntimeResponse('electron', method, result);
         if (clean === undefined)
             throw new Error('Invalid response');
         if (MUTATING_METHODS.has(method)) this.scheduleRefresh();
-        return { protocol: REVIEW_RUNTIME_PROTOCOL, version: REVIEW_RUNTIME_VERSION, kind: 'response', runtimeId: this.windowId, requestId: v.requestId, sessionId: this.projection!.sessionId, generation: method === 'bootstrap' ? this.projection!.generation : v.generation, revision: method === 'bootstrap' ? this.projection!.revision : v.revision, method, ok: true, payload: method === 'bootstrap' ? { ...(clean as object), capabilities: { interactionLifecycleVersion: 1 } } : clean };
+        return { protocol: DOCUMENT_RUNTIME_PROTOCOL, version: DOCUMENT_RUNTIME_VERSION, kind: 'response', runtimeId: this.windowId, requestId: v.requestId, sessionId: this.projection!.sessionId, generation: method === 'bootstrap' ? this.projection!.generation : v.generation, revision: method === 'bootstrap' ? this.projection!.revision : v.revision, method, ok: true, payload: method === 'bootstrap' ? { ...(clean as object), capabilities: { interactionLifecycleVersion: 1 } } : clean };
     }
 }

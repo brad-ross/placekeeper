@@ -1,9 +1,9 @@
 import { useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import type { ViewerClientPlacement, ViewerFixedClientRect } from '../pdf/viewer-interaction-events.js';
 
-import { ReviewIcon } from './ReviewIcon.js';
-import { ReviewTooltipButton } from './ReviewTooltipButton.js';
-import { reviewActions } from './review-actions.js';
+import { ReaderIcon } from './ReviewIcon.js';
+import { ReaderTooltipButton } from './ReviewTooltipButton.js';
+import { documentActions } from './review-actions.js';
 
 type ContextActionKind = 'copy' | 'replace' | 'delete' | 'highlight';
 
@@ -22,9 +22,9 @@ interface ContextActionButtonProps {
 function ContextActionButton({ kind, iconOnly = false, onAction }: ContextActionButtonProps) {
   const action = kind === 'copy'
     ? copyAction
-    : reviewActions.find((candidate) => candidate.kind === kind)!;
+    : documentActions.find((candidate) => candidate.kind === kind)!;
   return (
-    <ReviewTooltipButton
+    <ReaderTooltipButton
       type="button"
       className={`review-action-button${iconOnly ? ' review-action-button--icon' : ''}`}
       label={action.label}
@@ -34,9 +34,9 @@ function ContextActionButton({ kind, iconOnly = false, onAction }: ContextAction
         onAction?.();
       }}
     >
-      <ReviewIcon name={kind} />
+      <ReaderIcon name={kind} />
       {iconOnly ? null : action.label}
-    </ReviewTooltipButton>
+    </ReaderTooltipButton>
   );
 }
 
@@ -245,14 +245,14 @@ export function ContextActionPalette(props: ContextActionPaletteProps) {
       inert={props.hidden}
       style={boundedStyle ?? style}
     >
-      {props.onAddContext ? <ReviewTooltipButton
+      {props.onAddContext ? <ReaderTooltipButton
         type="button"
         className="review-action-button review-action-button--icon"
         label="Add selection to chat"
         aria-haspopup="dialog"
         onMouseDown={(event) => event.preventDefault()}
         onClick={props.onAddContext}
-      ><ReviewIcon name="agent" /></ReviewTooltipButton> : null}
+      ><ReaderIcon name="agent" /></ReaderTooltipButton> : null}
       <ContextActionButton kind="replace" iconOnly onAction={props.onReplace} />
       <ContextActionButton kind="delete" iconOnly onAction={props.onDelete} />
       <ContextActionButton kind="highlight" iconOnly onAction={props.onHighlight} />

@@ -10,33 +10,33 @@ test('only exact current main frame, window and attempt can act', () => {
     assert.equal(acceptsRenderer({ ...binding, retired: true }, frame, 'window123', 'attempt123'), false);
 });
 import { createElectronHostRuntime } from "../../web/src/host/electron-runtime.js";
-import { ReviewBridge } from "../src/review-bridge.js";
+import { DocumentBridge } from "../src/review-bridge.js";
 import { createHash } from "node:crypto";
-import { createReviewState, type PendingReviewDraftV1, type ReviewCommand } from '../../../packages/core/src/review-model.js';
-import { reduceReview } from '../../../packages/core/src/review-reducer.js';
-import { ReviewInteractions } from '../../service/src/sessions/review-interactions.js';
-import { beginReviewInteraction, authoringAuthorityFor, authoringSessionIsCurrent } from '../../web/src/review/authoring-session.js';
+import { createDocumentState, type PendingDocumentDraftV1, type DocumentCommand } from '../../../packages/core/src/review-model.js';
+import { reduceDocument } from '../../../packages/core/src/review-reducer.js';
+import { DocumentInteractions } from '../../service/src/sessions/review-interactions.js';
+import { beginDocumentInteraction, authoringAuthorityFor, authoringSessionIsCurrent } from '../../web/src/review/authoring-session.js';
 import { releaseDeletedAuthoringInteraction } from '../../web/src/review/use-authoring-session.js';
 const sourceBytes = Buffer.from("%PDF-1.7\n%%EOF");
 const digest = createHash("sha256").update(sourceBytes).digest("hex");
 
 test('ordinary Electron refresh cannot reacquire or roll back a protected editor while its command is accepted', async () => {
     const initial = projection();
-    let state = createReviewState({ sessionId: initial.sessionId, source: initial.state.source, documentGeneration: 2 });
-    const interactions = new ReviewInteractions({ currentGeneration: () => state.workflow.documentGeneration });
+    let state = createDocumentState({ sessionId: initial.sessionId, source: initial.state.source, documentGeneration: 2 });
+    const interactions = new DocumentInteractions({ currentGeneration: () => state.workflow.documentGeneration });
     const attachment = interactions.register(state.sessionId, 'electron-test');
     const canonical = () => ({ ...projection(state.revision),
         activeAuthoringDraftIds: interactions.activeAuthoringClaims(state.sessionId)
             .filter(claim => claim.generation === state.workflow.documentGeneration).map(claim => claim.draftId),
         generation: state.workflow.documentGeneration, state,
         document: { ...initial.document, generation: state.workflow.documentGeneration } });
-    const bridge = new ReviewBridge(async message => {
+    const bridge = new DocumentBridge(async message => {
         if (message.type === 'refresh') return { ...message, type: 'refreshed', projection: canonical() };
         if (message.type !== 'invoke') throw new Error('Unexpected helper operation');
         if (message.generation !== state.workflow.documentGeneration || message.revision !== state.revision) throw new Error('Stale native revision');
         let payload: unknown;
         if (message.method === 'command') {
-            state = reduceReview(state, message.payload as ReviewCommand);
+            state = reduceDocument(state, message.payload as DocumentCommand);
             payload = state;
         } else if (message.method === 'beginInteraction') {
             payload = await interactions.begin({ ...attachment,
@@ -66,7 +66,7 @@ test('ordinary Electron refresh cannot reacquire or roll back a protected editor
         const lifecycle = { beginInteraction: runtime.beginInteraction!, finalizeInteraction: runtime.finalizeInteraction!,
             releaseInteraction: runtime.releaseInteraction!, acknowledgeInteraction: runtime.acknowledgeInteraction! };
         const draftId = 'bdb2a067-72f2-4fb2-85d0-2cc67bf50274';
-        const editor = await beginReviewInteraction(lifecycle, 2, 'editor_interaction', 1, draftId);
+        const editor = await beginDocumentInteraction(lifecycle, 2, 'editor_interaction', 1, draftId);
         const authority = authoringAuthorityFor(state, 2);
         let editorOpen = true, reconnects = 0;
         runtime.subscribeInteractionReconnect?.(async () => {
@@ -78,7 +78,7 @@ test('ordinary Electron refresh cannot reacquire or roll back a protected editor
         const refresh = runtime.bootstrap();
         void refresh.catch(() => undefined);
         await captured.promise;
-        const draft: PendingReviewDraftV1 = { id: draftId, ownerViewId: attachment.attachmentId,
+        const draft: PendingDocumentDraftV1 = { id: draftId, ownerViewId: attachment.attachmentId,
             baseGeneration: 2, revision: 0, kind: 'pageNote', pageIndex: 0, text: 'Exact text typed after source refresh.',
             anchor: { kind: 'page', pageIndex: 0, rect: { x: 72, y: 72, width: 18, height: 18 } },
             disposition: { kind: 'resolved', generation: 2 }, status: 'protected',
@@ -98,7 +98,7 @@ test('ordinary Electron refresh cannot reacquire or roll back a protected editor
         state = { ...state, workflow: { ...state.workflow, documentGeneration: 3 } };
         await runtime.bootstrap();
         assert.equal(authoringSessionIsCurrent({ authority }, authoringAuthorityFor(state, 3)), false);
-        await assert.rejects(beginReviewInteraction(lifecycle, 2, 'stale_interaction', 2));
+        await assert.rejects(beginDocumentInteraction(lifecycle, 2, 'stale_interaction', 2));
     } finally { deliver.resolve(); runtime.dispose(); bridge.retired = true; }
 });
 function projection(revision = 0) {
@@ -150,7 +150,7 @@ function projection(revision = 0) {
 }
 test('real RPC renderer client bootstraps through bridge and rejects bounded transport failures', async () => {
     const p = { ...projection(), activeAuthoringDraftIds: [] };
-    const bridge = new ReviewBridge(async (message) => (message.type === 'invoke' ? { ...message, type: 'result', method: message.method, payload: p.saveStatus } : { ...message, type: 'refreshed', projection: p }), generation => `placekeeper-resource://document/attempt123/${generation}`);
+    const bridge = new DocumentBridge(async (message) => (message.type === 'invoke' ? { ...message, type: 'result', method: message.method, payload: p.saveStatus } : { ...message, type: 'refreshed', projection: p }), generation => `placekeeper-resource://document/attempt123/${generation}`);
     bridge.projection = p;
     const identity = { windowId: bridge.windowId, attemptId: bridge.attemptId };
     const runtime = createElectronHostRuntime({ sourceEndpoint: async () => {}, identity: async () => identity, request: (_id, value) => bridge.request(value), requestClose: async () => {}, readyToSettle: async () => {}, documentReady: async () => { }, visible: async () => { }, commandSurface: async () => {}, presentation: async () => {}, toolbarHeight: async () => {}, closeSettled: async () => {}, writeClipboard: async () => {}, createLink: async () => 'placekeeper:///paper.pdf#page=1', focusFailed: async () => {}, subscribeShell: () => () => {}, subscribe: () => () => { } }, identity);
@@ -169,7 +169,7 @@ import { documentResponse } from '../src/resource-protocol.js';
 test('document stream verifies length and digest before adoption and rejects stale generations', async () => {
     const p = { ...projection(), activeAuthoringDraftIds: [] };
     let adopted = false;
-    const bridge = new ReviewBridge(async (message) => {
+    const bridge = new DocumentBridge(async (message) => {
         if (message.type === 'read-resource')
             return { ...message, type: 'resource-bytes', sequence: 0, data: sourceBytes.toString('base64'), done: true };
         if (message.type === 'adopt-resource') {
@@ -193,7 +193,7 @@ test('document stream verifies length and digest before adoption and rejects sta
 test('recovery admission requires a native choice and keeps the current offer fence', async () => {
     const p = { ...projection(), activeAuthoringDraftIds: [] };
     const offer = { id: 'offer12345678', expiresAt: new Date(Date.now() + 10000).toISOString() };
-    const bridge = new ReviewBridge(async message => {
+    const bridge = new DocumentBridge(async message => {
         if (message.type === 'admit') return { ...message, type: 'recovery-offered', choices: ['resume', 'discard', 'fork'], offer };
         assert.equal(message.type, 'recover');
         if (message.type !== 'recover') throw new Error('Unexpected operation');
@@ -206,7 +206,7 @@ test('recovery admission requires a native choice and keeps the current offer fe
 });
 test('native destination dialog captures the invoking generation and revision before waiting', async () => {
     const p = { ...projection(), activeAuthoringDraftIds: [] };
-    const bridge = new ReviewBridge(async message => {
+    const bridge = new DocumentBridge(async message => {
         assert.equal(message.type, 'destination-selection');
         if (message.type !== 'destination-selection') throw new Error('Unexpected operation');
         assert.equal(message.generation, 1); assert.equal(message.revision, 0); assert.equal(message.selectedPath, '/chosen');
@@ -229,7 +229,7 @@ test('focused task attachment keeps resources and emits exact launch identity on
     const p = { ...projection(), activeAuthoringDraftIds: [] };
     const launchId = 'a'.repeat(43);
     const operations: unknown[] = [];
-    const bridge = new ReviewBridge(async message => {
+    const bridge = new DocumentBridge(async message => {
         operations.push(message);
         return { ...message, type: message.type === 'activate' ? 'active' : 'refreshed', projection: p };
     }, () => 'unused');
@@ -247,7 +247,7 @@ test('discarded interaction publishes its canonical revision after the receipt w
     const next = { ...projection(1), activeAuthoringDraftIds: [] };
     const delivery: string[] = [];
     const events: unknown[] = [];
-    const bridge = new ReviewBridge(async message => {
+    const bridge = new DocumentBridge(async message => {
         if (message.type === 'refresh') return { ...message, type: 'refreshed', projection: next };
         assert.equal(message.type, 'invoke');
         if (message.type !== 'invoke') throw new Error('Unexpected operation');
@@ -280,7 +280,7 @@ test('interaction release publishes same-revision authoring changes and ignores 
     const next = { ...initial, activeAuthoringDraftIds: [] };
     const events: unknown[] = [];
     let refreshes = 0;
-    const bridge = new ReviewBridge(async message => {
+    const bridge = new DocumentBridge(async message => {
         if (message.type === 'refresh') { refreshes++; return { ...message, type: 'refreshed', projection: next }; }
         if (message.type !== 'invoke') throw new Error('Unexpected operation');
         return { ...message, type: 'result', method: message.method, payload: { status: 'released' } };
@@ -300,7 +300,7 @@ test('interaction release publishes same-revision authoring changes and ignores 
 test('native source navigation polls only active current generations and emits changed safe state', async () => {
     let calls = 0;
     let release: (() => void) | undefined;
-    const bridge = new ReviewBridge(async message => {
+    const bridge = new DocumentBridge(async message => {
         assert.equal(message.type, 'invoke'); calls++;
         if (calls === 3) await new Promise<void>(resolve => { release = resolve; });
         return { ...message, type: 'result', method: 'forwardSyncTex', payload: { status: 'ready', sequence: calls < 3 ? 1 : 2, generation: 2, pageIndex: 0, point: { x: 10, y: 20 }, sourcePath: '/secret.tex' } };
@@ -324,7 +324,7 @@ test('reverse source setup retries only after native association and keeps the r
     const p = { ...projection(), activeAuthoringDraftIds: [] };
     const requests: unknown[] = [];
     let configured = false;
-    const bridge = new ReviewBridge(async message => {
+    const bridge = new DocumentBridge(async message => {
         requests.push(message);
         assert.equal(message.type, 'invoke');
         return { ...message, type: 'result', method: 'reverseSyncTex', payload: { status: configured ? 'opened' : 'setup-required' } };
@@ -341,7 +341,7 @@ test('reverse source setup retries only after native association and keeps the r
 test('navigation admission carries the opaque handle only to the helper', async () => {
     const p = { ...projection(), activeAuthoringDraftIds: [] };
     const handle = 'a'.repeat(43);
-    const bridge = new ReviewBridge(async message => {
+    const bridge = new DocumentBridge(async message => {
         assert.equal(message.type, 'admit');
         assert.equal((message as { navigationHandle?: string }).navigationHandle, handle);
         return { ...message, type: 'admitted', provisionalId: 'provisional123', resourceId: 'resource123', generation: 1, byteLength: sourceBytes.length, digest, displayName: 'Paper.pdf', projection: p };
@@ -353,7 +353,7 @@ test('navigation admission carries the opaque handle only to the helper', async 
 test('native forward acknowledgements retain the renderer generation and outcome', async () => {
     const p = { ...projection(), activeAuthoringDraftIds: [] };
     const payload = { action: 'ack', sequence: 5, generation: p.generation, outcome: 'applied' };
-    const bridge = new ReviewBridge(async message => {
+    const bridge = new DocumentBridge(async message => {
         assert.equal(message.type, 'invoke');
         assert.deepEqual((message as { payload: unknown }).payload, payload);
         return { ...message, type: 'result', method: 'forwardSyncTex', payload: { status: 'applied', sequence: 5 } };
@@ -366,7 +366,7 @@ test('native forward acknowledgements retain the renderer generation and outcome
 test('canceling source setup releases close settlement without retrying the editor', async () => {
     const p = { ...projection(), activeAuthoringDraftIds: [] };
     let calls = 0;
-    const bridge = new ReviewBridge(async message => {
+    const bridge = new DocumentBridge(async message => {
         calls++;
         return { ...message, type: 'result', method: 'reverseSyncTex', payload: { status: 'setup-required' } };
     }, () => '');

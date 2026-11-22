@@ -4,7 +4,7 @@ import { ExtensionShell } from "./extension-shell.js";
 import { EXTENSION_META_KEY } from "../../../packages/core/src/extension-protocol.js";
 import { externalWebUrl } from "../../../packages/core/src/external-web-url.js";
 import { createCodexHostRuntime } from "../../web/src/host/codex-runtime.js";
-import { mountCodexProductionReview } from "../../web/src/codex-entry.js";
+import { mountCodexProductionDocument } from "../../web/src/codex-entry.js";
 import type { HostRuntimeInvalidation } from "../../web/src/host/runtime.js";
 import { OLD_ATTEMPT_META_KEY } from "./old-attempt-contract.js";
 import { ShellOldAttempt } from "./shell-old-attempt.js";
@@ -21,10 +21,10 @@ const app = new App({ name: "Placekeeper", version: "1.0.0" });
 const extensions = new OpenAIExtensions(app);
 const status = document.querySelector<HTMLElement>("#status")!;
 const detail = document.querySelector<HTMLElement>("#detail")!;
-const reviewRoot = document.querySelector<HTMLElement>("#root")!;
+const readerRoot = document.querySelector<HTMLElement>("#root")!;
 const extensionControls = document.createElement("div");
 detail.after(extensionControls);
-const extensionShell = new ExtensionShell(app, reviewRoot, status, extensionControls, () => extensions.resources, () => extensions.modelContext);
+const extensionShell = new ExtensionShell(app, readerRoot, status, extensionControls, () => extensions.resources, () => extensions.modelContext);
 status.setAttribute("role", "status");
 status.setAttribute("aria-live", "polite");
 let traceStorage: Storage | undefined;
@@ -66,17 +66,17 @@ function stop(preserveRetirement = false) {
   unmountProduction?.(); unmountProduction = undefined; runtimeInvalidations.clear();
   if (timer !== undefined) clearTimeout(timer);
   liveness?.stop(); liveness = undefined;
-  reviewRoot.inert = true;
-  reviewRoot.dataset.connectionState = "ended";
+  readerRoot.inert = true;
+  readerRoot.dataset.connectionState = "ended";
   productionSessionId = undefined; detail.textContent = "";
 }
 function display(text: string) { status.textContent = text; status.hidden = text.length === 0; }
 function setConnectionState(state: PanelConnectionState) {
   if (state === "reconnecting" && connectionState === "connected") { connectionEpoch++; verifiedProbes.clear(); }
   connectionState = state;
-  reviewRoot.inert = state !== "connected";
-  reviewRoot.dataset.connectionState = state;
-  reviewRoot.setAttribute("aria-busy", String(state !== "connected"));
+  readerRoot.inert = state !== "connected";
+  readerRoot.dataset.connectionState = state;
+  readerRoot.setAttribute("aria-busy", String(state !== "connected"));
   display(state === "connected" ? "" : "Reconnecting to Placekeeper… The displayed review may be out of date. Editing is paused until the connection is verified.");
 }
 async function call(request: CodexAppRequest, attempt: number): Promise<CodexAppResponse> {
@@ -195,7 +195,7 @@ function mountPresentation(response: Extract<CodexAppResponse, { status: "active
       subscribeInvalidations(listener) { runtimeInvalidations.add(listener); return () => runtimeInvalidations.delete(listener); },
     });
     setConnectionState("connected");
-    unmountProduction = mountCodexProductionReview(reviewRoot, runtime, (error) => {
+    unmountProduction = mountCodexProductionDocument(readerRoot, runtime, (error) => {
       if (attempt !== incarnation) return;
       display(error instanceof ResourceAllocationError ? "The host could not allocate memory for this document. Close other panels and reopen the PDF; accepted work remains recoverable." : "The PDF could not be loaded. Retry opening this review through a fresh native launch; accepted work remains recoverable.");
     }, () => { if (attempt === incarnation) { recordDiagnostic("verified"); if (connectionState === "connected") display(""); } });

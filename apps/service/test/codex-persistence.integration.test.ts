@@ -1,7 +1,7 @@
 import { PDFArray, PDFDict, PDFDocument, PDFName, PDFString } from "pdf-lib";
 import { createEmbedPdfWriter } from "../../../packages/pdf-backends/src/embedpdf-adapter.js";
-import { reviewStateDigest } from "../src/recovery/draft-snapshot.js";
-import { prepareReplacementReview } from "../src/sessions/document-replacement-preparation.js";
+import { documentStateDigest } from "../src/recovery/draft-snapshot.js";
+import { prepareReplacementDocument } from "../src/sessions/document-replacement-preparation.js";
 import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { createHash, randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
@@ -156,12 +156,12 @@ describe("native persistence composition", () => {
     const initial = f.broker.state(f.sessionId)!;
     expect(initial.items).toHaveLength(1);
     expect(initial.items[0]!.payload.identityProvenance).toBe("generation-ordinal");
-    const beforeDigest = reviewStateDigest(initial);
+    const beforeDigest = documentStateDigest(initial);
     payload(await f.manager.handle(request(a, "chooseOriginal", {}, "save_original_native")));
     await f.saving.drain();
     expect(f.broker.saveStatus(f.sessionId)?.sync.phase).toBe("clean");
     expect(f.broker.state(f.sessionId)?.revision).toBe(initial.revision);
-    expect(reviewStateDigest(f.broker.state(f.sessionId)!)).toBe(beforeDigest);
+    expect(documentStateDigest(f.broker.state(f.sessionId)!)).toBe(beforeDigest);
     payload(await f.manager.handle(request(a, "command", { type: "edit", expectedRevision: initial.revision, id: initial.items[0]!.id, updatedAt: "2026-10-05T12:00:00Z", payload: { comment: "intervening comment" } }, "intervening_edit")));
     await f.saving.drain();
     // Undo history is unchanged by save evidence, and cannot erase its proof.
@@ -211,7 +211,7 @@ describe("native persistence composition", () => {
     const item = before.items[0]!;
     // A matching name alone is not evidence that an ordinal source was saved.
     const successor = { ...item, payload: { ...item.payload, identityProvenance: "verified" } };
-    const state = prepareReplacementReview(before, 2, before.source.fileId, before.source, [], [successor]);
+    const state = prepareReplacementDocument(before, 2, before.source.fileId, before.source, [], [successor]);
     expect(state.items).toHaveLength(2);
     expect(state.items[0]!.id).toBe(item.id);
     expect(state.items[1]!.id).not.toBe(item.id);
@@ -227,7 +227,7 @@ describe("native persistence composition", () => {
     let settle: "superseded" | "uncertain" = status === "uncertain" ? "uncertain" : "superseded";
     const result = await f.broker.commitSaveCandidate({ sessionId: f.sessionId, generation: destination.generation,
       documentGeneration: state.workflow.documentGeneration, sourceDigest: state.source.digest,
-      revision: state.revision, stateDigest: reviewStateDigest(state), targetDigest: state.source.digest,
+      revision: state.revision, stateDigest: documentStateDigest(state), targetDigest: state.source.digest,
       verifiedNativeAnnotationIds: [state.items[0]!.id],
       commit: async () => status === "unpublished" ? undefined : { targetDigest: state.source.digest, settle: async () => settle },
     });

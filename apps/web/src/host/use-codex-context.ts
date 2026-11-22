@@ -1,8 +1,8 @@
 import { useEffect, useState, type Dispatch, type SetStateAction, type RefObject } from 'react';
-import type { ReviewStateView } from '../../../../packages/core/src/review-model.js';
+import type { DocumentStateView } from '../../../../packages/core/src/review-model.js';
 import type { LiveContextBindingStatus } from '../../../../packages/core/src/live-context.js';
 import type { ProductionScope, ProductionSessionApi } from './session-contracts.js';
-import { visibleCodexContext, reviewStateRequestKey, updateProductionScope, updateCodexContext } from './context-projection.js';
+import { visibleCodexContext, documentStateRequestKey, updateProductionScope, updateCodexContext } from './context-projection.js';
 export const UNAVAILABLE_CODEX_CONTEXT: LiveContextBindingStatus = {
   status: 'unavailable',
   reason: 'unavailable',
@@ -12,7 +12,7 @@ const CODEX_SCOPE_POLL_MS = 1_500;
 const CODEX_SCOPE_TIMEOUT_MS = 4_000;
 
 export function useCodexContext(props: { api: ProductionSessionApi }, scope: ProductionScope,
-  setScope: Dispatch<SetStateAction<ProductionScope>>, stateRef: RefObject<ReviewStateView>) {
+  setScope: Dispatch<SetStateAction<ProductionScope>>, stateRef: RefObject<DocumentStateView>) {
   const [codexContext, setCodexContext] = useState(scope.codexContext);
   useEffect(() => {
     if (scope.launchSurface !== 'codex' && scope.reconnectPending !== true) return;
@@ -21,7 +21,7 @@ export function useCodexContext(props: { api: ProductionSessionApi }, scope: Pro
     let timeout: number | undefined;
     let controller: AbortController | undefined;
     const refreshCodexContext = async () => {
-      const requestedStateKey = reviewStateRequestKey(stateRef.current);
+      const requestedStateKey = documentStateRequestKey(stateRef.current);
       controller = new AbortController();
       try {
         const next = await Promise.race([
@@ -33,7 +33,7 @@ export function useCodexContext(props: { api: ProductionSessionApi }, scope: Pro
             }, CODEX_SCOPE_TIMEOUT_MS);
           }),
         ]);
-        if (!stopped && requestedStateKey === reviewStateRequestKey(stateRef.current)) {
+        if (!stopped && requestedStateKey === documentStateRequestKey(stateRef.current)) {
           setScope((current) => updateProductionScope(current, next));
           const nextContext = next.launchSurface === 'codex'
             ? next.codexContext ?? UNAVAILABLE_CODEX_CONTEXT
@@ -42,7 +42,7 @@ export function useCodexContext(props: { api: ProductionSessionApi }, scope: Pro
           setCodexContext((current) => updateCodexContext(current, safeContext));
         }
       } catch {
-        if (!stopped && requestedStateKey === reviewStateRequestKey(stateRef.current)) {
+        if (!stopped && requestedStateKey === documentStateRequestKey(stateRef.current)) {
           setCodexContext((current) => updateCodexContext(current, UNAVAILABLE_CODEX_CONTEXT));
         }
       } finally {

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, type RefObject } from 'react';
-import type { ReviewStateView } from '../../../../packages/core/src/review-model.js';
+import type { DocumentStateView } from '../../../../packages/core/src/review-model.js';
 import type { PdfViewerNavigation } from '../pdf/viewer-navigation-adapter.js';
 import type { LocationRestoreStatus } from '../generation-status.js';
 import type { HostForwardSyncTexRequest, ReverseSyncTexRequest } from './session-contracts.js';
@@ -16,7 +16,7 @@ export function useHostSyncTex(props: {
   onHostForwardSyncTexHandled: ((request: HostForwardSyncTexRequest, outcome: "applied" | "superseded" | "failed") => void) | undefined;
   hostReverseSyncTexRequestToken: number | undefined;
   onReverseSyncTex: ((input: ReverseSyncTexRequest) => Promise<unknown>) | undefined;
-}, state: ReviewStateView, stateRef: RefObject<ReviewStateView>, mainNavigation: PdfViewerNavigation | null,
+}, state: DocumentStateView, stateRef: RefObject<DocumentStateView>, mainNavigation: PdfViewerNavigation | null,
   mainNavigationRef: RefObject<PdfViewerNavigation | null>, mainNavigationReadyGeneration: number | null,
   mainDocumentReadyGeneration: number | null, locationRestoreStatus: LocationRestoreStatus,
   setCommandError: (error: string | null) => void) {

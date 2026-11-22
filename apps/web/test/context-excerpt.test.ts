@@ -6,7 +6,7 @@ import {
   trailingContext,
 } from '../src/pdf/context-excerpt.js';
 import { annotationContent } from '../src/review/annotation-content.js';
-import type { ReviewItem } from '../../../packages/core/src/review-model.js';
+import type { Annotation } from '../../../packages/core/src/review-model.js';
 
 describe('context excerpts', () => {
   it('drops a cut partial word before the match and marks the cut', () => {
@@ -49,7 +49,7 @@ describe('context excerpts', () => {
 });
 
 describe('annotation quote context', () => {
-  const item = (payload: ReviewItem['payload'], kind: ReviewItem['kind'] = 'highlight'): ReviewItem => ({
+  const item = (payload: Annotation['payload'], kind: Annotation['kind'] = 'highlight'): Annotation => ({
     id: 'a', kind, pageIndex: 0, createdAt: '', updatedAt: '', payload,
   });
 

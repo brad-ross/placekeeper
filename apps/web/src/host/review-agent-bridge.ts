@@ -1,37 +1,37 @@
 import type { DocumentContextController } from './document-in-context.js';
 import type { PdfSearchState } from '../pdf/pdf-search-model.js';
 
-export { reviewContextSnapshot as reviewAgentSnapshot } from './review-context-snapshot.js';
-export type { ReviewContextSnapshot as ReviewAgentSnapshot } from './review-context-snapshot.js';
-import type { ReviewContextSnapshot as ReviewAgentSnapshot } from './review-context-snapshot.js';
+export { documentContextSnapshot as documentAgentSnapshot } from './review-context-snapshot.js';
+export type { DocumentContextSnapshot as DocumentAgentSnapshot } from './review-context-snapshot.js';
+import type { DocumentContextSnapshot as DocumentAgentSnapshot } from './review-context-snapshot.js';
 
-export type ReviewAgentTarget =
+export type DocumentAgentTarget =
   | { readonly page: number; readonly documentGeneration: number }
   | { readonly resultId: string; readonly documentGeneration: number }
   | { readonly annotationId: string; readonly documentGeneration: number };
 
-export interface ReviewAgentActions {
-  snapshot(): ReviewAgentSnapshot;
-  search(query: string): Promise<ReturnType<typeof reviewAgentSearchResult>>;
-  navigate(target: ReviewAgentTarget): Promise<boolean>;
+export interface DocumentAgentActions {
+  snapshot(): DocumentAgentSnapshot;
+  search(query: string): Promise<ReturnType<typeof documentAgentSearchResult>>;
+  navigate(target: DocumentAgentTarget): Promise<boolean>;
 }
 
-export type ReviewAgentContextInput = (
-  | { readonly kind: 'selection'; readonly snapshot: ReviewAgentSnapshot }
-  | { readonly kind: 'annotations'; readonly snapshot: ReviewAgentSnapshot; readonly annotationIds: readonly string[] }
+export type DocumentAgentContextInput = (
+  | { readonly kind: 'selection'; readonly snapshot: DocumentAgentSnapshot }
+  | { readonly kind: 'annotations'; readonly snapshot: DocumentAgentSnapshot; readonly annotationIds: readonly string[] }
 ) & { readonly note?: string };
 
-export const MAX_REVIEW_CONTEXT_NOTE_LENGTH = 2000;
+export const MAX_DOCUMENT_CONTEXT_NOTE_LENGTH = 2000;
 
-export interface ReviewAgentBridge {
+export interface DocumentAgentBridge {
   readonly documentContext?: DocumentContextController;
-  attach(actions: ReviewAgentActions): () => void;
+  attach(actions: DocumentAgentActions): () => void;
   /** Publish the captured evidence and optional user note as chat context. */
-  addContext?(input: ReviewAgentContextInput): Promise<void>;
+  addContext?(input: DocumentAgentContextInput): Promise<void>;
 }
 
 /** The reader retains every match for navigation; chat receives a bounded page with coverage. */
-export function reviewAgentSearchResult(state: PdfSearchState, documentGeneration: number) {
+export function documentAgentSearchResult(state: PdfSearchState, documentGeneration: number) {
   const results = state.groups.flatMap(group => group.results);
   return {
     documentGeneration,

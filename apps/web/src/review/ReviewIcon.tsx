@@ -49,7 +49,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 
-const reviewIcons = {
+const readerIcons = {
   alert: AlertCircle,
   'arrow-left': ArrowLeft,
   'arrow-right': ArrowRight,
@@ -100,24 +100,24 @@ const reviewIcons = {
   close: X,
 } satisfies Record<string, LucideIcon>;
 
-export type ReviewIconName = keyof typeof reviewIcons;
+export type ReaderIconName = keyof typeof readerIcons;
 
-export interface ReviewIconProps {
-  readonly name: ReviewIconName;
+export interface ReaderIconProps {
+  readonly name: ReaderIconName;
   readonly size?: number;
   readonly strokeWidth?: number;
   readonly className?: string;
   readonly children?: ReactNode;
 }
 
-export function ReviewIcon({
+export function ReaderIcon({
   name,
   size = 16,
   strokeWidth = 2,
   className = 'review-icon',
   children,
-}: ReviewIconProps) {
-  const Icon = reviewIcons[name];
+}: ReaderIconProps) {
+  const Icon = readerIcons[name];
   return (
     <Icon
       aria-hidden="true"

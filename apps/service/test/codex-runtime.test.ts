@@ -549,10 +549,10 @@ describe("canonical native watermark", () => {
       text: "a note", anchor: { kind: "page", pageIndex: 0, nearbyText: "source", rect: { x: 1, y: 1, width: 1, height: 1 } },
       disposition: { kind: "resolved", generation: 1 }, status: "protected", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
     } }); advanced();
-    expect(await broker.finalizeReviewInteraction({ sessionId, attachment, interactionToken: "authoring_token_1", order: 2,
+    expect(await broker.finalizeDocumentInteraction({ sessionId, attachment, interactionToken: "authoring_token_1", order: 2,
       outcome: "applied", draftId, expectedDraftRevision: 0 })).toMatchObject({ status: "finalized", outcome: "applied" }); advanced();
     await broker.beginReviewInteraction({ sessionId, attachment, generation: 1, interactionToken: "authoring_token_2", order: 3, draftId: "draft_released" }); advanced();
-    await broker.releaseReviewInteraction({ sessionId, attachment, interactionToken: "authoring_token_2", order: 4 }); advanced();
+    await broker.releaseDocumentInteraction({ sessionId, attachment, interactionToken: "authoring_token_2", order: 4 }); advanced();
     await broker.beginReviewInteraction({ sessionId, attachment, generation: 1, interactionToken: "authoring_token_3", order: 5, draftId: "draft_disconnected" }); advanced();
     broker.disconnectInteractionIncarnation(sessionId, "author", attachment); advanced();
     expect(events.filter((reason) => reason === "revision")).toHaveLength(3);

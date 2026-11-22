@@ -1,55 +1,55 @@
 import type {
   JsonValue,
-  ReviewCommand,
-  ReviewItem,
-  ReviewItemKind,
-  ReviewSelectionAnchorV1,
-  ReviewState,
+  DocumentCommand,
+  Annotation,
+  AnnotationKind,
+  DocumentSelectionAnchorV1,
+  DocumentState,
 } from './review-model.js';
-import { reviewSelectionPayload } from './review-model.js';
+import { documentSelectionPayload } from './review-model.js';
 
-export interface ReviewRect {
+export interface DocumentRect {
   x: number;
   y: number;
   width: number;
   height: number;
 }
 
-export interface ReviewSelectionAnchor extends ReviewSelectionAnchorV1 {
+export interface DocumentSelectionAnchor extends DocumentSelectionAnchorV1 {
   reliable: true;
 }
 
-export interface ReviewCaretAnchor {
+export interface DocumentCaretAnchor {
   pageIndex: number;
-  position: ReviewRect;
+  position: DocumentRect;
   leftContext: string;
   rightContext: string;
   reliable: true;
 }
 
-export interface ReviewCommandFactory {
+export interface DocumentCommandFactory {
   createId(): string;
   now(): string;
 }
 
-const defaultFactory: ReviewCommandFactory = {
+const defaultFactory: DocumentCommandFactory = {
   createId: () => globalThis.crypto.randomUUID(),
   now: () => new Date().toISOString(),
 };
 
-function selectionPayload(anchor: ReviewSelectionAnchor): Record<string, JsonValue> {
-  return { ...reviewSelectionPayload(anchor) };
+function selectionPayload(anchor: DocumentSelectionAnchor): Record<string, JsonValue> {
+  return { ...documentSelectionPayload(anchor) };
 }
 
 function add(
-  state: Pick<ReviewState, "revision">,
-  kind: ReviewItemKind,
+  state: Pick<DocumentState, "revision">,
+  kind: AnnotationKind,
   pageIndex: number,
   payload: Record<string, JsonValue>,
-  factory: ReviewCommandFactory,
-): ReviewCommand {
+  factory: DocumentCommandFactory,
+): DocumentCommand {
   const timestamp = factory.now();
-  const item: ReviewItem = {
+  const item: Annotation = {
     id: factory.createId(),
     kind,
     pageIndex,
@@ -61,11 +61,11 @@ function add(
 }
 
 export function addReplace(
-  state: Pick<ReviewState, "revision">,
-  anchor: ReviewSelectionAnchor,
+  state: Pick<DocumentState, "revision">,
+  anchor: DocumentSelectionAnchor,
   proposedText: string,
-  factory: ReviewCommandFactory = defaultFactory,
-): ReviewCommand {
+  factory: DocumentCommandFactory = defaultFactory,
+): DocumentCommand {
   return add(state, 'replace', anchor.pageIndex, {
     ...selectionPayload(anchor),
     proposedText,
@@ -73,19 +73,19 @@ export function addReplace(
 }
 
 export function addDelete(
-  state: Pick<ReviewState, "revision">,
-  anchor: ReviewSelectionAnchor,
-  factory: ReviewCommandFactory = defaultFactory,
-): ReviewCommand {
+  state: Pick<DocumentState, "revision">,
+  anchor: DocumentSelectionAnchor,
+  factory: DocumentCommandFactory = defaultFactory,
+): DocumentCommand {
   return add(state, 'delete', anchor.pageIndex, selectionPayload(anchor), factory);
 }
 
 export function addInsert(
-  state: Pick<ReviewState, "revision">,
-  anchor: ReviewCaretAnchor,
+  state: Pick<DocumentState, "revision">,
+  anchor: DocumentCaretAnchor,
   proposedText: string,
-  factory: ReviewCommandFactory = defaultFactory,
-): ReviewCommand {
+  factory: DocumentCommandFactory = defaultFactory,
+): DocumentCommand {
   return add(state, 'insert', anchor.pageIndex, {
     position: { ...anchor.position },
     leftContext: anchor.leftContext,
@@ -96,11 +96,11 @@ export function addInsert(
 }
 
 export function addHighlight(
-  state: Pick<ReviewState, "revision">,
-  anchor: ReviewSelectionAnchor,
+  state: Pick<DocumentState, "revision">,
+  anchor: DocumentSelectionAnchor,
   comment?: string,
-  factory: ReviewCommandFactory = defaultFactory,
-): ReviewCommand {
+  factory: DocumentCommandFactory = defaultFactory,
+): DocumentCommand {
   return add(state, 'highlight', anchor.pageIndex, {
     ...selectionPayload(anchor),
     ...(comment === undefined || comment === '' ? {} : { comment }),
@@ -108,13 +108,13 @@ export function addHighlight(
 }
 
 export function addPageNote(
-  state: Pick<ReviewState, "revision">,
+  state: Pick<DocumentState, "revision">,
   pageIndex: number,
-  position: ReviewRect,
+  position: DocumentRect,
   comment: string,
-  factory: ReviewCommandFactory = defaultFactory,
+  factory: DocumentCommandFactory = defaultFactory,
   nearbyText?: string,
-): ReviewCommand {
+): DocumentCommand {
   return add(state, 'pageNote', pageIndex, {
     position: { ...position },
     comment,
@@ -122,27 +122,27 @@ export function addPageNote(
   }, factory);
 }
 
-export function editReviewItem(
-  state: Pick<ReviewState, "revision">,
+export function editAnnotation(
+  state: Pick<DocumentState, "revision">,
   id: string,
   payload: Readonly<Record<string, JsonValue>>,
-  factory: Pick<ReviewCommandFactory, 'now'> = defaultFactory,
-): ReviewCommand {
+  factory: Pick<DocumentCommandFactory, 'now'> = defaultFactory,
+): DocumentCommand {
   return { type: 'edit', expectedRevision: state.revision, id, payload, updatedAt: factory.now() };
 }
 
-export function removeReviewItem(state: Pick<ReviewState, "revision">, id: string): ReviewCommand {
+export function removeAnnotation(state: Pick<DocumentState, "revision">, id: string): DocumentCommand {
   return { type: 'remove', expectedRevision: state.revision, id };
 }
 
-export function undoReview(state: Pick<ReviewState, "revision">): ReviewCommand {
+export function undoDocument(state: Pick<DocumentState, "revision">): DocumentCommand {
   return { type: 'undo', expectedRevision: state.revision };
 }
 
-export function redoReview(state: Pick<ReviewState, "revision">): ReviewCommand {
+export function redoDocument(state: Pick<DocumentState, "revision">): DocumentCommand {
   return { type: 'redo', expectedRevision: state.revision };
 }
 
-export function setAnnotationName(state: Pick<ReviewState, "revision">, annotationName: string): Extract<ReviewCommand, { type: 'set-annotation-name' }> {
+export function setAnnotationName(state: Pick<DocumentState, "revision">, annotationName: string): Extract<DocumentCommand, { type: 'set-annotation-name' }> {
   return { type: 'set-annotation-name', expectedRevision: state.revision, annotationName };
 }

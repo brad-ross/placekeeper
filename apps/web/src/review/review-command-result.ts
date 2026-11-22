@@ -1,8 +1,8 @@
-import type { ReviewStateView } from "../../../../packages/core/src/review-model.js";
+import type { DocumentStateView } from "../../../../packages/core/src/review-model.js";
 
-export interface RejectedReviewCommand {
+export interface RejectedDocumentCommand {
   readonly accepted: false;
-  readonly state: ReviewStateView;
+  readonly state: DocumentStateView;
   readonly message: string;
   readonly reason?: 'rejected' | 'save-destination' | 'stale-authoring' | 'generation-conflict'
     | 'persistence-pending';

@@ -1,5 +1,5 @@
 
-export function firstUnresolvedReviewItemId(
+export function firstUnresolvedAnnotationId(
   items: readonly {
     readonly id: string;
     readonly reconciliation?: { readonly disposition: { readonly kind: string } };

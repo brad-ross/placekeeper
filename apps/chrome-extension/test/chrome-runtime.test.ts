@@ -4,8 +4,8 @@ import { describe, expect, it, vi } from "vitest";
 import {
   createChromeInteractionOwnerClaimStore,
   chromePdfDisplayName,
-  createNativeEmbeddedReview,
-  type NativeEmbeddedReviewSession,
+  createNativeEmbeddedDocument,
+  type NativeEmbeddedDocumentSession,
 } from "../src/chrome-runtime.js";
 import type { NativePort } from "../src/chrome-api.js";
 
@@ -310,8 +310,8 @@ function runtimePort(options: {
   };
 }
 
-function opener(port: NativePort, overrides: Partial<Parameters<typeof createNativeEmbeddedReview>[0]> = {}) {
-  return createNativeEmbeddedReview({
+function opener(port: NativePort, overrides: Partial<Parameters<typeof createNativeEmbeddedDocument>[0]> = {}) {
+  return createNativeEmbeddedDocument({
     connectNative: () => port,
     fetchStream: vi.fn(async () => new Response(pdf)),
     createId: () => connectionId,
@@ -654,7 +654,7 @@ describe("embedded Chrome review runtime", () => {
 
   it("delivers a runtime response before its related invalidation", async () => {
     const port = runtimePort({ resultThenInvalidation: true, refreshes: [revisionProjection()] });
-    const session: NativeEmbeddedReviewSession = await opener(port)({
+    const session: NativeEmbeddedDocumentSession = await opener(port)({
       originalUrl: "https://papers.example.test/Review.pdf",
       streamUrl: "blob:chrome-authorized-stream",
     });
@@ -1377,7 +1377,7 @@ describe("embedded Chrome review runtime", () => {
     expect(session.protected).toBe(true);
   });
 
-  it.each([undefined, 1])("rejects review runtime version %s before consuming the one-shot stream", async (reviewRuntimeVersion) => {
+  it.each([undefined, 1])("rejects review runtime version %s before consuming the one-shot stream", async (documentRuntimeVersion) => {
     const onMessage = new ReplyEvent<unknown>();
     const port: NativePort = {
       onMessage,
@@ -1386,7 +1386,7 @@ describe("embedded Chrome review runtime", () => {
       postMessage() {
         queueMicrotask(() => onMessage.emit({
           type: "hello-ack",
-          ...(reviewRuntimeVersion === undefined ? {} : { reviewRuntimeVersion }),
+          ...(documentRuntimeVersion === undefined ? {} : { reviewRuntimeVersion: documentRuntimeVersion }),
           protocol: "placekeeper.chrome-runtime",
           protocolVersion: 2,
           connectionId,
@@ -1407,7 +1407,7 @@ describe("embedded Chrome review runtime", () => {
 
   it("does not consume the MIME stream when the registered native host is absent", async () => {
     const fetchStream = vi.fn(async () => new Response(pdf));
-    const open = createNativeEmbeddedReview({
+    const open = createNativeEmbeddedDocument({
       connectNative: () => { throw new Error("native-host-missing"); },
       fetchStream,
       createId: () => connectionId,

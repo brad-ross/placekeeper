@@ -1,5 +1,5 @@
 import type { CSSProperties } from 'react';
-import type { ReviewItem } from '../../../../packages/core/src/review-model.js';
+import type { Annotation } from '../../../../packages/core/src/review-model.js';
 import {
   AnnotationRowContent,
   type AnnotationListContent,
@@ -9,7 +9,7 @@ import type { CopyLinkControlProps } from './CopyLinkControl.js';
 import type { AnnotationReaderRecord } from './annotation-reader.js';
 
 export interface AnnotationPeekProps {
-  item: ReviewItem;
+  item: Annotation;
   presentation?: AnnotationListContent;
   kind?: string;
   pageNumber?: number;
@@ -131,12 +131,12 @@ export function AnnotationPeek({
 export interface AnnotationRecordPeekProps extends Omit<AnnotationPeekProps,
   'item' | 'presentation' | 'kind' | 'pageNumber' | 'lastPageNumber' | 'readerRecord' | 'origin' | 'readOnly'> {
   readonly record: AnnotationReaderRecord;
-  readonly item?: ReviewItem;
+  readonly item?: Annotation;
 }
 
 /** Render any resolved annotation record through the same compact card used by Main PDF peeks. */
 export function AnnotationRecordPeek({ record, item, ...props }: AnnotationRecordPeekProps) {
-  const projectedItem: ReviewItem = item ?? {
+  const projectedItem: Annotation = item ?? {
     id: record.identity.origin === 'owned'
       ? record.identity.itemId
       : record.identity.annotationKey,

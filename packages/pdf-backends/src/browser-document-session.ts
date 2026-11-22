@@ -4,7 +4,7 @@ import type {
   PdfWriteResult,
   PdfWriter,
 } from '../../core/src/pdf-writer.js';
-import type { ReviewItem } from '../../core/src/review-model.js';
+import type { Annotation } from '../../core/src/review-model.js';
 
 export interface BrowserPdfProjectionIdentity {
   readonly pageIndex: number;
@@ -12,7 +12,7 @@ export interface BrowserPdfProjectionIdentity {
 }
 
 export interface BrowserPdfInspection {
-  readonly portableItems: readonly ReviewItem[];
+  readonly portableItems: readonly Annotation[];
   readonly ownedProjections: readonly BrowserPdfProjectionIdentity[];
 }
 

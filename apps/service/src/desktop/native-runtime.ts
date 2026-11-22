@@ -8,10 +8,10 @@ import { pathToFileURL } from "node:url";
 
 import {
   NATIVE_HELPER_RESOURCE_CHUNK_BYTES,
-  parseNativeReviewHelperMessage,
+  parseNativeDocumentHelperMessage,
   sanitizeNativeRuntimeProjection,
-  type NativeReviewHelperMessage,
-  type NativeReviewHelperResponse,
+  type NativeDocumentHelperMessage,
+  type NativeDocumentHelperResponse,
   type NativeRuntimeProjection,
 } from "../../../../packages/core/src/native-helper-protocol.js";
 import {
@@ -20,17 +20,17 @@ import {
   type PlacekeeperLinkLocation,
 } from "../../../../packages/core/src/placekeeper-link.js";
 import {
-  sanitizeNativeReviewRuntimeResponse,
+  sanitizeNativeDocumentRuntimeResponse,
   type NativeRuntimeHost,
-  sanitizeReviewRuntimeDisplayString,
-  type ReviewRuntimeBrokerMethod,
+  sanitizeDocumentRuntimeDisplayString,
+  type DocumentRuntimeBrokerMethod,
 } from "../../../../packages/core/src/review-runtime-protocol.js";
 import type {
   ChromeRuntimeBackend,
   ChromeRuntimeProjection,
   ChromeRuntimeRecovery,
   ChromeRuntimeSourceSink,
-  ChromeRuntimeStagedReview,
+  ChromeRuntimeStagedDocument,
 } from "../browser/chrome-runtime.js";
 
 import { canonicalJson } from "../runtime/canonical-json.js";
@@ -39,7 +39,7 @@ export type NativeRuntimeBackend = ChromeRuntimeBackend;
 export type NativeRuntimeTrustedProjection = ChromeRuntimeProjection;
 export type { NativeRuntimeProjection };
 
-const NON_IDEMPOTENT = new Set<ReviewRuntimeBrokerMethod>([
+const NON_IDEMPOTENT = new Set<DocumentRuntimeBrokerMethod>([
   "command", "beginInteraction", "finalizeInteraction", "releaseInteraction", "acknowledgeInteraction",
   "chooseCopy", "chooseFolder", "chooseOriginal", "retrySave", "locateSave", "exportReviewedCopy",
 ]);
@@ -63,7 +63,7 @@ interface StagedRuntimeRecord extends RuntimeRecordBase {
   adoptedResourceGeneration: number;
   taskLaunch?: NativeTaskLaunchAdmission;
   taskLaunchAwaitingActivation?: boolean;
-  interactionAttachment?: import("../sessions/review-interactions.js").ReviewInteractionAttachment;
+  interactionAttachment?: import("../sessions/review-interactions.js").DocumentInteractionAttachment;
 }
 
 interface RecoveryRuntimeRecord extends RuntimeRecordBase {
@@ -78,7 +78,7 @@ interface RequestRecord {
   readonly fingerprint: string;
   readonly controller: AbortController;
   readonly releaseRequest: () => void;
-  result: Promise<NativeReviewHelperResponse>;
+  result: Promise<NativeDocumentHelperResponse>;
   releaseResource: (() => void) | undefined;
   completed: boolean;
 }
@@ -124,7 +124,7 @@ export class NativeRuntimeManager {
   readonly #limits: Required<NativeRuntimeManagerOptions>;
   readonly #records = new Map<string, RuntimeRecord>();
   readonly #requests = new Map<string, RequestRecord>();
-  readonly #pendingResultsByHelper = new Map<string, Set<Promise<NativeReviewHelperResponse>>>();
+  readonly #pendingResultsByHelper = new Map<string, Set<Promise<NativeDocumentHelperResponse>>>();
   readonly #completedRequestKeysByHelper = new Map<string, string[]>();
   readonly #activeRequestsByHelper = new Map<string, number>();
   readonly #activeResourcesByHelper = new Map<string, number>();
@@ -184,8 +184,8 @@ export class NativeRuntimeManager {
     return record?.phase === "recovery" ? undefined : record?.resourceId;
   }
 
-  async handle(helperId: string, raw: unknown): Promise<NativeReviewHelperResponse> {
-    const message = parseNativeReviewHelperMessage(this.#host, raw);
+  async handle(helperId: string, raw: unknown): Promise<NativeDocumentHelperResponse> {
+    const message = parseNativeDocumentHelperMessage(this.#host, raw);
     if (message === undefined || !/^[A-Za-z0-9_-]{8,128}$/u.test(helperId)) {
       return this.#failure(rawEnvelope(raw), "invalid");
     }
@@ -219,7 +219,7 @@ export class NativeRuntimeManager {
       else this.#retainCompletedRequest(helperId, requestKey, request);
     });
     request.result = result;
-    const pending = this.#pendingResultsByHelper.get(helperId) ?? new Set<Promise<NativeReviewHelperResponse>>();
+    const pending = this.#pendingResultsByHelper.get(helperId) ?? new Set<Promise<NativeDocumentHelperResponse>>();
     this.#pendingResultsByHelper.set(helperId, pending);
     pending.add(result);
     const settled = () => {
@@ -232,10 +232,10 @@ export class NativeRuntimeManager {
 
   async #dispatch(
     helperId: string,
-    message: NativeReviewHelperMessage,
+    message: NativeDocumentHelperMessage,
     signal: AbortSignal,
     request: RequestRecord,
-  ): Promise<NativeReviewHelperResponse> {
+  ): Promise<NativeDocumentHelperResponse> {
     const existing = this.#records.get(helperId);
     if (existing === undefined) {
       if (message.type === "admit-launch") return this.#admitLaunch(helperId, message, signal);
@@ -272,10 +272,10 @@ export class NativeRuntimeManager {
 
   async #admitLaunch(
     helperId: string,
-    message: Extract<NativeReviewHelperMessage, { readonly type: "admit-launch" }>,
+    message: Extract<NativeDocumentHelperMessage, { readonly type: "admit-launch" }>,
     signal: AbortSignal,
     existing?: RuntimeRecord,
-  ): Promise<NativeReviewHelperResponse> {
+  ): Promise<NativeDocumentHelperResponse> {
     const launches = this.#backend.nativeTaskLaunches;
     const admission = launches?.reserve(message.launchId);
     if (admission === undefined || launches === undefined) return this.#failure(message, "invalid");
@@ -322,9 +322,9 @@ export class NativeRuntimeManager {
 
   async #admit(
     helperId: string,
-    message: Extract<NativeReviewHelperMessage, { readonly type: "admit" | "admit-link" }>,
+    message: Extract<NativeDocumentHelperMessage, { readonly type: "admit" | "admit-link" }>,
     signal: AbortSignal,
-  ): Promise<NativeReviewHelperResponse> {
+  ): Promise<NativeDocumentHelperResponse> {
     if (this.#records.size >= this.#limits.maxHelpers) return this.#failure(message, "budget");
     let sourcePath: string;
     let location: PlacekeeperLinkLocation | undefined;
@@ -360,7 +360,7 @@ export class NativeRuntimeManager {
       const staged = await sink.finish(undefined, signal);
       if (!("choose" in staged)) canonicalKey = staged.canonicalKey;
       throwIfAborted(signal);
-      const displayName = sanitizeReviewRuntimeDisplayString(basename(sourcePath));
+      const displayName = sanitizeDocumentRuntimeDisplayString(basename(sourcePath));
       if (displayName === undefined) throw new Error("invalid-display-name");
       if ("choose" in staged) {
         this.#records.set(helperId, {
@@ -389,13 +389,13 @@ export class NativeRuntimeManager {
 
   async #recover(
     record: RecoveryRuntimeRecord,
-    message: Extract<NativeReviewHelperMessage, { readonly type: "recover" }>,
+    message: Extract<NativeDocumentHelperMessage, { readonly type: "recover" }>,
     signal: AbortSignal,
-  ): Promise<NativeReviewHelperResponse> {
+  ): Promise<NativeDocumentHelperResponse> {
     if (message.offer.id !== record.recovery.offer.id || message.offer.expiresAt !== record.recovery.offer.expiresAt) {
       return this.#failure(message, "invalid");
     }
-    let staged: ChromeRuntimeStagedReview | undefined;
+    let staged: ChromeRuntimeStagedDocument | undefined;
     try {
       staged = await record.recovery.choose(message.decision, message.idempotencyKey);
       throwIfAborted(signal);
@@ -408,11 +408,11 @@ export class NativeRuntimeManager {
 
   #stage(
     helperId: string,
-    message: Pick<NativeReviewHelperMessage, "windowId" | "attemptId" | "requestId">,
+    message: Pick<NativeDocumentHelperMessage, "windowId" | "attemptId" | "requestId">,
     displayName: string,
-    staged: ChromeRuntimeStagedReview,
+    staged: ChromeRuntimeStagedDocument,
     location?: PlacekeeperLinkLocation,
-  ): NativeReviewHelperResponse {
+  ): NativeDocumentHelperResponse {
     const trustedProjection = location === undefined
       ? staged.projection
       : { ...staged.projection, location };
@@ -451,9 +451,9 @@ export class NativeRuntimeManager {
 
   async #activate(
     record: StagedRuntimeRecord,
-    message: Extract<NativeReviewHelperMessage, { readonly type: "activate" }>,
+    message: Extract<NativeDocumentHelperMessage, { readonly type: "activate" }>,
     signal: AbortSignal,
-  ): Promise<NativeReviewHelperResponse> {
+  ): Promise<NativeDocumentHelperResponse> {
     if (record.phase !== "provisional" && !record.taskLaunchAwaitingActivation) return this.#failure(message, "invalid");
     const taskLaunch = record.taskLaunch;
     if (record.taskLaunchAwaitingActivation) {
@@ -505,9 +505,9 @@ export class NativeRuntimeManager {
 
   async #refresh(
     record: StagedRuntimeRecord,
-    message: Extract<NativeReviewHelperMessage, { readonly type: "refresh" }>,
+    message: Extract<NativeDocumentHelperMessage, { readonly type: "refresh" }>,
     signal: AbortSignal,
-  ): Promise<NativeReviewHelperResponse> {
+  ): Promise<NativeDocumentHelperResponse> {
     try {
       const trusted = await this.#backend.current(record.canonicalKey, signal);
       throwIfAborted(signal);
@@ -524,9 +524,9 @@ export class NativeRuntimeManager {
 
   async #keepalive(
     record: StagedRuntimeRecord,
-    message: Extract<NativeReviewHelperMessage, { readonly type: "keepalive" }>,
+    message: Extract<NativeDocumentHelperMessage, { readonly type: "keepalive" }>,
     signal: AbortSignal,
-  ): Promise<NativeReviewHelperResponse> {
+  ): Promise<NativeDocumentHelperResponse> {
     if (record.phase !== "active") return this.#failure(message, "invalid");
     try {
       const previous = record.projection;
@@ -562,10 +562,10 @@ export class NativeRuntimeManager {
 
   async #invoke(
     record: StagedRuntimeRecord,
-    message: Extract<NativeReviewHelperMessage, { readonly type: "invoke" }>,
+    message: Extract<NativeDocumentHelperMessage, { readonly type: "invoke" }>,
     signal: AbortSignal,
     trustedDestinationSelection?: { readonly selectedPath: string | null },
-  ): Promise<NativeReviewHelperResponse> {
+  ): Promise<NativeDocumentHelperResponse> {
     if (record.phase !== "active") return this.#failure(message, "invalid");
     const navigation = message.method === "forwardSyncTex" || message.method === "reverseSyncTex";
     if (message.generation !== record.projection.generation || (!navigation && message.revision !== record.projection.revision)) {
@@ -622,7 +622,7 @@ export class NativeRuntimeManager {
             record.presentationLease,
           ) ?? { status: "unauthorized" };
       throwIfAborted(signal);
-      const payload = sanitizeNativeReviewRuntimeResponse(this.#host, message.method, result);
+      const payload = sanitizeNativeDocumentRuntimeResponse(this.#host, message.method, result);
       if (payload === undefined) return this.#failure(message, "unavailable");
       if (message.method === "upgradePoll") return { ...this.#envelope(message), type: "result", method: message.method, payload };
       const current = await this.#backend.current(record.canonicalKey, signal);
@@ -641,10 +641,10 @@ export class NativeRuntimeManager {
 
   async #read(
     record: StagedRuntimeRecord,
-    message: Extract<NativeReviewHelperMessage, { readonly type: "read-resource" }>,
+    message: Extract<NativeDocumentHelperMessage, { readonly type: "read-resource" }>,
     signal: AbortSignal,
     request: RequestRecord,
-  ): Promise<NativeReviewHelperResponse> {
+  ): Promise<NativeDocumentHelperResponse> {
     const descriptor = record.documents.get(message.generation);
     if (message.resourceId !== record.resourceId || descriptor === undefined
       || message.offset + message.length > descriptor.byteLength) {
@@ -682,8 +682,8 @@ export class NativeRuntimeManager {
 
   #adoptResource(
     record: StagedRuntimeRecord,
-    message: Extract<NativeReviewHelperMessage, { readonly type: "adopt-resource" }>,
-  ): NativeReviewHelperResponse {
+    message: Extract<NativeDocumentHelperMessage, { readonly type: "adopt-resource" }>,
+  ): NativeDocumentHelperResponse {
     const descriptor = record.documents.get(message.generation);
     if (message.resourceId !== record.resourceId || descriptor === undefined
       || descriptor.byteLength !== message.byteLength || descriptor.digest !== message.digest
@@ -712,8 +712,8 @@ export class NativeRuntimeManager {
 
   #copyLink(
     record: StagedRuntimeRecord,
-    message: Extract<NativeReviewHelperMessage, { readonly type: "copy-link" }>,
-  ): NativeReviewHelperResponse {
+    message: Extract<NativeDocumentHelperMessage, { readonly type: "copy-link" }>,
+  ): NativeDocumentHelperResponse {
     if (record.phase !== "active") return this.#failure(message, "invalid");
     const link = `${record.trustedProjection.canonicalLinkBase}#${encodePlacekeeperLinkFragment(message.location)}`;
     return { ...this.#envelope(message), type: "placekeeper-link", link };
@@ -809,7 +809,7 @@ export class NativeRuntimeManager {
     if (completed.length === 0) this.#completedRequestKeysByHelper.delete(helperId);
   }
 
-  #envelope(message: Pick<NativeReviewHelperMessage, "windowId" | "attemptId" | "requestId">) {
+  #envelope(message: Pick<NativeDocumentHelperMessage, "windowId" | "attemptId" | "requestId">) {
     return {
       protocolVersion: 1 as const,
       windowId: message.windowId,
@@ -820,8 +820,8 @@ export class NativeRuntimeManager {
 
   #failure(
     message: { readonly windowId: string; readonly attemptId: string; readonly requestId: string },
-    code: Extract<NativeReviewHelperResponse, { readonly type: "failure" }>["code"],
-  ): NativeReviewHelperResponse {
+    code: Extract<NativeDocumentHelperResponse, { readonly type: "failure" }>["code"],
+  ): NativeDocumentHelperResponse {
     return { ...this.#envelope(message), type: "failure", code };
   }
 }

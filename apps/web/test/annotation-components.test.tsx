@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 
-import type { ReviewItem } from '../../../packages/core/src/review-model.js';
+import type { Annotation } from '../../../packages/core/src/review-model.js';
 import {
   AnnotationList,
   AnnotationRowContent,
@@ -18,10 +18,10 @@ import {
   FullAnnotationReader,
   shouldRestoreFullAnnotationReaderFocus,
 } from '../src/review/FullAnnotationReader.js';
-import { ReviewIcon } from '../src/review/ReviewIcon.js';
+import { ReaderIcon } from '../src/review/ReviewIcon.js';
 import { projectExistingAnnotationReader, projectOwnedAnnotationReader } from '../src/review/annotation-reader.js';
 
-const replacement: ReviewItem = {
+const replacement: Annotation = {
   id: 'replace-1',
   kind: 'replace',
   pageIndex: 3,
@@ -30,14 +30,14 @@ const replacement: ReviewItem = {
   payload: { quote: 'imprecise source', proposedText: 'precise replacement' },
 };
 
-const highlightWithComment: ReviewItem = {
+const highlightWithComment: Annotation = {
   ...replacement,
   id: 'highlight-with-comment',
   kind: 'highlight',
   payload: { comment: 'Explain why this identifies the coefficient.', quote: 'Local variation identifies demand.' },
 };
 
-const highlightWithoutComment: ReviewItem = {
+const highlightWithoutComment: Annotation = {
   ...replacement,
   id: 'highlight-without-comment',
   kind: 'highlight',
@@ -78,7 +78,7 @@ describe('annotation row and reader presentation', () => {
   });
 
   it('names the section beside the page in list rows', () => {
-    const located: ReviewItem = { ...replacement, payload: { ...replacement.payload, rect: { x: 40, y: 300, width: 80, height: 12 } } };
+    const located: Annotation = { ...replacement, payload: { ...replacement.payload, rect: { x: 40, y: 300, width: 80, height: 12 } } };
     const sectionLabelAt = vi.fn(() => 'Short Panel Settings');
     const html = renderToStaticMarkup(<AnnotationList
       items={[located]}
@@ -283,7 +283,7 @@ describe('annotation row and reader presentation', () => {
   });
 
   it('keeps Main native annotation subtype metadata when no peek override is supplied', () => {
-    const nativeHighlight: ReviewItem = {
+    const nativeHighlight: Annotation = {
       ...replacement,
       id: 'native-highlight',
       kind: 'pdfAnnotation',
@@ -396,7 +396,7 @@ describe('annotation row and reader presentation', () => {
     expect(palette).toMatch(/aria-label="Delete"[\s\S]*?lucide-trash-2/u);
     expect(palette).not.toMatch(/aria-label="Delete"[\s\S]*?lucide-minus/u);
 
-    const deletion: ReviewItem = {
+    const deletion: Annotation = {
       ...replacement,
       id: 'delete-1',
       kind: 'delete',
@@ -405,7 +405,7 @@ describe('annotation row and reader presentation', () => {
     const row = renderToStaticMarkup(<AnnotationRowContent item={deletion} />);
     expect(row).toContain('data-annotation-kind-icon="delete"');
     expect(row).toContain('lucide-trash-2');
-    expect(renderToStaticMarkup(<ReviewIcon name="minus" />)).toContain('lucide-minus');
+    expect(renderToStaticMarkup(<ReaderIcon name="minus" />)).toContain('lucide-minus');
   });
 });
 

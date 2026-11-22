@@ -6,24 +6,24 @@ import {
   addInsert,
   addPageNote,
   addReplace,
-  editReviewItem,
-  removeReviewItem,
-  type ReviewCommandFactory,
+  editAnnotation,
+  removeAnnotation,
+  type DocumentCommandFactory,
 } from '../src/review-commands.js';
 import {
-  anchorEvidenceFromReviewItem,
-  canonicalizeReviewItem,
-  createReviewState,
-  normalizeReviewSelectionAnchor,
-  startReviewGeneration,
-  type PendingReviewDraftV1,
-  type ReviewCommand,
-  type ReviewState,
+  anchorEvidenceFromAnnotation,
+  canonicalizeAnnotation,
+  createDocumentState,
+  normalizeDocumentSelectionAnchor,
+  startDocumentGeneration,
+  type PendingDocumentDraftV1,
+  type DocumentCommand,
+  type DocumentState,
 } from '../src/review-model.js';
 import {
-  InvalidReviewCommandError,
-  MAX_REVIEW_SELECTION_SEGMENTS,
-  reduceReview,
+  InvalidDocumentCommandError,
+  MAX_DOCUMENT_SELECTION_SEGMENTS,
+  reduceDocument,
 } from '../src/review-reducer.js';
 import {
   PORTABLE_ANNOTATION_MAX_BYTES,
@@ -72,9 +72,9 @@ const caret = {
   reliable: true as const,
 };
 
-function setup(): { state: ReviewState; commands: ReviewCommandFactory } {
+function setup(): { state: DocumentState; commands: DocumentCommandFactory } {
   let id = 0;
-  const commands = new (class implements ReviewCommandFactory {
+  const commands = new (class implements DocumentCommandFactory {
     createId() {
       id += 1;
       return `00000000-0000-4000-8000-${String(id).padStart(12, '0')}`;
@@ -84,12 +84,12 @@ function setup(): { state: ReviewState; commands: ReviewCommandFactory } {
     }
   })();
   return {
-    state: createReviewState({ sessionId: 'session', source }),
+    state: createDocumentState({ sessionId: 'session', source }),
     commands,
   };
 }
 
-function protectedDraft(state: ReviewState, text: string): PendingReviewDraftV1 {
+function protectedDraft(state: DocumentState, text: string): PendingDocumentDraftV1 {
   return { id: '00000000-0000-4000-8000-000000000999', ownerViewId: 'panel-a',
     baseGeneration: state.workflow.documentGeneration, revision: 0, kind: 'highlight', pageIndex: 0, text,
     anchor: { kind: 'selection', ...selection }, disposition: { kind: 'resolved', generation: state.workflow.documentGeneration },
@@ -100,67 +100,67 @@ describe('canonical review commands', () => {
   it('keeps hundreds of durable draft updates outside semantic history and Apply consumes the draft permanently', () => {
     let { state } = setup();
     for (let index = 0; index < 300; index++) {
-      state = reduceReview(state, { type: 'put-draft', expectedRevision: state.revision,
+      state = reduceDocument(state, { type: 'put-draft', expectedRevision: state.revision,
         expectedDraftRevision: index - 1, draft: protectedDraft(state, `text ${index}`) });
     }
     expect(state.revision).toBe(300);
     expect(state.pendingDrafts[0]?.revision).toBe(299);
     expect(state.history).toHaveLength(0);
-    state = reduceReview(state, { type: 'apply-draft', expectedRevision: state.revision,
+    state = reduceDocument(state, { type: 'apply-draft', expectedRevision: state.revision,
       id: state.pendingDrafts[0]!.id, expectedDraftRevision: 299, ownerViewId: 'panel-a', updatedAt: '2026-08-07T12:01:00.000Z' });
     expect(state.history).toHaveLength(1);
     expect(state.history[0]).toMatchObject({ schemaVersion: 1, itemChanges: [{ before: null }] });
-    state = reduceReview(state, { type: 'undo', expectedRevision: state.revision });
+    state = reduceDocument(state, { type: 'undo', expectedRevision: state.revision });
     expect(state.items).toEqual([]);
     expect(state.pendingDrafts).toEqual([]);
   });
 
   it('undoes an applied edit to its previous item without reopening its consumed draft', () => {
     let { state, commands } = setup();
-    state = reduceReview(state, addHighlight(state, selection, 'Original', commands));
+    state = reduceDocument(state, addHighlight(state, selection, 'Original', commands));
     const original = state.items[0]!;
-    state = reduceReview(state, { type: 'put-draft', expectedRevision: state.revision, expectedDraftRevision: -1,
+    state = reduceDocument(state, { type: 'put-draft', expectedRevision: state.revision, expectedDraftRevision: -1,
       draft: { ...protectedDraft(state, 'Revised'), targetItemId: original.id } });
-    state = reduceReview(state, { type: 'apply-draft', expectedRevision: state.revision, id: state.pendingDrafts[0]!.id,
+    state = reduceDocument(state, { type: 'apply-draft', expectedRevision: state.revision, id: state.pendingDrafts[0]!.id,
       expectedDraftRevision: 0, ownerViewId: 'panel-a', updatedAt: '2026-08-07T12:01:00.000Z' });
     expect(state.items[0]?.payload.comment).toBe('Revised');
     expect(state.history).toHaveLength(2);
-    state = reduceReview(state, { type: 'undo', expectedRevision: state.revision });
+    state = reduceDocument(state, { type: 'undo', expectedRevision: state.revision });
     expect(state.items).toEqual([original]);
     expect(state.pendingDrafts).toEqual([]);
-    state = reduceReview(state, { type: 'redo', expectedRevision: state.revision });
+    state = reduceDocument(state, { type: 'redo', expectedRevision: state.revision });
     expect(state.items[0]?.payload.comment).toBe('Revised');
     expect(state.pendingDrafts).toEqual([]);
   });
 
   it('preserves redo and other current drafts and their audit through document undo', () => {
     let { state, commands } = setup();
-    state = reduceReview(state, addHighlight(state, selection, 'Keep', commands));
-    state = reduceReview(state, { type: 'undo', expectedRevision: state.revision });
-    state = reduceReview(state, { type: 'put-draft', expectedRevision: state.revision,
+    state = reduceDocument(state, addHighlight(state, selection, 'Keep', commands));
+    state = reduceDocument(state, { type: 'undo', expectedRevision: state.revision });
+    state = reduceDocument(state, { type: 'put-draft', expectedRevision: state.revision,
       expectedDraftRevision: -1, draft: protectedDraft(state, 'other view text') });
     expect(state.historyCursor).toBe(0);
     expect(state.history).toHaveLength(1);
-    state = reduceReview(state, { type: 'discard-reconciliation', target: 'draft', id: state.pendingDrafts[0]!.id,
+    state = reduceDocument(state, { type: 'discard-reconciliation', target: 'draft', id: state.pendingDrafts[0]!.id,
       expectedRevision: state.revision, expectedTargetRevision: 0, ownerViewId: 'panel-a', reason: 'discard draft', discardedAt: '2026-08-07T12:02:00.000Z' });
     expect(state.historyCursor).toBe(0);
-    state = reduceReview(state, { type: 'redo', expectedRevision: state.revision });
-    state = reduceReview(state, { type: 'discard-reconciliation', target: 'item', id: state.items[0]!.id,
+    state = reduceDocument(state, { type: 'redo', expectedRevision: state.revision });
+    state = reduceDocument(state, { type: 'discard-reconciliation', target: 'item', id: state.items[0]!.id,
       expectedRevision: state.revision, expectedTargetRevision: 0, ownerViewId: 'panel-a', reason: 'discard item', discardedAt: '2026-08-07T12:03:00.000Z' });
-    state = reduceReview(state, { type: 'put-draft', expectedRevision: state.revision,
+    state = reduceDocument(state, { type: 'put-draft', expectedRevision: state.revision,
       expectedDraftRevision: -1, draft: protectedDraft(state, 'latest other view text') });
-    state = reduceReview(state, { type: 'discard-reconciliation', target: 'draft', id: state.pendingDrafts[0]!.id,
+    state = reduceDocument(state, { type: 'discard-reconciliation', target: 'draft', id: state.pendingDrafts[0]!.id,
       expectedRevision: state.revision, expectedTargetRevision: 0, ownerViewId: 'panel-a', reason: 'later draft discard', discardedAt: '2026-08-07T12:04:00.000Z' });
-    state = reduceReview(state, { type: 'put-draft', expectedRevision: state.revision,
+    state = reduceDocument(state, { type: 'put-draft', expectedRevision: state.revision,
       expectedDraftRevision: -1, draft: protectedDraft(state, 'latest other view text') });
     const drafts = state.pendingDrafts;
-    state = reduceReview(state, { type: 'undo', expectedRevision: state.revision });
+    state = reduceDocument(state, { type: 'undo', expectedRevision: state.revision });
     expect(state.items).toHaveLength(1);
     expect(state.pendingDrafts).toEqual(drafts);
     expect(state.discardAudit.map(({ target, reason }) => ({ target, reason }))).toEqual([
       { target: 'draft', reason: 'discard draft' }, { target: 'draft', reason: 'later draft discard' },
     ]);
-    state = startReviewGeneration(state, { documentGeneration: 2 });
+    state = startDocumentGeneration(state, { documentGeneration: 2 });
     expect(state.history).toEqual([]);
     expect(state.historyCursor).toBe(0);
     expect(state.items).toHaveLength(1);
@@ -169,25 +169,25 @@ describe('canonical review commands', () => {
 
   it('dispatches legacy snapshot undo without restoring consumed or unrelated draft snapshots', () => {
     let { state, commands } = setup();
-    state = reduceReview(state, addHighlight(state, selection, 'Keep', commands));
+    state = reduceDocument(state, addHighlight(state, selection, 'Keep', commands));
     const draft = protectedDraft(state, 'current draft');
     state = { ...state, pendingDrafts: [draft], history: [{ beforeItems: [], afterItems: state.items,
       beforePendingDrafts: [], afterPendingDrafts: [] }], historyCursor: 1 };
-    state = reduceReview(state, { type: 'undo', expectedRevision: state.revision });
+    state = reduceDocument(state, { type: 'undo', expectedRevision: state.revision });
     expect(state.items).toEqual([]);
     expect(state.pendingDrafts).toEqual([draft]);
-    state = reduceReview(state, { type: 'redo', expectedRevision: state.revision });
+    state = reduceDocument(state, { type: 'redo', expectedRevision: state.revision });
     expect(state.items).toHaveLength(1);
     expect(state.pendingDrafts).toEqual([draft]);
   });
 
   it.each([
-    ['replace', (state: ReviewState, commands: ReviewCommandFactory) => addReplace(state, crossPageSelection, 'revised', commands)],
-    ['delete', (state: ReviewState, commands: ReviewCommandFactory) => addDelete(state, crossPageSelection, commands)],
-    ['highlight', (state: ReviewState, commands: ReviewCommandFactory) => addHighlight(state, crossPageSelection, 'Keep', commands)],
+    ['replace', (state: DocumentState, commands: DocumentCommandFactory) => addReplace(state, crossPageSelection, 'revised', commands)],
+    ['delete', (state: DocumentState, commands: DocumentCommandFactory) => addDelete(state, crossPageSelection, commands)],
+    ['highlight', (state: DocumentState, commands: DocumentCommandFactory) => addHighlight(state, crossPageSelection, 'Keep', commands)],
   ])('creates one atomic cross-page %s item and history entry', (_kind, build) => {
     let { state, commands } = setup();
-    state = reduceReview(state, build(state, commands));
+    state = reduceDocument(state, build(state, commands));
 
     expect(state.items).toHaveLength(1);
     expect(state.history).toHaveLength(1);
@@ -200,15 +200,15 @@ describe('canonical review commands', () => {
       },
     });
 
-    state = reduceReview(state, { type: 'undo', expectedRevision: state.revision });
+    state = reduceDocument(state, { type: 'undo', expectedRevision: state.revision });
     expect(state.items).toEqual([]);
-    state = reduceReview(state, { type: 'redo', expectedRevision: state.revision });
+    state = reduceDocument(state, { type: 'redo', expectedRevision: state.revision });
     expect(state.items).toHaveLength(1);
     expect(state.items[0]?.payload.pages).toEqual(crossPageSelection.pages);
   });
 
   it('normalizes legacy selection evidence without changing compatibility fields', () => {
-    expect(normalizeReviewSelectionAnchor(selection)).toEqual({
+    expect(normalizeDocumentSelectionAnchor(selection)).toEqual({
       ...selection,
       pages: [{
         pageIndex: selection.pageIndex,
@@ -232,7 +232,7 @@ describe('canonical review commands', () => {
       { ...crossPageSelection, pages: [crossPageSelection.pages[0]!, { ...crossPageSelection.pages[1]!, rect: { x: 0, y: 0, width: -1, height: 2 } }] },
     ];
     for (const anchor of malformed) {
-      expect(() => reduceReview(state, addDelete(state, anchor, commands))).toThrow(InvalidReviewCommandError);
+      expect(() => reduceDocument(state, addDelete(state, anchor, commands))).toThrow(InvalidDocumentCommandError);
       expect(state).toMatchObject({ revision: 0, items: [], history: [] });
     }
 
@@ -245,7 +245,7 @@ describe('canonical review commands', () => {
       segmentRects: selection.segmentRects,
     }));
     const twelvePages = pages.slice(0, 12);
-    expect(() => reduceReview(state, addDelete(state, {
+    expect(() => reduceDocument(state, addDelete(state, {
       ...selection,
       quote: twelvePages.map(({ quote }) => quote).join('\n'),
       prefix: '',
@@ -253,7 +253,7 @@ describe('canonical review commands', () => {
       pages: twelvePages,
       pageBoundaries: twelvePages.slice(0, -1).map(({ pageIndex }) => ({ afterPageIndex: pageIndex, separator: '\n' })),
     }, commands))).not.toThrow();
-    expect(() => reduceReview(state, addDelete(state, {
+    expect(() => reduceDocument(state, addDelete(state, {
       ...selection,
       quote: pages.map(({ quote }) => quote).join('\n'),
       prefix: '',
@@ -287,8 +287,8 @@ describe('canonical review commands', () => {
       };
     };
 
-    expect(() => reduceReview(state, addHighlight(state, anchor(256), undefined, commands))).not.toThrow();
-    expect(() => reduceReview(state, addHighlight(state, anchor(257), undefined, commands)))
+    expect(() => reduceDocument(state, addHighlight(state, anchor(256), undefined, commands))).not.toThrow();
+    expect(() => reduceDocument(state, addHighlight(state, anchor(257), undefined, commands)))
       .toThrow(/at most 256 text segments/iu);
   });
 
@@ -324,7 +324,7 @@ describe('canonical review commands', () => {
       const command = build(length);
       if (command.type !== 'add') throw new Error('Expected add');
       const before = serializePortableAnnotationGroup(command.item);
-      const after = serializePortableAnnotationGroup(canonicalizeReviewItem(command.item, {
+      const after = serializePortableAnnotationGroup(canonicalizeAnnotation(command.item, {
         ownerViewId: 'main',
         baseGeneration: state.workflow.documentGeneration,
       }));
@@ -333,8 +333,8 @@ describe('canonical review commands', () => {
       expect(after.map(({ byteLength }) => byteLength))
         .toEqual(before.map(({ byteLength }) => byteLength));
     }
-    expect(() => reduceReview(state, build(low))).not.toThrow();
-    expect(() => reduceReview(state, build(low + 1))).toThrow(/too much text or geometry/iu);
+    expect(() => reduceDocument(state, build(low))).not.toThrow();
+    expect(() => reduceDocument(state, build(low + 1))).toThrow(/too much text or geometry/iu);
     expect(state).toMatchObject({ revision: 0, items: [], history: [] });
   });
 
@@ -358,12 +358,12 @@ describe('canonical review commands', () => {
     expect(children).toHaveLength(2);
     expect(children.every(({ byteLength }) =>
       byteLength < PORTABLE_ANNOTATION_MAX_BYTES)).toBe(true);
-    expect(() => reduceReview(state, command)).toThrow(/too complex to preserve/iu);
+    expect(() => reduceDocument(state, command)).toThrow(/too complex to preserve/iu);
     expect(state).toMatchObject({ revision: 0, items: [], history: [] });
   });
 
   it('keeps generated-output items and pending authoring generation-bound and revisioned', () => {
-    let state = createReviewState({
+    let state = createDocumentState({
       sessionId: 'session',
       source,
       workflowMode: 'generated-output',
@@ -372,7 +372,7 @@ describe('canonical review commands', () => {
     const commands = setup().commands;
     const addCommand = addReplace(state, selection, 'locally unique equilibrium', commands);
     if (addCommand.type !== 'add') throw new Error('Expected add');
-    state = reduceReview(state, {
+    state = reduceDocument(state, {
       ...addCommand,
       authoring: { ownerViewId: 'panel-a', baseGeneration: 4 },
     });
@@ -389,7 +389,7 @@ describe('canonical review commands', () => {
       disposition: { kind: 'resolved', generation: 4 },
     });
 
-    state = reduceReview(state, {
+    state = reduceDocument(state, {
       type: 'put-draft',
       expectedRevision: state.revision,
       expectedDraftRevision: -1,
@@ -401,7 +401,7 @@ describe('canonical review commands', () => {
         kind: 'replace',
         pageIndex: 0,
         text: 'draft replacement',
-        anchor: anchorEvidenceFromReviewItem(state.items[0]!),
+        anchor: anchorEvidenceFromAnnotation(state.items[0]!),
         disposition: { kind: 'resolved', generation: 4 },
         status: 'protected',
         createdAt: '2026-08-07T12:00:00.000Z',
@@ -410,14 +410,14 @@ describe('canonical review commands', () => {
     });
     expect(state.pendingDrafts[0]).toMatchObject({ revision: 0, status: 'protected' });
 
-    expect(() => reduceReview(state, {
+    expect(() => reduceDocument(state, {
       type: 'put-draft',
       expectedRevision: state.revision,
       expectedDraftRevision: -1,
       draft: { ...state.pendingDrafts[0]!, text: 'racing update' },
     })).toThrow(/draft revision/iu);
 
-    state = reduceReview(state, {
+    state = reduceDocument(state, {
       type: 'apply-draft',
       expectedRevision: state.revision,
       id: state.pendingDrafts[0]!.id,
@@ -436,7 +436,7 @@ describe('canonical review commands', () => {
 
   it('initializes ordinary review reconciliation metadata before a generation transition', () => {
     let { state, commands } = setup();
-    state = reduceReview(state, addHighlight(state, selection, 'Keep', commands));
+    state = reduceDocument(state, addHighlight(state, selection, 'Keep', commands));
 
     expect(state.workflow.mode).toBe('standard');
     expect(state.items[0]?.reconciliation).toMatchObject({
@@ -445,15 +445,15 @@ describe('canonical review commands', () => {
       disposition: { kind: 'resolved', generation: 1 },
     });
 
-    state = startReviewGeneration(state, { documentGeneration: 2 });
+    state = startDocumentGeneration(state, { documentGeneration: 2 });
     expect(state.workflow).toMatchObject({ documentGeneration: 2, historyBoundary: 0 });
-    expect(() => reduceReview(state, { type: 'undo', expectedRevision: state.revision }))
+    expect(() => reduceDocument(state, { type: 'undo', expectedRevision: state.revision }))
       .toThrow(/no review command to undo/iu);
   });
 
   it('applies an acknowledged protected draft in an ordinary review', () => {
     let { state } = setup();
-    state = reduceReview(state, {
+    state = reduceDocument(state, {
       type: 'put-draft',
       expectedRevision: state.revision,
       expectedDraftRevision: -1,
@@ -472,7 +472,7 @@ describe('canonical review commands', () => {
         updatedAt: '2026-09-15T12:00:01.000Z',
       },
     });
-    state = reduceReview(state, {
+    state = reduceDocument(state, {
       type: 'apply-draft',
       expectedRevision: state.revision,
       id: state.pendingDrafts[0]!.id,
@@ -491,18 +491,18 @@ describe('canonical review commands', () => {
 
   it('reattaches while preserving proposed text and fences undo at a rebuild boundary', () => {
     let { state, commands } = setup();
-    state = reduceReview(state, addReplace(state, selection, 'same semantics', commands));
+    state = reduceDocument(state, addReplace(state, selection, 'same semantics', commands));
     const before = state.items[0]!;
-    state = startReviewGeneration(state, { documentGeneration: 2 });
+    state = startDocumentGeneration(state, { documentGeneration: 2 });
     expect(state.items[0]?.reconciliation?.disposition.kind).toBe('missing');
 
     const nextAnchor = {
-      ...anchorEvidenceFromReviewItem(before),
+      ...anchorEvidenceFromAnnotation(before),
       pageIndex: 2,
       rect: { x: 20, y: 30, width: 40, height: 10 },
       segmentRects: [{ x: 20, y: 30, width: 40, height: 10 }],
     };
-    state = reduceReview(state, {
+    state = reduceDocument(state, {
       type: 'reattach',
       expectedRevision: state.revision,
       id: before.id,
@@ -525,17 +525,17 @@ describe('canonical review commands', () => {
       anchor: { pageIndex: 2 },
     });
 
-    state = reduceReview(state, { type: 'undo', expectedRevision: state.revision });
+    state = reduceDocument(state, { type: 'undo', expectedRevision: state.revision });
     expect(state.items[0]?.reconciliation?.disposition.kind).toBe('missing');
-    expect(() => reduceReview(state, { type: 'undo', expectedRevision: state.revision }))
+    expect(() => reduceDocument(state, { type: 'undo', expectedRevision: state.revision }))
       .toThrow(/no review command to undo/iu);
   });
 
   it('reattaches a complete cross-page anchor and synchronizes its payload in one history entry', () => {
     let { state, commands } = setup();
-    state = reduceReview(state, addReplace(state, selection, 'same semantics', commands));
+    state = reduceDocument(state, addReplace(state, selection, 'same semantics', commands));
     const before = state.items[0]!;
-    state = startReviewGeneration(state, { documentGeneration: 2 });
+    state = startDocumentGeneration(state, { documentGeneration: 2 });
     const beforeHistoryLength = state.history.length;
     const pages = [2, 3].map((pageIndex) => ({
       pageIndex,
@@ -557,7 +557,7 @@ describe('canonical review commands', () => {
       pageBoundaries: [{ afterPageIndex: 2, separator: '\n' }],
     };
 
-    state = reduceReview(state, {
+    state = reduceDocument(state, {
       type: 'reattach',
       expectedRevision: state.revision,
       id: before.id,
@@ -578,15 +578,15 @@ describe('canonical review commands', () => {
       pages,
       pageBoundaries: [{ afterPageIndex: 2, separator: '\n' }],
     });
-    state = reduceReview(state, { type: 'undo', expectedRevision: state.revision });
-    expect(state.items[0]?.reconciliation?.anchor).toEqual(anchorEvidenceFromReviewItem(before));
+    state = reduceDocument(state, { type: 'undo', expectedRevision: state.revision });
+    expect(state.items[0]?.reconciliation?.anchor).toEqual(anchorEvidenceFromAnnotation(before));
     expect(state.items[0]?.payload).toEqual(before.payload);
   });
 
   it('rejects unknown and item-incompatible reattachment anchors', () => {
     let { state, commands } = setup();
-    state = reduceReview(state, addReplace(state, selection, 'same semantics', commands));
-    state = startReviewGeneration(state, { documentGeneration: 2 });
+    state = reduceDocument(state, addReplace(state, selection, 'same semantics', commands));
+    state = startDocumentGeneration(state, { documentGeneration: 2 });
     const item = state.items[0]!;
     const command = {
       type: 'reattach',
@@ -597,16 +597,16 @@ describe('canonical review commands', () => {
       updatedAt: '2026-08-07T12:05:00.000Z',
     } as const;
 
-    expect(() => reduceReview(state, {
+    expect(() => reduceDocument(state, {
       ...command,
       anchor: {
         kind: 'unknown',
         pageIndex: 0,
         rect: { x: 20, y: 30, width: 40, height: 10 },
       },
-    } as unknown as ReviewCommand)).toThrow(/anchor kind/iu);
+    } as unknown as DocumentCommand)).toThrow(/anchor kind/iu);
 
-    expect(() => reduceReview(state, {
+    expect(() => reduceDocument(state, {
       ...command,
       anchor: {
         kind: 'caret',
@@ -620,17 +620,17 @@ describe('canonical review commands', () => {
 
   it('drops predecessor redo entries when a rebuild starts', () => {
     let { state, commands } = setup();
-    state = reduceReview(state, addReplace(state, selection, 'first', commands));
-    state = reduceReview(state, { type: 'undo', expectedRevision: state.revision });
+    state = reduceDocument(state, addReplace(state, selection, 'first', commands));
+    state = reduceDocument(state, { type: 'undo', expectedRevision: state.revision });
     expect(state.historyCursor).toBe(0);
     expect(state.history).toHaveLength(1);
 
-    state = startReviewGeneration(state, { documentGeneration: 2 });
+    state = startDocumentGeneration(state, { documentGeneration: 2 });
 
     expect(state.history).toHaveLength(0);
     expect(state.historyCursor).toBe(0);
     expect(state.workflow.historyBoundary).toBe(0);
-    expect(() => reduceReview(state, { type: 'redo', expectedRevision: state.revision }))
+    expect(() => reduceDocument(state, { type: 'redo', expectedRevision: state.revision }))
       .toThrow(/no review command to redo/iu);
   });
 
@@ -644,7 +644,7 @@ describe('canonical review commands', () => {
       () => addPageNote(state, 1, { x: 44, y: 55, width: 18, height: 18 }, 'Rewrite this paragraph.', commands),
     ];
 
-    for (const build of commandBuilders) state = reduceReview(state, build());
+    for (const build of commandBuilders) state = reduceDocument(state, build());
 
     expect(state.revision).toBe(5);
     expect(state.items.map(({ kind }) => kind)).toEqual([
@@ -666,59 +666,59 @@ describe('canonical review commands', () => {
 
     const ids = state.items.map(({ id }) => id);
     for (let index = 0; index < 5; index += 1) {
-      state = reduceReview(state, { type: 'undo', expectedRevision: state.revision });
+      state = reduceDocument(state, { type: 'undo', expectedRevision: state.revision });
     }
     expect(state.items).toEqual([]);
     for (let index = 0; index < 5; index += 1) {
-      state = reduceReview(state, { type: 'redo', expectedRevision: state.revision });
+      state = reduceDocument(state, { type: 'redo', expectedRevision: state.revision });
     }
     expect(state.items.map(({ id }) => id)).toEqual(ids);
   });
 
   it('preserves an ID through edits and undo/redo, while delete-and-recreate gets a new ID', () => {
     let { state, commands } = setup();
-    state = reduceReview(state, addHighlight(state, selection, undefined, commands));
+    state = reduceDocument(state, addHighlight(state, selection, undefined, commands));
     const firstId = state.items[0]!.id;
-    state = reduceReview(state, editReviewItem(state, firstId, { comment: 'Keep this.' }, commands));
+    state = reduceDocument(state, editAnnotation(state, firstId, { comment: 'Keep this.' }, commands));
     expect(state.items[0]).toMatchObject({ id: firstId, payload: { comment: 'Keep this.' } });
 
-    state = reduceReview(state, { type: 'undo', expectedRevision: state.revision });
+    state = reduceDocument(state, { type: 'undo', expectedRevision: state.revision });
     expect(state.items[0]).toMatchObject({ id: firstId, payload: {} });
-    state = reduceReview(state, { type: 'redo', expectedRevision: state.revision });
+    state = reduceDocument(state, { type: 'redo', expectedRevision: state.revision });
     expect(state.items[0]).toMatchObject({ id: firstId, payload: { comment: 'Keep this.' } });
 
-    state = reduceReview(state, removeReviewItem(state, firstId));
-    state = reduceReview(state, addHighlight(state, selection, 'Keep this.', commands));
+    state = reduceDocument(state, removeAnnotation(state, firstId));
+    state = reduceDocument(state, addHighlight(state, selection, 'Keep this.', commands));
     expect(state.items[0]!.id).not.toBe(firstId);
   });
 
   it('persists canonical undo/redo history through recovery serialization', () => {
     let { state, commands } = setup();
-    state = reduceReview(state, addReplace(state, selection, 'locally unique equilibrium', commands));
-    state = reduceReview(state, addDelete(state, { ...selection, quote: 'clearly' }, commands));
-    state = reduceReview(state, { type: 'undo', expectedRevision: state.revision });
+    state = reduceDocument(state, addReplace(state, selection, 'locally unique equilibrium', commands));
+    state = reduceDocument(state, addDelete(state, { ...selection, quote: 'clearly' }, commands));
+    state = reduceDocument(state, { type: 'undo', expectedRevision: state.revision });
 
-    const recovered = JSON.parse(JSON.stringify(state)) as ReviewState;
-    const redone = reduceReview(recovered, { type: 'redo', expectedRevision: recovered.revision });
+    const recovered = JSON.parse(JSON.stringify(state)) as DocumentState;
+    const redone = reduceDocument(recovered, { type: 'redo', expectedRevision: recovered.revision });
     expect(redone.items.map(({ kind }) => kind)).toEqual(['replace', 'delete']);
     expect(redone.revision).toBe(4);
-    const backAgain = reduceReview(redone, { type: 'undo', expectedRevision: redone.revision });
+    const backAgain = reduceDocument(redone, { type: 'undo', expectedRevision: redone.revision });
     expect(backAgain.items.map(({ kind }) => kind)).toEqual(['replace']);
   });
 
   it('clears redo after a new mutation and preserves meaningful whitespace suggestions', () => {
     let { state, commands } = setup();
-    state = reduceReview(state, addReplace(state, selection, 'first', commands));
-    state = reduceReview(state, addDelete(state, selection, commands));
-    state = reduceReview(state, { type: 'undo', expectedRevision: state.revision });
-    state = reduceReview(state, addInsert(state, caret, ' ', commands));
+    state = reduceDocument(state, addReplace(state, selection, 'first', commands));
+    state = reduceDocument(state, addDelete(state, selection, commands));
+    state = reduceDocument(state, { type: 'undo', expectedRevision: state.revision });
+    state = reduceDocument(state, addInsert(state, caret, ' ', commands));
 
     expect(state.historyCursor).toBe(2);
     expect(state.history).toHaveLength(2);
     expect(state.items.map(({ kind }) => kind)).toEqual(['replace', 'insert']);
     expect(state.items[1]?.payload.proposedText).toBe(' ');
-    expect(() => reduceReview(state, { type: 'redo', expectedRevision: state.revision }))
-      .toThrow(InvalidReviewCommandError);
+    expect(() => reduceDocument(state, { type: 'redo', expectedRevision: state.revision }))
+      .toThrow(InvalidDocumentCommandError);
   });
 
   it('rejects payloads that do not deeply match their semantic tool', () => {
@@ -730,33 +730,33 @@ describe('canonical review commands', () => {
       item: { ...command.item, payload: { comment: 'missing anchor' } },
     };
 
-    expect(() => reduceReview(state, invalid)).toThrow(InvalidReviewCommandError);
+    expect(() => reduceDocument(state, invalid)).toThrow(InvalidDocumentCommandError);
 
     const deleteCommand = addDelete(state, selection, commands);
     if (deleteCommand.type !== 'add') throw new Error('Expected an add command');
     const { reliable: _reliable, ...untrustedPayload } = deleteCommand.item.payload;
-    expect(() => reduceReview(state, {
+    expect(() => reduceDocument(state, {
       ...deleteCommand,
       item: { ...deleteCommand.item, payload: untrustedPayload },
-    })).toThrow(InvalidReviewCommandError);
+    })).toThrow(InvalidDocumentCommandError);
   });
 
   it('accepts bounded long selections and rejects larger ones with an actionable error', () => {
     const { state, commands } = setup();
     const segment = { x: 72, y: 92, width: 12, height: 8 };
-    expect(MAX_REVIEW_SELECTION_SEGMENTS).toBe(256);
+    expect(MAX_DOCUMENT_SELECTION_SEGMENTS).toBe(256);
     const maximum = {
       ...selection,
-      segmentRects: Array.from({ length: MAX_REVIEW_SELECTION_SEGMENTS }, () => ({ ...segment })),
+      segmentRects: Array.from({ length: MAX_DOCUMENT_SELECTION_SEGMENTS }, () => ({ ...segment })),
     };
-    expect(() => reduceReview(state, addHighlight(state, maximum, undefined, commands)))
+    expect(() => reduceDocument(state, addHighlight(state, maximum, undefined, commands)))
       .not.toThrow();
 
     const tooLong = {
       ...selection,
       segmentRects: [...maximum.segmentRects, { ...segment }],
     };
-    expect(() => reduceReview(state, addHighlight(state, tooLong, undefined, commands)))
-      .toThrow(`Selections can contain at most ${MAX_REVIEW_SELECTION_SEGMENTS} text segments. Shorten the selection and try again.`);
+    expect(() => reduceDocument(state, addHighlight(state, tooLong, undefined, commands)))
+      .toThrow(`Selections can contain at most ${MAX_DOCUMENT_SELECTION_SEGMENTS} text segments. Shorten the selection and try again.`);
   });
 });

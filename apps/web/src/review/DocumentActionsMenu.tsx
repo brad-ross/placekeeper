@@ -10,23 +10,23 @@ import {
   type KeyboardEvent,
 } from 'react';
 
-import type { ReviewStateSummaryV1 } from '../../../../packages/core/src/live-context.js';
+import type { DocumentStateSummaryV1 } from '../../../../packages/core/src/live-context.js';
 import type { GenerationRefreshStatus } from '../generation-status.js';
 import { enabledMenuItems, menuRovingFocusIndex } from './menu-focus.js';
-import { ReviewIcon } from './ReviewIcon.js';
-import { ReviewTooltipButton } from './ReviewTooltipButton.js';
+import { ReaderIcon } from './ReviewIcon.js';
+import { ReaderTooltipButton } from './ReviewTooltipButton.js';
 
-export interface ReviewExportPresentation {
+export interface DocumentExportPresentation {
   readonly canExport: boolean;
   readonly requiresStaleConfirmation: boolean;
   readonly annotationBlocked: boolean;
   readonly message: string;
 }
 
-export function reviewExportPresentation(input: {
+export function documentExportPresentation(input: {
   readonly refreshStatus: GenerationRefreshStatus;
-  readonly summary: ReviewStateSummaryV1;
-}): ReviewExportPresentation {
+  readonly summary: DocumentStateSummaryV1;
+}): DocumentExportPresentation {
   if (input.refreshStatus === 'reconciling') {
     return {
       canExport: false,
@@ -72,8 +72,8 @@ export interface DocumentActionsMenuProps {
   readonly savedLabel: string;
   readonly showSaveStatusDot?: boolean;
   readonly savePhase?: 'clean' | 'saving' | 'not-saved';
-  readonly presentation: ReviewExportPresentation;
-  readonly onExport: (confirmPossiblyStale?: true) => Promise<ReviewExportResult | void>;
+  readonly presentation: DocumentExportPresentation;
+  readonly onExport: (confirmPossiblyStale?: true) => Promise<DocumentExportResult | void>;
   readonly onOpenAnnotations?: () => void;
   readonly onSaveOptions?: () => void;
   readonly open?: boolean;
@@ -85,12 +85,12 @@ export interface DocumentActionsMenuProps {
 
 type ExportOutcome = 'idle' | 'pending' | 'success' | 'failure';
 
-export interface ReviewExportResult {
+export interface DocumentExportResult {
   readonly kind?: string;
   readonly warning?: string;
 }
 
-function exportMessageFromResult(result: ReviewExportResult | void): string {
+function exportMessageFromResult(result: DocumentExportResult | void): string {
   if (result?.warning !== undefined && result.warning.trim() !== '') return result.warning;
   return 'Annotated Document exported.';
 }
@@ -196,7 +196,7 @@ export function DocumentActionsMenu({
     setExportDetail('');
   }, [open, pending]);
 
-  const exportReviewedPdf = async (confirmPossiblyStale?: true) => {
+  const exportAnnotatedPdf = async (confirmPossiblyStale?: true) => {
     if (pendingRef.current) return;
     pendingRef.current = true;
     setOutcome('pending');
@@ -235,7 +235,7 @@ export function DocumentActionsMenu({
       return;
     }
     setStaleConfirmation(false);
-    void exportReviewedPdf();
+    void exportAnnotatedPdf();
   }, [requestToken]);
 
   const onMenuKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
@@ -287,7 +287,7 @@ export function DocumentActionsMenu({
     data-document-actions-open={open ? 'true' : undefined}
     onBlur={onBlur}
   >
-    <ReviewTooltipButton
+    <ReaderTooltipButton
       label={enabled ? `${identityLabel}, ${savedLabel}. Open document actions` : identityLabel}
       tooltip={documentTitle}
       ref={triggerRef}
@@ -304,11 +304,11 @@ export function DocumentActionsMenu({
         else setOpen(true);
       }}
     >
-      <ReviewIcon name="file" size={16} />
+      <ReaderIcon name="file" size={16} />
       <span className="review-chrome__filename">{displayTitle}</span>
       {!showSaveStatusDot || savePhase === 'clean' ? null : <span className="review-chrome__save-dot" data-save-phase={savePhase} aria-hidden="true" />}
       <span className="sr-only" data-review-saved-status>{savedLabel}</span>
-    </ReviewTooltipButton>
+    </ReaderTooltipButton>
     {open ? <div
       id={menuId}
       className="document-actions__menu"
@@ -332,14 +332,14 @@ export function DocumentActionsMenu({
               setStaleConfirmation(false);
               queueMicrotask(() => exportRef.current?.focus({ preventScroll: true }));
             }}
-          ><ReviewIcon name="close" /><span>Cancel</span></button>
+          ><ReaderIcon name="close" /><span>Cancel</span></button>
           <button
             type="button"
             role="menuitem"
             title="Confirm export"
             aria-disabled={pending}
-            onClick={() => void exportReviewedPdf(true)}
-          ><ReviewIcon name="download" /><span>Confirm export</span></button>
+            onClick={() => void exportAnnotatedPdf(true)}
+          ><ReaderIcon name="download" /><span>Confirm export</span></button>
         </div>
         {resultMessage ? <p
           id={resultId}
@@ -349,7 +349,7 @@ export function DocumentActionsMenu({
           data-export-result={outcome}
         >{resultMessage}</p> : null}
       </> : <>
-        {onSaveOptions === undefined ? null : <button ref={saveOptionsRef} type="button" role="menuitem" title="Open automatic save options" aria-disabled={pending} onClick={() => { if (pending) return; closeForAction(); onSaveOptions(); }}><ReviewIcon name="file" /><span>Save options</span></button>}
+        {onSaveOptions === undefined ? null : <button ref={saveOptionsRef} type="button" role="menuitem" title="Open automatic save options" aria-disabled={pending} onClick={() => { if (pending) return; closeForAction(); onSaveOptions(); }}><ReaderIcon name="file" /><span>Save options</span></button>}
         <button
           ref={exportRef}
           type="button"
@@ -364,10 +364,10 @@ export function DocumentActionsMenu({
               setStaleConfirmation(true);
               return;
             }
-            void exportReviewedPdf();
+            void exportAnnotatedPdf();
           }}
         >
-          <ReviewIcon
+          <ReaderIcon
             name={pending ? 'loading' : outcome === 'success' ? 'check' : 'download'}
 
             className={pending ? 'review-icon document-actions__loading' : 'review-icon'}
@@ -379,7 +379,7 @@ export function DocumentActionsMenu({
           data-document-actions-attention
         >
           <p id={reasonId} className="document-actions__attention-label">
-            <ReviewIcon name="warning" />
+            <ReaderIcon name="warning" />
             <span>{presentation.message}</span>
           </p>
           <button
@@ -392,7 +392,7 @@ export function DocumentActionsMenu({
               closeForAction();
               requestAnimationFrame(onOpenAnnotations);
             }}
-          ><ReviewIcon name="annotations" /><span>Open Annotations</span></button>
+          ><ReaderIcon name="annotations" /><span>Open Annotations</span></button>
         </div> : reasonVisible ? <p id={reasonId} className="document-actions__message">
           {presentation.message}
         </p> : null}

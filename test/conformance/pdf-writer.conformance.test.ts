@@ -6,27 +6,27 @@ import { PDFArray, PDFDict, PDFDocument, PDFName, PDFNumber, PDFRawStream, decod
 import { PdfiumNative } from '@embedpdf/engines/pdfium';
 import { init } from '@embedpdf/pdfium';
 
-import type { PdfWriteRequest, ReviewAnnotation } from '../../packages/core/src/pdf-writer.js';
+import type { PdfWriteRequest, PdfWriterAnnotation } from '../../packages/core/src/pdf-writer.js';
 import { PdfWriterError } from '../../packages/core/src/pdf-writer.js';
 import {
   documentOrderedItems,
-  projectReviewItem,
-  projectReviewItemProjections,
+  projectAnnotation,
+  projectAnnotationProjections,
 } from '../../packages/core/src/annotation-projection.js';
-import { MAX_REVIEW_SELECTION_SEGMENTS } from '../../packages/core/src/review-reducer.js';
-import type { ReviewItem, ReviewState } from '../../packages/core/src/review-model.js';
+import { MAX_DOCUMENT_SELECTION_SEGMENTS } from '../../packages/core/src/review-reducer.js';
+import type { Annotation, DocumentState } from '../../packages/core/src/review-model.js';
 import {
   createEmbedPdfWriter,
   inspectPdfWithEmbedPdf,
-  migrateLegacyReviewStateGeometry,
-  readPortableReviewItems,
+  migrateLegacyDocumentStateGeometry,
+  readPortableAnnotations,
 } from '../../packages/pdf-backends/src/embedpdf-adapter.js';
 import { runPdfBackend } from '../../packages/pdf-backends/src/backend-host.js';
 
 const fixtures = resolve('test/fixtures/pdfs');
 const sha256 = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 
-const annotations: readonly ReviewAnnotation[] = [
+const annotations: readonly PdfWriterAnnotation[] = [
   {
     kind: 'replace',
     id: '11111111-1111-4111-8111-111111111111',
@@ -113,18 +113,18 @@ async function requestFor(name: string, items = annotations): Promise<PdfWriteRe
 
 describe('EmbedPDF writer gate', () => {
   it('updates an app-drawn highlight when a comment is attached or removed', async () => {
-    let item: ReviewItem = {
+    let item: Annotation = {
       id: '70000000-0000-4000-8000-000000000010', kind: 'highlight', pageIndex: 0,
       createdAt: '2026-09-08T12:00:00.000Z', updatedAt: '2026-09-08T12:00:00.000Z',
       payload: { rect: { x: 72, y: 120, width: 100, height: 16 }, segmentRects: [{ x: 72, y: 120, width: 100, height: 16 }], quote: 'test', prefix: '', suffix: '', reliable: true, comment: '' },
     };
     const writer = await createEmbedPdfWriter();
-    let result = await runPdfBackend(writer, await requestFor('text-native.pdf', [projectReviewItem(item)]));
-    expect(await readPortableReviewItems(result.pdfBytes)).toEqual([item]);
+    let result = await runPdfBackend(writer, await requestFor('text-native.pdf', [projectAnnotation(item)]));
+    expect(await readPortableAnnotations(result.pdfBytes)).toEqual([item]);
     for (const [comment, opacity] of [['Attached comment', .25], ['', .36]] as const) {
       item = { ...item, payload: { ...item.payload, comment }, updatedAt: comment ? '2026-09-08T12:01:00.000Z' : '2026-09-08T12:02:00.000Z' };
-      result = await runPdfBackend(writer, { sourcePdf: result.pdfBytes, sourceSha256: sha256(result.pdfBytes), revision: 2, annotations: [projectReviewItem(item)] });
-      expect(await readPortableReviewItems(result.pdfBytes)).toEqual([item]);
+      result = await runPdfBackend(writer, { sourcePdf: result.pdfBytes, sourceSha256: sha256(result.pdfBytes), revision: 2, annotations: [projectAnnotation(item)] });
+      expect(await readPortableAnnotations(result.pdfBytes)).toEqual([item]);
       const pdf = await PDFDocument.load(result.pdfBytes);
       const dictionary = pdf.getPage(0).node.lookup(PDFName.of('Annots'), PDFArray).lookup(0, PDFDict);
       const stream = dictionary.lookup(PDFName.of('AP'), PDFDict).lookup(PDFName.of('N')) as PDFRawStream;
@@ -214,13 +214,13 @@ describe('EmbedPDF writer gate', () => {
   });
 
   it.each([0, 90, 180, 270])('keeps a narrow insertion editable with a readable caret on a %i-degree cropped page', async (rotation) => {
-    const item: ReviewItem = {
+    const item: Annotation = {
       id: '70000000-0000-4000-8000-000000000009', kind: 'insert', pageIndex: 0,
       createdAt: '2026-09-08T12:00:00.000Z', updatedAt: '2026-09-08T12:00:00.000Z',
       payload: { position: { x: 150, y: 120, width: 2, height: 18 }, leftContext: 'before', rightContext: 'after', reliable: true, proposedText: 'new text' },
     };
-    const result = await runPdfBackend(await createEmbedPdfWriter(), await requestFor(`rotation-${rotation}-crop.pdf`, [projectReviewItem(item)]));
-    expect(await readPortableReviewItems(result.pdfBytes)).toEqual([item]);
+    const result = await runPdfBackend(await createEmbedPdfWriter(), await requestFor(`rotation-${rotation}-crop.pdf`, [projectAnnotation(item)]));
+    expect(await readPortableAnnotations(result.pdfBytes)).toEqual([item]);
     const pdf = await PDFDocument.load(result.pdfBytes);
     const page = pdf.getPage(0);
     const annots = page.node.lookup(PDFName.of('Annots'), PDFArray);
@@ -242,7 +242,7 @@ describe('EmbedPDF writer gate', () => {
       rect: { x: 72, y: 92 + pageIndex * 12, width: 120, height: 16 },
       segmentRects: [{ x: 72, y: 92 + pageIndex * 12, width: 120, height: 16 }],
     }));
-    const item: ReviewItem = {
+    const item: Annotation = {
       id: '70000000-0000-4000-8000-000000000007',
       kind: 'highlight',
       pageIndex: 0,
@@ -263,14 +263,14 @@ describe('EmbedPDF writer gate', () => {
         comment: 'Cross-page evidence.',
       },
     };
-    const projected = projectReviewItemProjections(item);
+    const projected = projectAnnotationProjections(item);
     const result = await runPdfBackend(
       await createEmbedPdfWriter(),
       await requestFor('pdf-search.pdf', projected),
     );
     const reopened = await inspectPdfWithEmbedPdf(result.pdfBytes);
 
-    expect(await readPortableReviewItems(result.pdfBytes)).toEqual([item]);
+    expect(await readPortableAnnotations(result.pdfBytes)).toEqual([item]);
     expect(reopened.portableItems).toEqual([item]);
     expect(reopened.annotations.filter(({ id }) => id.startsWith(`${item.id}:projection:`)))
       .toMatchObject(projected.map((annotation) => ({
@@ -285,7 +285,7 @@ describe('EmbedPDF writer gate', () => {
 
   it('rejects an incomplete requested v3 group before producing output', async () => {
     const timestamp = '2026-09-03T12:00:00.000Z';
-    const item: ReviewItem = {
+    const item: Annotation = {
       id: '70000000-0000-4000-8000-000000000008',
       kind: 'delete',
       pageIndex: 0,
@@ -305,7 +305,7 @@ describe('EmbedPDF writer gate', () => {
         reliable: true,
       },
     };
-    const incomplete = projectReviewItemProjections(item).slice(0, 1);
+    const incomplete = projectAnnotationProjections(item).slice(0, 1);
 
     await expect(runPdfBackend(
       await createEmbedPdfWriter(),
@@ -315,7 +315,7 @@ describe('EmbedPDF writer gate', () => {
 
   it('round-trips editable metadata for every app annotation kind', async () => {
     const timestamp = '2026-08-11T12:00:00.000Z';
-    const semanticItems: ReviewItem[] = [
+    const semanticItems: Annotation[] = [
       {
         id: '71111111-1111-4111-8111-111111111111', kind: 'replace', pageIndex: 0,
         createdAt: timestamp, updatedAt: timestamp,
@@ -346,15 +346,15 @@ describe('EmbedPDF writer gate', () => {
       await createEmbedPdfWriter(),
       await requestFor(
         'text-native-with-annotations.pdf',
-        documentOrderedItems(semanticItems).map((item) => projectReviewItem(item)),
+        documentOrderedItems(semanticItems).map((item) => projectAnnotation(item)),
       ),
     );
 
-    expect(await readPortableReviewItems(result.pdfBytes)).toEqual(documentOrderedItems(semanticItems));
+    expect(await readPortableAnnotations(result.pdfBytes)).toEqual(documentOrderedItems(semanticItems));
   });
 
   it('round-trips editable Page Note metadata on a rotated cropped page', async () => {
-    const note: ReviewItem = {
+    const note: Annotation = {
       id: '76666666-6666-4666-8666-666666666666',
       kind: 'pageNote',
       pageIndex: 0,
@@ -367,14 +367,14 @@ describe('EmbedPDF writer gate', () => {
     };
     const result = await runPdfBackend(
       await createEmbedPdfWriter(),
-      await requestFor('rotation-90-crop.pdf', [projectReviewItem(note)]),
+      await requestFor('rotation-90-crop.pdf', [projectAnnotation(note)]),
     );
 
-    expect(await readPortableReviewItems(result.pdfBytes)).toEqual([note]);
+    expect(await readPortableAnnotations(result.pdfBytes)).toEqual([note]);
   });
 
   it('reopens, edits, and deletes app annotations using portable PDF metadata', async () => {
-    const originalItem: ReviewItem = {
+    const originalItem: Annotation = {
       id: '77777777-7777-4777-8777-777777777777',
       kind: 'highlight',
       pageIndex: 0,
@@ -392,11 +392,11 @@ describe('EmbedPDF writer gate', () => {
     };
     const first = await runPdfBackend(
       await createEmbedPdfWriter(),
-      await requestFor('text-native-with-annotations.pdf', [projectReviewItem(originalItem)]),
+      await requestFor('text-native-with-annotations.pdf', [projectAnnotation(originalItem)]),
     );
-    expect(await readPortableReviewItems(first.pdfBytes)).toEqual([originalItem]);
+    expect(await readPortableAnnotations(first.pdfBytes)).toEqual([originalItem]);
 
-    const editedItem: ReviewItem = {
+    const editedItem: Annotation = {
       ...originalItem,
       updatedAt: '2026-08-11T12:01:00.000Z',
       payload: { ...originalItem.payload, comment: 'Edited after reopen' },
@@ -405,9 +405,9 @@ describe('EmbedPDF writer gate', () => {
       sourcePdf: first.pdfBytes,
       sourceSha256: sha256(first.pdfBytes),
       revision: 2,
-      annotations: [projectReviewItem(editedItem)],
+      annotations: [projectAnnotation(editedItem)],
     });
-    expect(await readPortableReviewItems(edited.pdfBytes)).toEqual([editedItem]);
+    expect(await readPortableAnnotations(edited.pdfBytes)).toEqual([editedItem]);
     expect(edited.evidence.preexistingAnnotationIds).toEqual(
       expect.arrayContaining(['existing-highlight', 'existing-stamp']),
     );
@@ -418,7 +418,7 @@ describe('EmbedPDF writer gate', () => {
       revision: 3,
       annotations: [],
     });
-    expect(await readPortableReviewItems(deleted.pdfBytes)).toEqual([]);
+    expect(await readPortableAnnotations(deleted.pdfBytes)).toEqual([]);
     expect((await inspectPdfWithEmbedPdf(deleted.pdfBytes)).annotations.map(({ id }) => id)).toEqual(
       expect.arrayContaining(['existing-highlight', 'existing-stamp']),
     );
@@ -426,7 +426,7 @@ describe('EmbedPDF writer gate', () => {
 
   it('round-trips a 33-segment highlight with prior Placekeeper marks and source links intact', async () => {
     const timestamp = '2026-08-25T12:00:00.000Z';
-    const priorHighlight: ReviewItem = {
+    const priorHighlight: Annotation = {
       id: '80000000-0000-4000-8000-000000000008',
       kind: 'highlight',
       pageIndex: 0,
@@ -447,7 +447,7 @@ describe('EmbedPDF writer gate', () => {
       width: 120,
       height: 8,
     }));
-    const longHighlight: ReviewItem = {
+    const longHighlight: Annotation = {
       id: '90000000-0000-4000-8000-000000000009',
       kind: 'highlight',
       pageIndex: 0,
@@ -464,13 +464,13 @@ describe('EmbedPDF writer gate', () => {
     };
     const first = await runPdfBackend(
       await createEmbedPdfWriter(),
-      await requestFor('preservation-corpus.pdf', [projectReviewItem(priorHighlight)]),
+      await requestFor('preservation-corpus.pdf', [projectAnnotation(priorHighlight)]),
     );
     const second = await runPdfBackend(await createEmbedPdfWriter(), {
       sourcePdf: first.pdfBytes,
       sourceSha256: sha256(first.pdfBytes),
       revision: 7,
-      annotations: [projectReviewItem(priorHighlight), projectReviewItem(longHighlight)],
+      annotations: [projectAnnotation(priorHighlight), projectAnnotation(longHighlight)],
     });
     const reopened = await inspectPdfWithEmbedPdf(second.pdfBytes);
 
@@ -492,13 +492,13 @@ describe('EmbedPDF writer gate', () => {
 
   it('round-trips editable metadata for a highlight at the shared segment limit', async () => {
     const timestamp = '2026-08-25T12:00:00.000Z';
-    const segmentRects = Array.from({ length: MAX_REVIEW_SELECTION_SEGMENTS }, (_, index) => ({
+    const segmentRects = Array.from({ length: MAX_DOCUMENT_SELECTION_SEGMENTS }, (_, index) => ({
       x: 72,
       y: 92 + index * 2,
       width: 120,
       height: 2,
     }));
-    const highlight: ReviewItem = {
+    const highlight: Annotation = {
       id: 'a0000000-0000-4000-8000-00000000000a',
       kind: 'highlight',
       pageIndex: 0,
@@ -508,17 +508,17 @@ describe('EmbedPDF writer gate', () => {
         quote: 'maximum legitimate selection',
         prefix: '',
         suffix: '',
-        rect: { x: 72, y: 92, width: 120, height: MAX_REVIEW_SELECTION_SEGMENTS * 2 },
+        rect: { x: 72, y: 92, width: 120, height: MAX_DOCUMENT_SELECTION_SEGMENTS * 2 },
         segmentRects,
         reliable: true,
       },
     };
     const result = await runPdfBackend(
       await createEmbedPdfWriter(),
-      await requestFor('preservation-corpus.pdf', [projectReviewItem(highlight)]),
+      await requestFor('preservation-corpus.pdf', [projectAnnotation(highlight)]),
     );
 
-    expect(await readPortableReviewItems(result.pdfBytes)).toEqual([highlight]);
+    expect(await readPortableAnnotations(result.pdfBytes)).toEqual([highlight]);
     const reopened = await inspectPdfWithEmbedPdf(result.pdfBytes);
     expect(reopened.portableItems).toEqual([highlight]);
     expect(reopened.annotations.find(({ id }) => id === highlight.id)?.segmentRects)
@@ -556,7 +556,7 @@ describe('EmbedPDF writer gate', () => {
     expect(reopened.annotationSubtypes).toEqual(
       expect.arrayContaining(['strikeOut', 'highlight', 'text', 'stamp']),
     );
-    const expectedSubtype: Partial<Record<ReviewAnnotation['kind'], string>> = {
+    const expectedSubtype: Partial<Record<PdfWriterAnnotation['kind'], string>> = {
       replace: 'strikeOut',
       delete: 'strikeOut',
       insert: 'text',
@@ -631,7 +631,7 @@ describe('EmbedPDF writer gate', () => {
 
   it.each(['legacy', 'compact'] as const)('migrates legacy draft items and %s undo history from CropBox-offset geometry', async (format) => {
     const sourcePdf = new Uint8Array(await readFile(resolve(fixtures, 'text-native.pdf')));
-    const legacyItem: ReviewItem = {
+    const legacyItem: Annotation = {
       id: '78888888-8888-4888-8888-888888888888',
       kind: 'highlight',
       pageIndex: 0,
@@ -647,7 +647,7 @@ describe('EmbedPDF writer gate', () => {
         comment: '',
       },
     };
-    const legacyState: ReviewState = {
+    const legacyState: DocumentState = {
       schemaVersion: 1,
       sessionId: 'legacy-session',
       source: { fileId: 'source', digest: sha256(sourcePdf), byteLength: sourcePdf.byteLength },
@@ -665,7 +665,7 @@ describe('EmbedPDF writer gate', () => {
       historyCursor: 1,
     };
 
-    const migrated = await migrateLegacyReviewStateGeometry(sourcePdf, legacyState);
+    const migrated = await migrateLegacyDocumentStateGeometry(sourcePdf, legacyState);
 
     expect(migrated.schemaVersion).toBe(2);
     expect(migrated.items[0]?.payload.rect).toEqual({ x: 72, y: 92, width: 90, height: 16 });

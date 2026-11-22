@@ -10,13 +10,13 @@ import {
   type Rect,
 } from '@embedpdf/models';
 
-import { PdfWriterError, type ReviewAnnotation } from '../../core/src/pdf-writer.js';
+import { PdfWriterError, type PdfWriterAnnotation } from '../../core/src/pdf-writer.js';
 import {
   inspectPortableAnnotations,
   inspectPortableAnnotationsForImport,
   type VisiblePortableAnnotation,
 } from '../../core/src/portable-annotation.js';
-import type { ReviewItem } from '../../core/src/review-model.js';
+import type { Annotation } from '../../core/src/review-model.js';
 
 const ENCRYPT_MARKER = new TextEncoder().encode('/Encrypt');
 const DOC_MDP_MARKER = new TextEncoder().encode('/DocMDP');
@@ -27,11 +27,11 @@ export type SupportedOutputAnnotation =
   | PdfTextAnnoObject;
 
 export interface PortablePdfAnnotationCatalog {
-  readonly items: readonly ReviewItem[];
+  readonly items: readonly Annotation[];
   readonly owned: readonly {
     readonly pageIndex: number;
     readonly annotation: PdfAnnotationObject;
-    readonly item: ReviewItem;
+    readonly item: Annotation;
   }[];
 }
 
@@ -166,14 +166,14 @@ export function pdfRewriteMarkers(
   };
 }
 
-export function toEmbedPdfRect(rect: ReviewAnnotation['rect']): Rect {
+export function toEmbedPdfRect(rect: PdfWriterAnnotation['rect']): Rect {
   return {
     origin: { x: rect.x, y: rect.y },
     size: { width: rect.width, height: rect.height },
   };
 }
 
-function common(annotation: ReviewAnnotation, type: PdfAnnotationSubtype) {
+function common(annotation: PdfWriterAnnotation, type: PdfAnnotationSubtype) {
   return {
     id: annotation.id,
     type,
@@ -188,8 +188,8 @@ function common(annotation: ReviewAnnotation, type: PdfAnnotationSubtype) {
   };
 }
 
-export function mapReviewAnnotationToEmbedPdf(
-  annotation: ReviewAnnotation,
+export function mapPdfWriterAnnotationToEmbedPdf(
+  annotation: PdfWriterAnnotation,
 ): SupportedOutputAnnotation {
   if (annotation.kind === 'pdfAnnotation') throw new PdfWriterError('backend-error', 'Imported annotations must be edited in their original PDF dictionaries.');
   const style = annotationAppearance(annotation);

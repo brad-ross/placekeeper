@@ -4,7 +4,7 @@ const host = vi.hoisted(() => ({ app: undefined as any, handler: undefined as an
 vi.mock('@modelcontextprotocol/ext-apps', () => ({ App: class { constructor() { host.app = this; } addEventListener() {} getHostContext() { return undefined; } getHostCapabilities() { return undefined; } connect() { return Promise.resolve(); } callServerTool(input: any) { return host.handler(input.arguments.request); } } }));
 vi.mock('../src/extension-shell.js', () => ({ ExtensionShell: class { ownsPanel = false; wake() {} } }));
 vi.mock('../../web/src/host/codex-runtime.js', () => ({ createCodexHostRuntime: (options: any) => { host.options.push(options); return options; } }));
-vi.mock('../../web/src/codex-entry.js', () => ({ mountCodexProductionReview: (...args: any[]) => { host.mounts.push(args); return host.unmount; } }));
+vi.mock('../../web/src/codex-entry.js', () => ({ mountCodexProductionDocument: (...args: any[]) => { host.mounts.push(args); return host.unmount; } }));
 const active = (suffix = 'old') => ({ status: 'active', runtimeId: `runtime_${suffix}`, attemptId: `attempt_${suffix}`, generation: 1, presentationCapability: 'p'.repeat(43), reconnectTicket: 'r'.repeat(43), continuationCapability: suffix === 'old' ? 'c'.repeat(43) : 'd'.repeat(43) });
 const reply = (value: any) => ({ _meta: { [RESPONSE_META_KEY]: value } });
 const elements = new Map<string, any>();

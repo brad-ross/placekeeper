@@ -1,6 +1,6 @@
 import { ensurePrivateDirectory, writePrivateFile } from "../src/platform/private-storage.js";
 import { addPageNote, setAnnotationName } from "../../../packages/core/src/review-commands.js";
-import type { ReviewItem } from "../../../packages/core/src/review-model.js";
+import type { Annotation } from "../../../packages/core/src/review-model.js";
 import type { PdfWriter } from "../../../packages/core/src/pdf-writer.js";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
@@ -28,7 +28,7 @@ afterEach(async () => {
   await Promise.all(directories.splice(0).map((path) => rm(path, { recursive: true, force: true })));
 });
 
-async function runtimeFixture(writerOverride?: PdfWriter, importedItems: readonly ReviewItem[] = []) {
+async function runtimeFixture(writerOverride?: PdfWriter, importedItems: readonly Annotation[] = []) {
   const root = await mkdtemp(join(tmpdir(), "placekeeper-canonical-retention-"));
   directories.push(root);
   const pdfPath = join(root, "paper.pdf");
@@ -271,7 +271,7 @@ describe("canonical review retention", () => {
   });
 
   it("autosaves accepted edits to an imported original and preserves command replay", async () => {
-    const imported: ReviewItem = { id: randomUUID(), kind: "pageNote", pageIndex: 0,
+    const imported: Annotation = { id: randomUUID(), kind: "pageNote", pageIndex: 0,
       createdAt: "2026-09-16T09:00:00.000Z", updatedAt: "2026-09-16T09:00:00.000Z",
       payload: { position: { x: 1, y: 1, width: 2, height: 2 }, comment: "imported" } };
     const writing = Promise.withResolvers<void>();

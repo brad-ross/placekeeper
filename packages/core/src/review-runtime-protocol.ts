@@ -1,13 +1,13 @@
-import { isUpgradeReviewSettlement, upgradeReviewStatus } from "./upgrade-review-protocol.js";
+import { isUpgradeDocumentSettlement, upgradeDocumentStatus } from "./upgrade-review-protocol.js";
 import { nativeSyncTexRequest, nativeSyncTexResponse } from "./native-synctex-protocol.js";
-import type { ReviewAnchorEvidenceV1, SaveDestinationConfirmation } from "./review-model.js";
-export const REVIEW_RUNTIME_PROTOCOL = "placekeeper.review-runtime" as const;
-export const REVIEW_RUNTIME_VERSION = 4 as const;
+import type { DocumentAnchorEvidenceV1, SaveDestinationConfirmation } from "./review-model.js";
+export const DOCUMENT_RUNTIME_PROTOCOL = "placekeeper.review-runtime" as const;
+export const DOCUMENT_RUNTIME_VERSION = 4 as const;
 
-export const REVIEW_RUNTIME_HOSTS = ["vscode", "chrome", "macos", "electron", "codex"] as const;
-export type ReviewRuntimeHost = typeof REVIEW_RUNTIME_HOSTS[number];
+export const DOCUMENT_RUNTIME_HOSTS = ["vscode", "chrome", "macos", "electron", "codex"] as const;
+export type DocumentRuntimeHost = typeof DOCUMENT_RUNTIME_HOSTS[number];
 
-export const REVIEW_RUNTIME_METHODS = [
+export const DOCUMENT_RUNTIME_METHODS = [
   "upgradePoll",
   "upgradeSettle",
   "bootstrap",
@@ -34,7 +34,7 @@ export const REVIEW_RUNTIME_METHODS = [
 
 export interface ReadingLocationResolutionRequestV1 {
   readonly generation: number;
-  readonly anchor: Extract<ReviewAnchorEvidenceV1, { readonly kind: "caret" }>;
+  readonly anchor: Extract<DocumentAnchorEvidenceV1, { readonly kind: "caret" }>;
 }
 
 export type ReadingLocationResolutionV1 =
@@ -93,42 +93,42 @@ function safeReadingLocationResolution(value: unknown): ReadingLocationResolutio
     rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height } };
 }
 
-export type ReviewRuntimeMethod = typeof REVIEW_RUNTIME_METHODS[number];
-export type ReviewRuntimeInvokeMethod = Exclude<ReviewRuntimeMethod, "bootstrap">;
-export type ReviewRuntimeBrokerMethod = Exclude<
-  ReviewRuntimeInvokeMethod,
+export type DocumentRuntimeMethod = typeof DOCUMENT_RUNTIME_METHODS[number];
+export type DocumentRuntimeInvokeMethod = Exclude<DocumentRuntimeMethod, "bootstrap">;
+export type DocumentRuntimeBrokerMethod = Exclude<
+  DocumentRuntimeInvokeMethod,
   "presence" | "detach"
 >;
 
-export const REVIEW_RUNTIME_HOST_METHODS = {
-  vscode: REVIEW_RUNTIME_METHODS,
-  chrome: REVIEW_RUNTIME_METHODS.filter((method) => (
+export const DOCUMENT_RUNTIME_HOST_METHODS = {
+  vscode: DOCUMENT_RUNTIME_METHODS,
+  chrome: DOCUMENT_RUNTIME_METHODS.filter((method) => (
     method !== "forwardSyncTex" && method !== "reverseSyncTex"
   )),
-  codex: REVIEW_RUNTIME_METHODS.filter((method) => (
+  codex: DOCUMENT_RUNTIME_METHODS.filter((method) => (
     method !== "forwardSyncTex" && method !== "reverseSyncTex"
   )),
-  electron: REVIEW_RUNTIME_METHODS,
-  macos: REVIEW_RUNTIME_METHODS,
-} as const satisfies Readonly<Record<ReviewRuntimeHost, readonly ReviewRuntimeMethod[]>>;
+  electron: DOCUMENT_RUNTIME_METHODS,
+  macos: DOCUMENT_RUNTIME_METHODS,
+} as const satisfies Readonly<Record<DocumentRuntimeHost, readonly DocumentRuntimeMethod[]>>;
 
-const REVIEW_RUNTIME_METHOD_SET: ReadonlySet<string> = new Set(REVIEW_RUNTIME_METHODS);
-const REVIEW_PANEL_KEY = /^[A-Za-z0-9_-]{8,128}$/u;
+const DOCUMENT_RUNTIME_METHOD_SET: ReadonlySet<string> = new Set(DOCUMENT_RUNTIME_METHODS);
+const DOCUMENT_PANEL_KEY = /^[A-Za-z0-9_-]{8,128}$/u;
 
-export function isReviewRuntimeMethod(value: unknown): value is ReviewRuntimeMethod {
-  return typeof value === "string" && REVIEW_RUNTIME_METHOD_SET.has(value);
+export function isDocumentRuntimeMethod(value: unknown): value is DocumentRuntimeMethod {
+  return typeof value === "string" && DOCUMENT_RUNTIME_METHOD_SET.has(value);
 }
 
-export function isReviewRuntimeMethodForHost(
-  host: ReviewRuntimeHost,
+export function isDocumentRuntimeMethodForHost(
+  host: DocumentRuntimeHost,
   value: unknown,
-): value is ReviewRuntimeMethod {
-  return isReviewRuntimeMethod(value) &&
-    (REVIEW_RUNTIME_HOST_METHODS[host] as readonly ReviewRuntimeMethod[]).includes(value);
+): value is DocumentRuntimeMethod {
+  return isDocumentRuntimeMethod(value) &&
+    (DOCUMENT_RUNTIME_HOST_METHODS[host] as readonly DocumentRuntimeMethod[]).includes(value);
 }
 
-export function isReviewPanelKey(value: unknown): value is string {
-  return typeof value === "string" && REVIEW_PANEL_KEY.test(value);
+export function isDocumentPanelKey(value: unknown): value is string {
+  return typeof value === "string" && DOCUMENT_PANEL_KEY.test(value);
 }
 
 const SAFE_RUNTIME_ID = /^[A-Za-z0-9_-]{8,128}$/u;
@@ -147,7 +147,7 @@ const SAVE_FAILURE_REASONS = new Set([
   "verification-failed",
   "write-failed",
 ]);
-const COMMITTED_REVIEWED_COPY_WARNING =
+const COMMITTED_ANNOTATED_COPY_WARNING =
   "The reviewed copy was created, but final durability bookkeeping was interrupted. Verify the saved artifact before closing the review.";
 
 function record(value: unknown): value is Record<string, unknown> {
@@ -169,7 +169,7 @@ function safeActiveAuthoringDraftIds(value: unknown): string[] | undefined {
   return ids;
 }
 
-export function sanitizeReviewRuntimeDisplayString(value: unknown, limit = 255): string | undefined {
+export function sanitizeDocumentRuntimeDisplayString(value: unknown, limit = 255): string | undefined {
   if (typeof value !== "string") return undefined;
   const normalized = value.replace(BIDI_OR_CONTROL, " ").replace(/\s+/gu, " ").trim();
   if (normalized.length === 0) return undefined;
@@ -300,11 +300,11 @@ function safeChromeState(value: unknown): unknown | undefined {
 
 function safeChromeScope(value: unknown): unknown | undefined {
   if (!record(value) || Object.keys(value).some((key) => FORBIDDEN_CHROME_KEY.test(key))) return undefined;
-  const title = sanitizeReviewRuntimeDisplayString(value.documentTitle);
+  const title = sanitizeDocumentRuntimeDisplayString(value.documentTitle);
   if (title === undefined || (value.launchSurface !== undefined && value.launchSurface !== "chrome")) return undefined;
   const sourceDisplayName = value.sourceDisplayName === undefined
     ? undefined
-    : sanitizeReviewRuntimeDisplayString(value.sourceDisplayName);
+    : sanitizeDocumentRuntimeDisplayString(value.sourceDisplayName);
   if (value.sourceDisplayName !== undefined && sourceDisplayName === undefined) return undefined;
   if (value.sourceDisposition !== undefined && value.sourceDisposition !== "local" &&
     value.sourceDisposition !== "remote-temporary") return undefined;
@@ -384,12 +384,12 @@ export function isSaveDestinationConfirmation(value: unknown): value is SaveDest
 }
 
 /** Returns a fresh, closed payload for the Chrome RPC boundary, or rejects it. */
-export function sanitizeChromeReviewRuntimeRequest(
-  method: ReviewRuntimeMethod,
+export function sanitizeChromeDocumentRuntimeRequest(
+  method: DocumentRuntimeMethod,
   payload: unknown,
 ): unknown | undefined {
-  if (!isReviewRuntimeMethodForHost("chrome", method) || !record(payload)) return undefined;
-  if (method === "upgradeSettle") return isUpgradeReviewSettlement(payload) ? closedJsonClone(payload) : undefined;
+  if (!isDocumentRuntimeMethodForHost("chrome", method) || !record(payload)) return undefined;
+  if (method === "upgradeSettle") return isUpgradeDocumentSettlement(payload) ? closedJsonClone(payload) : undefined;
   if (["upgradePoll", "bootstrap", "presence", "detach", "saveStatus", "saveProposal", "chooseFolder",
     "retrySave", "locateSave", "scope"].includes(method)) {
     return Object.keys(payload).length === 0 ? {} : undefined;
@@ -430,18 +430,18 @@ export function sanitizeChromeReviewRuntimeRequest(
   if (method === "chooseCopy") {
     if (!hasOnlyKeys(payload, ["filename", "folderSelectionId", "confirmation"]) ||
       (payload.confirmation !== undefined && !isSaveDestinationConfirmation(payload.confirmation)) ||
-      (payload.filename !== undefined && sanitizeReviewRuntimeDisplayString(payload.filename) === undefined) ||
+      (payload.filename !== undefined && sanitizeDocumentRuntimeDisplayString(payload.filename) === undefined) ||
       (payload.folderSelectionId !== undefined &&
         (typeof payload.folderSelectionId !== "string" || !SAFE_RUNTIME_ID.test(payload.folderSelectionId)))) return undefined;
     return {
-      ...(payload.filename === undefined ? {} : { filename: sanitizeReviewRuntimeDisplayString(payload.filename) }),
+      ...(payload.filename === undefined ? {} : { filename: sanitizeDocumentRuntimeDisplayString(payload.filename) }),
       ...(payload.confirmation === undefined ? {} : { confirmation: closedJsonClone(payload.confirmation) }),
       ...(payload.folderSelectionId === undefined ? {} : { folderSelectionId: payload.folderSelectionId }),
     };
   }
   if (method === "exportReviewedCopy") {
     return hasOnlyKeys(payload, ["confirmPossiblyStale", "fence"]) &&
-      (payload.fence === undefined || isReviewExportFence(payload.fence)) &&
+      (payload.fence === undefined || isDocumentExportFence(payload.fence)) &&
       (payload.confirmPossiblyStale === undefined || payload.confirmPossiblyStale === true)
       ? { ...(payload.confirmPossiblyStale === true ? { confirmPossiblyStale: true } : {}),
         ...(payload.fence === undefined ? {} : { fence: closedJsonClone(payload.fence) }) }
@@ -452,23 +452,23 @@ export function sanitizeChromeReviewRuntimeRequest(
 
 export type NativeRuntimeHost = "macos" | "electron";
 
-export function sanitizeNativeReviewRuntimeRequest(
+export function sanitizeNativeDocumentRuntimeRequest(
   host: NativeRuntimeHost,
-  method: ReviewRuntimeMethod,
+  method: DocumentRuntimeMethod,
   payload: unknown,
 ): unknown | undefined {
-  if (!isReviewRuntimeMethodForHost(host, method)) return undefined;
+  if (!isDocumentRuntimeMethodForHost(host, method)) return undefined;
   if (method === "forwardSyncTex" || method === "reverseSyncTex") return nativeSyncTexRequest(method, payload);
-  return sanitizeChromeReviewRuntimeRequest(method, payload);
+  return sanitizeChromeDocumentRuntimeRequest(method, payload);
 }
 
 /** Projects trusted service output onto the non-authorizing Chrome client contract. */
-export function sanitizeChromeReviewRuntimeResponse(
-  method: ReviewRuntimeMethod,
+export function sanitizeChromeDocumentRuntimeResponse(
+  method: DocumentRuntimeMethod,
   value: unknown,
 ): unknown | undefined {
-  if (!isReviewRuntimeMethodForHost("chrome", method)) return undefined;
-  if (method === "upgradePoll" || method === "upgradeSettle") return upgradeReviewStatus(value);
+  if (!isDocumentRuntimeMethodForHost("chrome", method)) return undefined;
+  if (method === "upgradePoll" || method === "upgradeSettle") return upgradeDocumentStatus(value);
   if (method === "bootstrap") {
     if (!record(value) || !SESSION_ID.test(String(value.sessionId)) || !safeInteger(value.generation) ||
       !safeInteger(value.revision) || !record(value.scope) || !record(value.resources)) return undefined;
@@ -510,13 +510,13 @@ export function sanitizeChromeReviewRuntimeResponse(
     const status = safeChromeSaveStatus(value);
     if (status === undefined || !record(value) || value.nameResult === undefined) return status;
     if (method !== "chooseCopy" && method !== "chooseOriginal") return undefined;
-    const nameResult = sanitizeChromeReviewRuntimeResponse("command", value.nameResult);
+    const nameResult = sanitizeChromeDocumentRuntimeResponse("command", value.nameResult);
     return nameResult === undefined ? undefined : { ...status as object, nameResult };
   }
   if (method === "command") {
     if (record(value) && value.accepted === false) {
       const state = safeChromeState(value.state);
-      const message = sanitizeReviewRuntimeDisplayString(value.message, 512);
+      const message = sanitizeDocumentRuntimeDisplayString(value.message, 512);
       if (state === undefined || message === undefined) return undefined;
       return {
         accepted: false,
@@ -541,7 +541,7 @@ export function sanitizeChromeReviewRuntimeResponse(
     if (value.sourceDisposition === "remote-temporary" &&
       !hasOnlyKeys(value, ["sourceDisposition", "filename", "folder", "folderSelectionId"])) return undefined;
     const filename = value.filename === undefined ? undefined
-      : sanitizeReviewRuntimeDisplayString(value.filename);
+      : sanitizeDocumentRuntimeDisplayString(value.filename);
     if ((value.filename !== undefined || value.sourceDisposition === "local") && filename === undefined) return undefined;
     const selectionId = value.folderSelectionId;
     if (selectionId !== undefined && (typeof selectionId !== "string" ||
@@ -567,13 +567,13 @@ export function sanitizeChromeReviewRuntimeResponse(
   if (method === "exportReviewedCopy") {
     if (!record(value) || value.kind !== "reviewed-copy" || !safeInteger(value.revision) ||
       typeof value.digest !== "string" || !SHA256.test(value.digest) ||
-      (value.warning !== undefined && value.warning !== COMMITTED_REVIEWED_COPY_WARNING)) return undefined;
+      (value.warning !== undefined && value.warning !== COMMITTED_ANNOTATED_COPY_WARNING)) return undefined;
     return {
       kind: "reviewed-copy",
       path: "Annotated Document",
       revision: value.revision,
       digest: value.digest,
-      ...(value.warning === undefined ? {} : { warning: COMMITTED_REVIEWED_COPY_WARNING }),
+      ...(value.warning === undefined ? {} : { warning: COMMITTED_ANNOTATED_COPY_WARNING }),
     };
   }
   return record(value) && Object.keys(value).length === 0 ? {} : undefined;
@@ -581,17 +581,17 @@ export function sanitizeChromeReviewRuntimeResponse(
 
 /** Projects trusted service output without paths, capabilities, or link bases.
  * Link construction stays on the trusted helper/native host-action lane. */
-export function sanitizeNativeReviewRuntimeResponse(
+export function sanitizeNativeDocumentRuntimeResponse(
   host: NativeRuntimeHost,
-  method: ReviewRuntimeMethod,
+  method: DocumentRuntimeMethod,
   value: unknown,
 ): unknown | undefined {
-  if (!isReviewRuntimeMethodForHost(host, method)) return undefined;
+  if (!isDocumentRuntimeMethodForHost(host, method)) return undefined;
   if (method === "scope") return safeNativeScope(host, value);
   if (method === "forwardSyncTex" || method === "reverseSyncTex") return nativeSyncTexResponse(method, value);
   if (method === "bootstrap") {
     if (!record(value) || !record(value.scope)) return undefined;
-    const projected = sanitizeChromeReviewRuntimeResponse("bootstrap", {
+    const projected = sanitizeChromeDocumentRuntimeResponse("bootstrap", {
       ...value,
       scope: { ...value.scope, launchSurface: "chrome" },
       canonicalLinkBase: "placekeeper:///Redacted.pdf",
@@ -602,22 +602,22 @@ export function sanitizeNativeReviewRuntimeResponse(
     const { canonicalLinkBase: _canonicalLinkBase, ...withoutLinkBase } = projected;
     return { ...withoutLinkBase, scope };
   }
-  return sanitizeChromeReviewRuntimeResponse(method, value);
+  return sanitizeChromeDocumentRuntimeResponse(method, value);
 }
 
 /** The acknowledged review that the reader approved for export. */
-export interface ReviewExportFence {
+export interface DocumentExportFence {
   readonly expectedRevision: number;
   readonly documentGeneration: number;
 }
 
-export function isReviewExportFence(value: unknown): value is ReviewExportFence {
+export function isDocumentExportFence(value: unknown): value is DocumentExportFence {
   return record(value) && hasOnlyKeys(value, ["expectedRevision", "documentGeneration"])
     && Number.isSafeInteger(value.expectedRevision) && (value.expectedRevision as number) >= 0
     && Number.isSafeInteger(value.documentGeneration) && (value.documentGeneration as number) >= 1;
 }
 
-export class ReviewExportConflictError extends Error {
+export class DocumentExportConflictError extends Error {
   constructor() {
     super("Document changed. Confirm the annotation name again to export the latest version.");
     this.name = "ReviewExportConflictError";
@@ -663,12 +663,12 @@ function safeCodexContext(value: unknown): unknown | undefined {
 
 /** Native Codex projections share the path-free native host boundary. Resource
  * strings are opaque handles; immutable descriptors travel in the app envelope. */
-export function sanitizeCodexReviewRuntimeResponse(
-  method: ReviewRuntimeMethod,
+export function sanitizeCodexDocumentRuntimeResponse(
+  method: DocumentRuntimeMethod,
   value: unknown,
 ): unknown | undefined {
-  if (!isReviewRuntimeMethodForHost("codex", method)) return undefined;
-  const projected = sanitizeMacosReviewRuntimeResponse(method, value);
+  if (!isDocumentRuntimeMethodForHost("codex", method)) return undefined;
+  const projected = sanitizeMacosDocumentRuntimeResponse(method, value);
   if (!record(projected)) return projected;
   const scope = method === "scope" ? value : record(value) ? value.scope : undefined;
   const codexContext = record(scope) && scope.codexContext !== undefined ? safeCodexContext(scope.codexContext) : undefined;
@@ -680,9 +680,9 @@ export function sanitizeCodexReviewRuntimeResponse(
   return projected;
 }
 
-export function sanitizeMacosReviewRuntimeRequest(method: ReviewRuntimeMethod, value: unknown): unknown | undefined {
-  return sanitizeNativeReviewRuntimeRequest("macos", method, value);
+export function sanitizeMacosDocumentRuntimeRequest(method: DocumentRuntimeMethod, value: unknown): unknown | undefined {
+  return sanitizeNativeDocumentRuntimeRequest("macos", method, value);
 }
-export function sanitizeMacosReviewRuntimeResponse(method: ReviewRuntimeMethod, value: unknown): unknown | undefined {
-  return sanitizeNativeReviewRuntimeResponse("macos", method, value);
+export function sanitizeMacosDocumentRuntimeResponse(method: DocumentRuntimeMethod, value: unknown): unknown | undefined {
+  return sanitizeNativeDocumentRuntimeResponse("macos", method, value);
 }

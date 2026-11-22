@@ -41,7 +41,7 @@ import type {
 } from "./placekeeper-host.js";
 import type { ConditionalShutdownResult } from "./daemon-lifecycle.js";
 
-import { parseElectronReviewHelperMessage } from "../../../../packages/core/src/electron-helper-protocol.js";
+import { parseElectronDocumentHelperMessage } from "../../../../packages/core/src/electron-helper-protocol.js";
 
 // Both directions are explicitly bounded. Evidence requests use a stricter
 // byte budget before base64 expansion, so a document can never turn this
@@ -228,7 +228,7 @@ async function dispatch(
   if (request.kind === "electron-runtime") {
     const lifecycle = host.electronLifecycle;
     const runtime = host.electronRuntime;
-    const message = parseElectronReviewHelperMessage(request.message)!;
+    const message = parseElectronDocumentHelperMessage(request.message)!;
     const isAdmission = message.type === "admit" || message.type === "admit-link" || message.type === "admit-launch";
     const alreadyOwned = lifecycle.ownsHelper(request.appInstanceId, request.helperId);
     if (isAdmission && !host.lifecycle.admissionAllowed()) return { kind: "error", reason: "unavailable" };
@@ -365,7 +365,7 @@ async function dispatch(
       };
     }
     if (request.kind === "retrieve-review-items-by-handle") {
-      const result = host.context.evidence.retrieveReviewItemsWithHandle(request);
+      const result = host.context.evidence.retrieveAnnotationsWithHandle(request);
       return result.status === "ok"
         ? {
             kind: "evidence",
@@ -379,7 +379,7 @@ async function dispatch(
         : { kind: "evidence", result };
     }
     if (request.kind === "retrieve-review-changes-by-handle") {
-      const result = host.context.evidence.retrieveReviewChangesWithHandle(request);
+      const result = host.context.evidence.retrieveDocumentChangesWithHandle(request);
       return result.status === "ok"
         ? {
             kind: "evidence",

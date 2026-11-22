@@ -1,11 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { createReviewCommandSurface } from "../src/review/review-command-surface.js";
+import { createDocumentCommandSurface } from "../src/review/review-command-surface.js";
 
 describe("shared semantic review command surface", () => {
   it("publishes only primitive presentation state and invokes one authorized handler", () => {
     const undo = vi.fn();
-    const surface = createReviewCommandSurface({
+    const surface = createDocumentCommandSurface({
       focusContext: "review",
       canUndo: true,
       canRedo: false,
@@ -35,7 +35,7 @@ describe("shared semantic review command surface", () => {
   it("preserves Cocoa text ownership for undo and redo in editable focus", () => {
     const undo = vi.fn();
     const redo = vi.fn();
-    const surface = createReviewCommandSurface({
+    const surface = createDocumentCommandSurface({
       focusContext: "editable",
       canUndo: true,
       canRedo: true,
@@ -61,7 +61,7 @@ it.each(["review", "editable", "dialog"] as const)("gates PDF zoom with readines
   for (const ready of [false, true]) {
     const zoomIn = vi.fn();
     const zoomOut = vi.fn();
-    const surface = createReviewCommandSurface({
+    const surface = createDocumentCommandSurface({
       focusContext, canUndo: false, canRedo: false, canNavigateBack: false,
       canNavigateForward: false, canFind: false, canOpenAnnotations: false,
       canOpenSaveOptions: false, canFitWidth: ready, canZoom: ready,

@@ -78,7 +78,7 @@ globalThis.viewerAcceptance = {
       scroll.scrollToPage({ pageNumber, behavior: 'instant' });
     }
   },
-  reviewItemCount() {
+  annotationCount() {
     return document.querySelectorAll('[data-review-item]').length;
   },
   interactionCount(type: ViewerInteractionEvent['type']) {
@@ -184,7 +184,7 @@ declare global {
     zoomLevel(): number;
     selectionAnchorStatus(): string;
     goToPage(pageNumber: number): void;
-    reviewItemCount(): number;
+    annotationCount(): number;
     interactionCount(type: ViewerInteractionEvent['type']): number;
     composerActionCount(action: 'apply' | 'cancel'): number;
     caretAnchorPageIndex(): number | null;

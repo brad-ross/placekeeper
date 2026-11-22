@@ -2,12 +2,12 @@ import { establishPrivateDirectory } from "../src/platform/private-storage.js";
 import { expect, it, vi } from 'vitest';
 import { DaemonLifecycleCoordinator } from '../src/host/daemon-lifecycle.js';
 import { UpgradePreparationCoordinator } from '../src/host/upgrade-preparation.js';
-import { UpgradeReviewParticipants } from '../src/host/upgrade-review-participants.js';
+import { UpgradeDocumentParticipants } from '../src/host/upgrade-review-participants.js';
 
 it('protects the final typed revision and leaves prepared peers attached until global commit', async () => {
   const lifecycle = new DaemonLifecycleCoordinator({ activity: () => ({ reviewPresence: 2, codexTasks: 0, transientWork: 0 }), drain: async () => {} });
   const coordinator = new UpgradePreparationCoordinator(lifecycle);
-  const participants = new UpgradeReviewParticipants(coordinator);
+  const participants = new UpgradeDocumentParticipants(coordinator);
   let revision = '1'; let durable = ''; let fail = false;
   participants.attach('browser:a', { revision: () => revision, protect: async () => { durable = revision; } });
   participants.attach('electron:b', { revision: () => '2', protect: async () => { if (fail) throw new Error('disk full'); } });
@@ -28,7 +28,7 @@ it('protects the final typed revision and leaves prepared peers attached until g
 it('ignores stale attempts, does not prepare on decline, and disconnect cancels readiness', async () => {
   const lifecycle = new DaemonLifecycleCoordinator({ activity: () => ({ reviewPresence: 0, codexTasks: 0, transientWork: 0 }), drain: async () => {} });
   const coordinator = new UpgradePreparationCoordinator(lifecycle);
-  const participants = new UpgradeReviewParticipants(coordinator);
+  const participants = new UpgradeDocumentParticipants(coordinator);
   let writes = 0;
   participants.attach('chrome:a', { revision: () => '1', protect: async () => { writes++; } });
   const candidate = { daemonIdentity: 'a'.repeat(64), installArtifactIdentity: 'b'.repeat(64) };
@@ -79,7 +79,7 @@ it('uses live browser and editor connection ownership, requires idle desktop app
       const credential = host.broker.exchangeBootstrap(sessionId, opened.launch.fragment.slice('#cap='.length))!;
       const socket = new WebSocket(`${host.server.origin.replace('http:', 'ws:')}/s/${sessionId}/control`, ['placekeeper', `placekeeper-auth.${credential}`, `placekeeper-view.${randomUUID()}`], surface === 'browser' ? { origin: host.server.origin } : {});
       sockets.push(socket);
-      const attachment = await new Promise<import('../src/sessions/review-interactions.js').ReviewInteractionAttachment>((resolve, reject) => {
+      const attachment = await new Promise<import('../src/sessions/review-interactions.js').DocumentInteractionAttachment>((resolve, reject) => {
         socket.once('error', reject); socket.once('message', (data: unknown) => resolve(JSON.parse(String(data)).attachment));
       });
       const post = async (path: string, body: unknown) => fetch(`${host.server.origin}/s/${sessionId}${path}`, {
@@ -175,7 +175,7 @@ it('uses live browser and editor connection ownership, requires idle desktop app
 it('re-proves a peer final revision, blocks later authoring, and invalidates unexpected committed review changes', async () => {
   const lifecycle = new DaemonLifecycleCoordinator({ activity: () => ({ reviewPresence: 0, codexTasks: 0, transientWork: 0 }), drain: async () => {} });
   const coordinator = new UpgradePreparationCoordinator(lifecycle);
-  const participants = new UpgradeReviewParticipants(coordinator);
+  const participants = new UpgradeDocumentParticipants(coordinator);
   let revision = '1';
   for (const id of ['electron:one', 'chrome:two']) participants.attach(id, { revision: () => revision, protect: async () => {} });
   const attempt = coordinator.preview('development', { daemonIdentity: 'a'.repeat(64), installArtifactIdentity: 'b'.repeat(64) });
@@ -195,7 +195,7 @@ it('re-proves a peer final revision, blocks later authoring, and invalidates une
 
 it('cancels a document generation change instead of accepting it as a final input flush', async () => {
   const lifecycle = new DaemonLifecycleCoordinator({ activity: () => ({ reviewPresence: 0, codexTasks: 0, transientWork: 0 }), drain: async () => {} });
-  const coordinator = new UpgradePreparationCoordinator(lifecycle); const participants = new UpgradeReviewParticipants(coordinator);
+  const coordinator = new UpgradePreparationCoordinator(lifecycle); const participants = new UpgradeDocumentParticipants(coordinator);
   let generation = 1;
   participants.attach('electron:one', { revision: () => `${generation}:0`, generation: () => generation, protect: async () => {} });
   const attempt = coordinator.preview('development', { daemonIdentity: 'a'.repeat(64), installArtifactIdentity: 'b'.repeat(64) });
@@ -207,7 +207,7 @@ it('cancels a document generation change instead of accepting it as a final inpu
 it('negotiates desktop participation without changing a legacy app acknowledgement', async () => {
   const { NativeAppLifecycleManager } = await import('../src/desktop/app-lifecycle.js');
   const lifecycle = new DaemonLifecycleCoordinator({ activity: () => ({ reviewPresence: 0, codexTasks: 0, transientWork: 0 }), drain: async () => {} });
-  const participants = new UpgradeReviewParticipants(new UpgradePreparationCoordinator(lifecycle));
+  const participants = new UpgradeDocumentParticipants(new UpgradePreparationCoordinator(lifecycle));
   const apps = new NativeAppLifecycleManager({ detach: async () => {} }); apps.upgradeParticipants = participants;
   const legacy = { protocolVersion: 1, type: 'register-app', appInstanceId: 'legacy_upgrade_app', processId: process.pid, startIdentity: 'legacy_start_identity', buildIdentity: 'legacy_build_identity' };
   expect(await apps.handle(legacy)).toEqual({ protocolVersion: 1, type: 'ack', appInstanceId: legacy.appInstanceId });
@@ -222,7 +222,7 @@ it('negotiates desktop participation without changing a legacy app acknowledgeme
 it('ignores an obsolete app settlement without killing the persistent app channel or acknowledging its successor', async () => {
   const { NativeAppLifecycleManager } = await import('../src/desktop/app-lifecycle.js');
   const lifecycle = new DaemonLifecycleCoordinator({ activity: () => ({ reviewPresence: 0, codexTasks: 0, transientWork: 0 }), drain: async () => {} });
-  const coordinator = new UpgradePreparationCoordinator(lifecycle); const participants = new UpgradeReviewParticipants(coordinator);
+  const coordinator = new UpgradePreparationCoordinator(lifecycle); const participants = new UpgradeDocumentParticipants(coordinator);
   const apps = new NativeAppLifecycleManager({ detach: async () => {} }); apps.upgradeParticipants = participants;
   const appInstanceId = 'upgrade_stale_app';
   await apps.handle({ protocolVersion: 1, type: 'register-app', appInstanceId, processId: process.pid, startIdentity: 'upgrade_stale_start', buildIdentity: 'upgrade_stale_build', upgradePreparationVersion: 1 });
@@ -286,7 +286,7 @@ it('requires authenticated widget detach or an explicit trusted task end to rele
 it('accepts overlapping reproofs after a peer has made the same durable revision ready', async () => {
   const lifecycle = new DaemonLifecycleCoordinator({ activity: () => ({ reviewPresence: 0, codexTasks: 0, transientWork: 0 }), drain: async () => {} });
   const coordinator = new UpgradePreparationCoordinator(lifecycle);
-  const participants = new UpgradeReviewParticipants(coordinator);
+  const participants = new UpgradeDocumentParticipants(coordinator);
   const delayed = Promise.withResolvers<void>();
   let calls = 0;
   participants.attach('browser:only', { revision: () => '1:7', generation: () => 1,

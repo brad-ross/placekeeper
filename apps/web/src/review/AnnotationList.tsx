@@ -3,20 +3,20 @@ import { annotationContent as annotationListContent, existingAnnotationContent, 
 export { annotationContent as annotationListContent } from './annotation-content.js';
 export type { AnnotationContent as AnnotationListContent } from './annotation-content.js';
 import { useLayoutEffect, useMemo, useRef, type ReactElement, type ReactNode } from 'react';
-import type { ReviewItem } from '../../../../packages/core/src/review-model.js';
+import type { Annotation } from '../../../../packages/core/src/review-model.js';
 import {
   existingAnnotationKey,
   type ExistingAnnotation,
   type ExistingAnnotationsDiscovery,
 } from '../pdf/existing-annotations.js';
-import { documentOrderedItems, reviewItemPageRange } from './annotation-projection.js';
+import { documentOrderedItems, annotationPageRange } from './annotation-projection.js';
 import {
   AnnotationMetadata,
   annotationAccessibleLabel,
   annotationKindLabel,
 } from './AnnotationMetadata.js';
 import type { CopyLinkControlProps } from './CopyLinkControl.js';
-import { ReviewIcon } from './ReviewIcon.js';
+import { ReaderIcon } from './ReviewIcon.js';
 import { AnnotationExcerpt } from './AnnotationExcerpt.js';
 import {
   projectOwnedAnnotationReader,
@@ -27,13 +27,13 @@ import { RowActionGroup, type RowAction } from './RowActionGroup.js';
 import type { PdfDocumentOrderLocation } from '../pdf/document-order-location.js';
 
 export interface AnnotationListProps {
-  items: readonly ReviewItem[];
+  items: readonly Annotation[];
   activeId?: string;
   activeExistingAnnotationKey?: string;
   correspondingId?: string;
   activationRequest?: { readonly id: string; readonly token: number };
-  onNavigate(item: ReviewItem): void;
-  onOpenReference?(item: ReviewItem): void;
+  onNavigate(item: Annotation): void;
+  onOpenReference?(item: Annotation): void;
   existingAnnotations?: ExistingAnnotationsDiscovery;
   documentGeneration?: number;
   onNavigateExisting?(item: ExistingAnnotation): void;
@@ -48,10 +48,10 @@ export interface AnnotationListProps {
   onReaderOverflowChange?(record: AnnotationReaderRecord, overflowing: boolean): void;
   onReaderOverflowChangeExisting?(record: AnnotationReaderRecord, overflowing: boolean): void;
   onCorrespondenceChange?(id: string | undefined): void;
-  copyLinkForItem?(item: ReviewItem): CopyLinkControlProps | undefined;
-  onAddContext?(item: ReviewItem): void;
-  onEdit(item: ReviewItem, trigger: HTMLButtonElement): void;
-  onDelete(item: ReviewItem): Promise<void> | void;
+  copyLinkForItem?(item: Annotation): CopyLinkControlProps | undefined;
+  onAddContext?(item: Annotation): void;
+  onEdit(item: Annotation, trigger: HTMLButtonElement): void;
+  onDelete(item: Annotation): Promise<void> | void;
   attention?: AnnotationAttentionPresentation;
   /** The outline section containing a page location, shown beside the page number. */
   sectionLabelAt?(location: PdfDocumentOrderLocation): string | null;
@@ -68,7 +68,7 @@ export interface AnnotationAttentionPresentation {
 }
 
 type AnnotationListEntry =
-  | { readonly origin: 'owned'; readonly item: ReviewItem; readonly pageIndex: number; readonly x: number; readonly y: number; readonly stableIndex: number }
+  | { readonly origin: 'owned'; readonly item: Annotation; readonly pageIndex: number; readonly x: number; readonly y: number; readonly stableIndex: number }
   | { readonly origin: 'source'; readonly annotation: ExistingAnnotation; readonly pageIndex: number; readonly x: number; readonly y: number; readonly stableIndex: number };
 
 function entryFocusKey(entry: AnnotationListEntry): string {
@@ -77,7 +77,7 @@ function entryFocusKey(entry: AnnotationListEntry): string {
     : `source:${existingAnnotationKey(entry.annotation)}`;
 }
 
-function ownedCoordinate(item: ReviewItem, field: 'x' | 'y'): number {
+function ownedCoordinate(item: Annotation, field: 'x' | 'y'): number {
   const candidate = item.reconciliation?.anchor.rect
     ?? (item.payload.rect && typeof item.payload.rect === 'object' && !Array.isArray(item.payload.rect) ? item.payload.rect : undefined)
     ?? (item.payload.position && typeof item.payload.position === 'object' && !Array.isArray(item.payload.position) ? item.payload.position : undefined);
@@ -87,11 +87,11 @@ function ownedCoordinate(item: ReviewItem, field: 'x' | 'y'): number {
 
 /** One stable reading order across editable and source-PDF annotations. */
 export function combinedDocumentOrderedAnnotations(
-  items: readonly ReviewItem[],
+  items: readonly Annotation[],
   existingAnnotations: ExistingAnnotationsDiscovery,
 ): AnnotationListEntry[] {
   const owned: AnnotationListEntry[] = documentOrderedItems(items).map((item, stableIndex) => ({
-    origin: 'owned', item, pageIndex: reviewItemPageRange(item).firstPageIndex,
+    origin: 'owned', item, pageIndex: annotationPageRange(item).firstPageIndex,
     x: ownedCoordinate(item, 'x'), y: ownedCoordinate(item, 'y'), stableIndex,
   }));
   const source: AnnotationListEntry[] = existingAnnotations.status === 'ready'
@@ -128,7 +128,7 @@ function annotationState(active: boolean, corresponding: boolean): string {
 }
 
 export interface AnnotationRowContentProps {
-  readonly item: ReviewItem;
+  readonly item: Annotation;
   readonly presentation?: AnnotationListContent;
   readonly kind?: string;
   readonly pageNumber?: number;
@@ -189,7 +189,7 @@ export function AnnotationRowContent({
   const presentation = suppliedPresentation ?? annotationListContent(item);
   const text = [presentation.sourceText, presentation.content, presentation.quoteText].filter(Boolean).join(' ');
   const { firstPageIndex, lastPageIndex } = readerRecord === null
-    ? reviewItemPageRange(item)
+    ? annotationPageRange(item)
     : {
         firstPageIndex: readerRecord.pageNumber - 1,
         lastPageIndex: (readerRecord.lastPageNumber ?? readerRecord.pageNumber) - 1,
@@ -351,7 +351,7 @@ export function AnnotationList({
     }
   }, [activationRequest?.id, activationRequest?.token]);
 
-  const remove = async (item: ReviewItem) => {
+  const remove = async (item: Annotation) => {
     const owner = listRef.current?.ownerDocument;
     const focusAtRemoval = owner?.activeElement;
     const index = combined.findIndex((entry) => entry.origin === 'owned' && entry.item.id === item.id);
@@ -506,13 +506,13 @@ export function AnnotationList({
       {attention?.message}
       {existingAnnotations.status === 'loading' ? (
         <p className="annotation-status" data-annotation-status="loading" role="status">
-          <ReviewIcon name="loading" className="review-icon annotation-status__icon" />
+          <ReaderIcon name="loading" className="review-icon annotation-status__icon" />
           <span>Existing annotations are loading…</span>
         </p>
       ) : null}
       {existingAnnotations.status === 'error' ? (
         <div className="workspace-error" data-annotation-status="error" role="alert">
-          <ReviewIcon name="alert" className="review-icon annotation-status__icon" />
+          <ReaderIcon name="alert" className="review-icon annotation-status__icon" />
           <p><strong>Existing annotations unavailable.</strong><span>{existingAnnotations.message}</span></p>
           <button type="button" title="Retry loading existing annotations" onClick={onRetryExistingAnnotations}>Retry</button>
         </div>

@@ -8,7 +8,7 @@ import { describe, expect, it, vi } from "vitest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { RESOURCE_MIME_TYPE } from "@modelcontextprotocol/ext-apps/server";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { CODEX_REVIEW_UI_RESOURCE } from "../../../packages/core/src/codex-mcp-protocol.js";
+import { CODEX_DOCUMENT_UI_RESOURCE } from "../../../packages/core/src/codex-mcp-protocol.js";
 import { callNativeTool, createNativeServer, nativeTools } from "../src/server.js";
 import { APP_TOOL, PENDING_META_KEY, RESPONSE_META_KEY } from "../src/transport-contract.js";
 import type { NativeServiceClient } from "../src/service-client.js";
@@ -106,7 +106,7 @@ describe("packaged native MCP transport", () => {
         for (const tool of launches) expect(tool._meta).toHaveProperty("ui.resourceUri", uri);
         for (const tool of tools.filter(tool => !launches.includes(tool))) expect(tool._meta ?? {}).not.toHaveProperty("ui.resourceUri");
         expect((await client.readResource({ uri })).contents[0]).toMatchObject({ uri, text: shell });
-        expect((await client.readResource({ uri: CODEX_REVIEW_UI_RESOURCE })).contents[0]).toMatchObject({ uri: CODEX_REVIEW_UI_RESOURCE, text: shell });
+        expect((await client.readResource({ uri: CODEX_DOCUMENT_UI_RESOURCE })).contents[0]).toMatchObject({ uri: CODEX_DOCUMENT_UI_RESOURCE, text: shell });
         await expect(client.readResource({ uri: uri.replace(/[a-f0-9]{64}/, "0".repeat(64)) })).rejects.toThrow("Unknown resource");
         expect(JSON.stringify({ tools, uri })).not.toContain(pending.pendingCapability);
       }

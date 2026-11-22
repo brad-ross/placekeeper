@@ -1,21 +1,21 @@
 import { externalWebUrl } from '../../../packages/core/src/external-web-url.js';
-import { isUpgradeReviewSettlement } from "../../../packages/core/src/upgrade-review-protocol.js";
+import { isUpgradeDocumentSettlement } from "../../../packages/core/src/upgrade-review-protocol.js";
 import { nativeSyncTexRequest } from "../../../packages/core/src/native-synctex-protocol.js";
 import {
-  ReviewExportConflictError,
+  DocumentExportConflictError,
   isReadingLocationResolutionRequest,
-  isReviewExportFence,
+  isDocumentExportFence,
   isSaveDestinationConfirmation,
 } from "../../../packages/core/src/review-runtime-protocol.js";
 import { randomBytes } from "node:crypto";
 import WebSocket from "ws";
 import {
-  REVIEW_RUNTIME_PROTOCOL,
-  REVIEW_RUNTIME_VERSION,
-  isReviewRuntimeMethodForHost,
-  type ReviewRuntimeBrokerMethod,
-  type ReviewRuntimeInvokeMethod,
-  type ReviewRuntimeMethod,
+  DOCUMENT_RUNTIME_PROTOCOL,
+  DOCUMENT_RUNTIME_VERSION,
+  isDocumentRuntimeMethodForHost,
+  type DocumentRuntimeBrokerMethod,
+  type DocumentRuntimeInvokeMethod,
+  type DocumentRuntimeMethod,
 } from "../../../packages/core/src/review-runtime-protocol.js";
 
 const SAFE_ID = /^[A-Za-z0-9_-]{16,128}$/u;
@@ -48,15 +48,15 @@ export interface WebviewRpcIdentity {
 }
 
 export interface WebviewRpcRequest {
-  readonly protocol: typeof REVIEW_RUNTIME_PROTOCOL;
-  readonly version: typeof REVIEW_RUNTIME_VERSION;
+  readonly protocol: typeof DOCUMENT_RUNTIME_PROTOCOL;
+  readonly version: typeof DOCUMENT_RUNTIME_VERSION;
   readonly kind: "request";
   readonly panelId: string;
   readonly requestId: string;
   readonly sessionId?: string;
   readonly generation?: number;
   readonly revision?: number;
-  readonly method: ReviewRuntimeMethod;
+  readonly method: DocumentRuntimeMethod;
   readonly payload: unknown;
 }
 
@@ -134,10 +134,10 @@ function containsCapabilityPrimitive(value: unknown, depth = 0): boolean {
   ));
 }
 
-function validPayload(method: ReviewRuntimeMethod, payload: unknown): boolean {
+function validPayload(method: DocumentRuntimeMethod, payload: unknown): boolean {
   if (!isObject(payload) || containsCapabilityPrimitive(payload)) return false;
   const keys = Object.keys(payload);
-  if (method === "upgradeSettle") return isUpgradeReviewSettlement(payload);
+  if (method === "upgradeSettle") return isUpgradeDocumentSettlement(payload);
   if (["upgradePoll", "bootstrap", "presence", "detach", "saveStatus", "saveProposal", "chooseFolder",
     "retrySave", "locateSave", "scope"].includes(method)) {
     return keys.length === 0;
@@ -177,7 +177,7 @@ function validPayload(method: ReviewRuntimeMethod, payload: unknown): boolean {
   }
   if (method === "exportReviewedCopy") {
     return keys.length <= 2 && keys.every((key) => key === "confirmPossiblyStale" || key === "fence") &&
-      (payload.fence === undefined || isReviewExportFence(payload.fence)) &&
+      (payload.fence === undefined || isDocumentExportFence(payload.fence)) &&
       (payload.confirmPossiblyStale === undefined || payload.confirmPossiblyStale === true);
   }
   if (method === "reverseSyncTex") {
@@ -193,11 +193,11 @@ export function parseWebviewRequest(
   expected: WebviewRpcIdentity,
   replayedRequestIds: ReadonlySet<string>,
 ): WebviewRpcRequest | undefined {
-  if (!isObject(value) || !bounded(value) || value.protocol !== REVIEW_RUNTIME_PROTOCOL ||
-    value.version !== REVIEW_RUNTIME_VERSION || value.kind !== "request" ||
+  if (!isObject(value) || !bounded(value) || value.protocol !== DOCUMENT_RUNTIME_PROTOCOL ||
+    value.version !== DOCUMENT_RUNTIME_VERSION || value.kind !== "request" ||
     value.panelId !== expected.panelId || typeof value.requestId !== "string" ||
     !SAFE_ID.test(value.requestId) || replayedRequestIds.has(value.requestId) ||
-    !isReviewRuntimeMethodForHost("vscode", value.method) || !("payload" in value) ||
+    !isDocumentRuntimeMethodForHost("vscode", value.method) || !("payload" in value) ||
     !validPayload(value.method, value.payload)) return undefined;
   if (value.method !== "bootstrap" && (
     value.sessionId !== expected.sessionId || value.generation !== expected.generation || value.revision !== expected.revision
@@ -212,8 +212,8 @@ export function parseWebviewCancel(
   value: unknown,
   expectedPanelId: string,
 ): { readonly requestId: string } | undefined {
-  if (!isObject(value) || !bounded(value) || value.protocol !== REVIEW_RUNTIME_PROTOCOL ||
-    value.version !== REVIEW_RUNTIME_VERSION || value.kind !== "cancel" ||
+  if (!isObject(value) || !bounded(value) || value.protocol !== DOCUMENT_RUNTIME_PROTOCOL ||
+    value.version !== DOCUMENT_RUNTIME_VERSION || value.kind !== "cancel" ||
     value.panelId !== expectedPanelId || typeof value.requestId !== "string" || !SAFE_ID.test(value.requestId)) return undefined;
   return { requestId: value.requestId };
 }
@@ -221,7 +221,7 @@ export function parseWebviewCancel(
 export interface TrustedRuntimeClient {
   readonly identity: WebviewRpcIdentity;
   bootstrap(signal: AbortSignal): Promise<unknown>;
-  invoke(method: ReviewRuntimeInvokeMethod, payload: unknown, signal: AbortSignal): Promise<unknown>;
+  invoke(method: DocumentRuntimeInvokeMethod, payload: unknown, signal: AbortSignal): Promise<unknown>;
   subscribeInvalidations?(listener: (payload: unknown) => void): () => void;
   dispose(): void;
 }
@@ -244,8 +244,8 @@ export class VersionedWebviewBridge {
     this.#postMessage = postMessage;
     this.#unsubscribeInvalidations = client.subscribeInvalidations?.((payload) => {
       this.#postMessage({
-        protocol: REVIEW_RUNTIME_PROTOCOL,
-        version: REVIEW_RUNTIME_VERSION,
+        protocol: DOCUMENT_RUNTIME_PROTOCOL,
+        version: DOCUMENT_RUNTIME_VERSION,
         kind: "event",
         event: "session-invalidated",
         panelId: this.#client.identity.panelId,
@@ -256,11 +256,11 @@ export class VersionedWebviewBridge {
 
   async receive(value: unknown): Promise<void> {
     if (this.#disposed) return;
-    if (isObject(value) && bounded(value) && value.protocol === REVIEW_RUNTIME_PROTOCOL &&
+    if (isObject(value) && bounded(value) && value.protocol === DOCUMENT_RUNTIME_PROTOCOL &&
       value.panelId === this.#client.identity.panelId && value.kind === "request" &&
-      Number.isSafeInteger(value.version) && value.version !== REVIEW_RUNTIME_VERSION &&
+      Number.isSafeInteger(value.version) && value.version !== DOCUMENT_RUNTIME_VERSION &&
       typeof value.requestId === "string" && SAFE_ID.test(value.requestId)) {
-      this.#postMessage({ protocol: REVIEW_RUNTIME_PROTOCOL, version: REVIEW_RUNTIME_VERSION,
+      this.#postMessage({ protocol: DOCUMENT_RUNTIME_PROTOCOL, version: DOCUMENT_RUNTIME_VERSION,
         kind: "response", panelId: this.#client.identity.panelId, requestId: value.requestId,
         ok: false, error: { kind: "runtime-version-mismatch" } });
       return;
@@ -296,7 +296,7 @@ export class VersionedWebviewBridge {
         : await this.#client.invoke(request.method, request.payload, controller.signal);
       if (controller.signal.aborted) return;
       this.#postMessage({
-        protocol: REVIEW_RUNTIME_PROTOCOL, version: REVIEW_RUNTIME_VERSION, kind: "response",
+        protocol: DOCUMENT_RUNTIME_PROTOCOL, version: DOCUMENT_RUNTIME_VERSION, kind: "response",
         ...(requestIdentity ?? this.#client.identity), requestId: request.requestId, ok: true, payload,
       });
     } catch (error) {
@@ -304,16 +304,16 @@ export class VersionedWebviewBridge {
         `[Placekeeper] trusted runtime request failed: ${request.method} (${safeRuntimeRequestFailure(error)})`,
       );
       if (!controller.signal.aborted) this.#postMessage({
-        protocol: REVIEW_RUNTIME_PROTOCOL, version: REVIEW_RUNTIME_VERSION, kind: "response",
+        protocol: DOCUMENT_RUNTIME_PROTOCOL, version: DOCUMENT_RUNTIME_VERSION, kind: "response",
         ...(requestIdentity ?? this.#client.identity), requestId: request.requestId, ok: false,
-        error: { kind: error instanceof ReviewExportConflictError ? "export-conflict" : "rejected" },
+        error: { kind: error instanceof DocumentExportConflictError ? "export-conflict" : "rejected" },
       });
     } finally { this.#active.delete(request.requestId); }
   }
 
   async #openExternalLink(value: Record<string, unknown>): Promise<void> {
     const identity = this.#client.identity;
-    if (!bounded(value) || value.protocol !== REVIEW_RUNTIME_PROTOCOL || value.version !== REVIEW_RUNTIME_VERSION ||
+    if (!bounded(value) || value.protocol !== DOCUMENT_RUNTIME_PROTOCOL || value.version !== DOCUMENT_RUNTIME_VERSION ||
       value.panelId !== identity.panelId || value.sessionId !== identity.sessionId ||
       value.generation !== identity.generation || value.revision !== identity.revision ||
       typeof value.requestId !== 'string' || !SAFE_ID.test(value.requestId) || this.#seen.has(value.requestId)) return;
@@ -324,7 +324,7 @@ export class VersionedWebviewBridge {
     }
     const controller = new AbortController();
     this.#active.set(value.requestId, controller);
-    const response = { protocol: REVIEW_RUNTIME_PROTOCOL, version: REVIEW_RUNTIME_VERSION,
+    const response = { protocol: DOCUMENT_RUNTIME_PROTOCOL, version: DOCUMENT_RUNTIME_VERSION,
       kind: 'external-link-response', ...identity, requestId: value.requestId };
     try {
       const url = externalWebUrl(value.url);
@@ -406,7 +406,7 @@ function safeSaveStatus(value: unknown): unknown {
   return { ...value, destination: { ...destination, targetPath: "Annotated Document" } };
 }
 
-function safeResult(method: ReviewRuntimeBrokerMethod, value: unknown): unknown {
+function safeResult(method: DocumentRuntimeBrokerMethod, value: unknown): unknown {
   switch (method) {
     case "scope":
       return safeScope(value);
@@ -485,7 +485,7 @@ export function createLoopbackRuntimeClient(options: LoopbackRuntimeClientOption
     if (!response.ok && !acceptedStatuses.includes(response.status)) {
       if (path === "/export" && response.status === 409) {
         const rejected = await response.json().catch(() => undefined) as { error?: { kind?: string } } | undefined;
-        if (rejected?.error?.kind === "export-conflict") throw new ReviewExportConflictError();
+        if (rejected?.error?.kind === "export-conflict") throw new DocumentExportConflictError();
       }
       throw new Error(`Trusted broker request failed (${response.status})`);
     }
@@ -520,7 +520,7 @@ export function createLoopbackRuntimeClient(options: LoopbackRuntimeClientOption
     reverseSyncTex: { method: "POST", path: "/synctex/reverse" },
     resolveReadingLocation: { method: "POST", path: "/reading-location" },
     exportReviewedCopy: { method: "POST", path: "/export" },
-  } satisfies Readonly<Record<ReviewRuntimeBrokerMethod, {
+  } satisfies Readonly<Record<DocumentRuntimeBrokerMethod, {
     readonly method: "GET" | "POST";
     readonly path: string;
   }>>;

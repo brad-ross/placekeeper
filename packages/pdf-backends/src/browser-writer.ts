@@ -15,13 +15,13 @@ import {
   type PdfStructuralEvidence,
   type PdfWriteRequest,
   type PdfWriteResult,
-  type ReviewAnnotation,
+  type PdfWriterAnnotation,
 } from '../../core/src/pdf-writer.js';
 import { inspectPortableAnnotations, inspectProjectedPortableAnnotations } from '../../core/src/portable-annotation.js';
 import {
   embedPdfSubtypeName,
   canonicalEmbedPdfValue,
-  mapReviewAnnotationToEmbedPdf,
+  mapPdfWriterAnnotationToEmbedPdf,
   pdfAnnotationIdentity,
   pdfRewriteMarkers,
   portableItemsFromAnnotationPages,
@@ -53,7 +53,7 @@ function closeEngine(engine: PdfEngine<Blob>, document?: PdfDocumentObject): Pro
   })();
 }
 
-function assertSemanticGeometry(annotations: readonly ReviewAnnotation[]): void {
+function assertSemanticGeometry(annotations: readonly PdfWriterAnnotation[]): void {
   const invalid = annotations.find((annotation) => (
     SEMANTIC_MARKUP_KINDS.has(annotation.kind) && annotation.textAnchorReliable !== true
   ));
@@ -66,7 +66,7 @@ function assertSemanticGeometry(annotations: readonly ReviewAnnotation[]): void 
 }
 
 function assertAnnotationWithinPage(
-  annotation: ReviewAnnotation,
+  annotation: PdfWriterAnnotation,
   page: PdfDocumentObject['pages'][number],
 ): void {
   const epsilon = 0.001;
@@ -310,7 +310,7 @@ export async function createBrowserEmbedPdfWriter(
         await engine.createPageAnnotation(
           document,
           document.pages[annotation.pageIndex]!,
-          mapReviewAnnotationToEmbedPdf(annotation),
+          mapPdfWriterAnnotationToEmbedPdf(annotation),
         ).toPromise();
       }
       const output = await saveWithReaderAppearances(engine, document, request.annotations.filter(({ pageIndex, id }) =>

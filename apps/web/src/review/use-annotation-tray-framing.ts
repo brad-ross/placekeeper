@@ -20,8 +20,8 @@ import {
 } from '../pdf/viewer-framing.js';
 
 import {
-  REVIEW_OVERLAY_INSET,
-  REVIEW_OVERLAY_FADE_SIZE,
+  READER_OVERLAY_INSET,
+  READER_OVERLAY_FADE_SIZE,
 } from './use-review-overlay-geometry.js';
 
 const WORKSPACE_SIDE_MAX_PX = 24 * 16;
@@ -63,10 +63,10 @@ function committedWorkspaceRunway(
   for (const surface of surfaces) {
     if (!workspaceSurfaceIsOpen(surface)) continue;
     if (surface.dataset.workspacePresentation === 'bottom') {
-      const clearBoundary = Math.max(0, surface.offsetTop - REVIEW_OVERLAY_INSET - REVIEW_OVERLAY_FADE_SIZE);
+      const clearBoundary = Math.max(0, surface.offsetTop - READER_OVERLAY_INSET - READER_OVERLAY_FADE_SIZE);
       runway.bottom = Math.max(runway.bottom, Math.min(stage.height, stage.height - clearBoundary));
     } else if (!rightDockOpen) {
-      const clearBoundary = Math.max(0, surface.offsetLeft - REVIEW_OVERLAY_INSET - REVIEW_OVERLAY_FADE_SIZE);
+      const clearBoundary = Math.max(0, surface.offsetLeft - READER_OVERLAY_INSET - READER_OVERLAY_FADE_SIZE);
       runway.right = Math.max(runway.right, Math.min(stage.width, stage.width - clearBoundary));
     }
   }

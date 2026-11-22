@@ -6,8 +6,8 @@ import {
   type PlacekeeperLinkLocation,
 } from '../../../../packages/core/src/placekeeper-link.js';
 import type { CopyLinkActionData } from './copy-link-model.js';
-import { ReviewIcon } from './ReviewIcon.js';
-import { ReviewTooltipButton } from './ReviewTooltipButton.js';
+import { ReaderIcon } from './ReviewIcon.js';
+import { ReaderTooltipButton } from './ReviewTooltipButton.js';
 
 export type CopyLinkStatus =
   | { readonly status: 'idle' | 'pending' | 'success' }
@@ -179,7 +179,7 @@ export function CopyLinkControl({
       data-copy-link-status={status.status}
       {...(buttonRole === undefined ? {} : { role: 'presentation' as const })}
     >
-      <ReviewTooltipButton
+      <ReaderTooltipButton
         label={ariaLabel}
         tooltip={title}
         ref={setTriggerNode}
@@ -192,11 +192,11 @@ export function CopyLinkControl({
         disabled={disabled}
         onClick={(event) => run(event.currentTarget, event.detail > 0)}
       >
-        <ReviewIcon name="link" size={16} />
+        <ReaderIcon name="link" size={16} />
         {presentation === 'labeled' ? (
           <span className="copy-link-control__label">{visibleLabel ?? ariaLabel}</span>
         ) : null}
-      </ReviewTooltipButton>
+      </ReaderTooltipButton>
       {status.status === 'success' ? (
         <span className="sr-only" role="status">Link copied.</span>
       ) : null}

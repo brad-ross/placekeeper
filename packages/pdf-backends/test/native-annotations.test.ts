@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { PDFArray, PDFDict, PDFDocument, PDFHexString, PDFName, PDFString } from 'pdf-lib';
 import { PdfAnnotationSubtype } from '@embedpdf/models';
-import { projectReviewItem } from '../../core/src/annotation-projection.js';
+import { projectAnnotation } from '../../core/src/annotation-projection.js';
 import { nativeAnnotationsFromPages, rewriteNativePdfAnnotations } from '../src/native-annotations.js';
 
 const mark = {
@@ -38,7 +38,7 @@ describe('standard PDF comment interoperability', () => {
     const native = nativeAnnotationsFromPages([[mark]], []);
     const item = native[0]!.item;
     const edited = { ...item, payload: { ...item.payload, comment: 'Edited in Placekeeper' } };
-    const output = await rewriteNativePdfAnnotations(source, native, [projectReviewItem(edited)]);
+    const output = await rewriteNativePdfAnnotations(source, native, [projectAnnotation(edited)]);
     const reopened = await PDFDocument.load(output);
     const annots = reopened.getPage(0).node.lookup(PDFName.of('Annots'), PDFArray);
     const saved = annots.lookup(0, PDFDict);

@@ -9,7 +9,7 @@ import {
 } from "../../../../packages/core/src/placekeeper-link.js";
 import type {
   LaunchSurface,
-  OpenReviewResult,
+  OpenDocumentResult,
   RecoveryDecision,
   RecoveryOfferIdentity,
   SessionBroker,
@@ -50,7 +50,7 @@ export interface OpenPlacekeeperLinkRequest {
   readonly surface: LaunchSurface;
 }
 
-export type OpenPlacekeeperLinkResult = OpenReviewResult | {
+export type OpenPlacekeeperLinkResult = OpenDocumentResult | {
   readonly kind: "confirmation-required";
   readonly path: string;
 };
@@ -134,7 +134,7 @@ export async function openPlacekeeperLink(
   const decoded = decodeHostPlacekeeperLink(request.link);
   // Keep this check synchronous with the first linked file operation. If an
   // ownership exemption vanished, no PDF is resolved, opened, or substituted.
-  if (request.confirmed !== true && !broker.activeReviewOwnsPath(decoded.path)) {
+  if (request.confirmed !== true && !broker.activeDocumentOwnsPath(decoded.path)) {
     return { kind: "confirmation-required", path: decoded.path };
   }
   const prepared = await createPlacekeeperLinkForPdf(

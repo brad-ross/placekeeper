@@ -148,10 +148,10 @@ describe("open command", () => {
   it("atomically drains accepted work and cancels when new activity wins the final recheck", async () => {
     const drainStarted = Promise.withResolvers<void>();
     const releaseDrain = Promise.withResolvers<void>();
-    let reviewPresence = 0;
+    let documentPresence = 0;
     let transientWork = 1;
     const lifecycle = new DaemonLifecycleCoordinator({
-      activity: () => ({ reviewPresence, codexTasks: 0, transientWork }),
+      activity: () => ({ reviewPresence: documentPresence, codexTasks: 0, transientWork }),
       drain: async () => {
         drainStarted.resolve();
         await releaseDrain.promise;
@@ -164,7 +164,7 @@ describe("open command", () => {
     expect(lifecycle.status().lifecycle).toBe("draining");
     const activity = lifecycle.enterActivity();
     expect(activity).toBeDefined();
-    reviewPresence = 1;
+    documentPresence = 1;
     activity!.complete();
     releaseDrain.resolve();
 

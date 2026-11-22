@@ -39,7 +39,7 @@ import {
   referencePdfAnnotationSurface,
   type PdfAnnotationSurface,
 } from './annotation-surface.js';
-import type { ReviewAnnotation } from '../../../../packages/core/src/pdf-writer.js';
+import type { PdfWriterAnnotation } from '../../../../packages/core/src/pdf-writer.js';
 import {
   hitTestOwnedMark,
   hitTestOwnedMarkHover,
@@ -174,7 +174,7 @@ export interface ReferencePdfViewportProps {
   readonly searchResultsByPage?: ReadonlyMap<number, readonly PdfSearchResult[]>;
   /** The active References tab's Destination Band, passed like search results. */
   readonly destinationBand?: DestinationBand | null;
-  readonly annotationsByPage?: ReadonlyMap<number, readonly ReviewAnnotation[]>;
+  readonly annotationsByPage?: ReadonlyMap<number, readonly PdfWriterAnnotation[]>;
   readonly geometryByPage?: ReadonlyMap<number, readonly OwnedMarkGeometry[]>;
   readonly authoringPreviewIds?: ReadonlySet<string>;
   readonly sourceRendering?: AnnotationRenderingState;

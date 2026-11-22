@@ -1,6 +1,6 @@
 import type { PdfRewriteEligibility } from "../../../../packages/core/src/pdf-writer.js";
 import type { PlacekeeperLinkLocation } from "../../../../packages/core/src/placekeeper-link.js";
-import type { ReviewItem, ReviewState, ReviewWorkflowMode } from "../../../../packages/core/src/review-model.js";
+import type { Annotation, DocumentState, DocumentWorkflowMode } from "../../../../packages/core/src/review-model.js";
 import type { SessionCredentialStore } from "../../../../packages/core/src/session-security.js";
 import type { ChromePdfInspection } from "../browser/chrome-pdf-validator.js";
 import type { RestartReconnectStore } from "../context/restart-reconnect-store.js";
@@ -30,7 +30,7 @@ export class RecoveryOfferUnavailableError extends Error {
   }
 }
 
-export class ReviewGenerationConflictError extends Error {
+export class DocumentGenerationConflictError extends Error {
   constructor(
     readonly expectedGeneration: number,
     readonly currentGeneration: number,
@@ -42,8 +42,8 @@ export class ReviewGenerationConflictError extends Error {
 }
 export const LAUNCH_SURFACES = ["browser", "finder", "codex", "codex-native", "vscode", "chrome"] as const;
 export type LaunchSurface = typeof LAUNCH_SURFACES[number];
-export const REVIEW_PRESENTATION_SURFACES = [...LAUNCH_SURFACES, "macos", "electron"] as const;
-export type ReviewPresentationSurface = typeof REVIEW_PRESENTATION_SURFACES[number];
+export const DOCUMENT_PRESENTATION_SURFACES = [...LAUNCH_SURFACES, "macos", "electron"] as const;
+export type DocumentPresentationSurface = typeof DOCUMENT_PRESENTATION_SURFACES[number];
 
 export function isRecoveryDecision(value: unknown): value is RecoveryDecision {
   return typeof value === "string" && RECOVERY_DECISIONS.includes(value as RecoveryDecision);
@@ -53,7 +53,7 @@ export function isLaunchSurface(value: unknown): value is LaunchSurface {
   return typeof value === "string" && LAUNCH_SURFACES.includes(value as LaunchSurface);
 }
 
-export interface OpenReviewRequest {
+export interface OpenDocumentRequest {
   readonly pdfPath: string;
   readonly sourceRootPath?: string;
   /** Service-only selection from the private recent-review index. */
@@ -61,11 +61,11 @@ export interface OpenReviewRequest {
   readonly recoveryDecision?: RecoveryDecision;
   readonly recoveryOffer?: RecoveryOfferIdentity;
   readonly recoveryOperationId?: string;
-  readonly surface?: ReviewPresentationSurface;
+  readonly surface?: DocumentPresentationSurface;
   readonly requestedLocation?: PlacekeeperLinkLocation;
-  readonly workflowMode?: ReviewWorkflowMode;
+  readonly workflowMode?: DocumentWorkflowMode;
   /** Creation default only; existing live and resumed reviews retain their mode. */
-  readonly initialWorkflowMode?: ReviewWorkflowMode;
+  readonly initialWorkflowMode?: DocumentWorkflowMode;
 }
 
 export interface SessionLaunch {
@@ -74,12 +74,12 @@ export interface SessionLaunch {
   readonly rootId?: string;
   readonly launchPath: string;
   readonly fragment: string;
-  readonly surface: ReviewPresentationSurface;
+  readonly surface: DocumentPresentationSurface;
   readonly documentGeneration: number;
   readonly bindProof?: string;
 }
 
-export type OpenReviewResult =
+export type OpenDocumentResult =
   | { readonly kind: "opened" | "focused"; readonly launch: SessionLaunch }
   | {
       readonly kind: "recovery-offered";
@@ -111,7 +111,7 @@ export interface SessionBrokerOptions {
   readonly controls?: SessionControlRegistry;
   readonly now?: () => Date;
   readonly snapshotHooks?: SnapshotHooks;
-  readonly portableReader?: (bytes: Uint8Array) => Promise<readonly ReviewItem[]>;
+  readonly portableReader?: (bytes: Uint8Array) => Promise<readonly Annotation[]>;
   readonly rewriteAssessor?: (bytes: Uint8Array) => Promise<PdfRewriteEligibility>;
   readonly browserSourceInspector?: (
     path: string,
@@ -178,7 +178,7 @@ export type SourceWorkInterruptionCollector = (
 export interface AtomicSessionProjection {
   readonly sessionId: string;
   readonly documentGeneration: number;
-  readonly state: ReviewState;
+  readonly state: DocumentState;
   readonly activeAuthoringDraftIds: readonly string[];
   readonly destination: DurableSaveDestination;
   readonly sync: DurableSaveSync;

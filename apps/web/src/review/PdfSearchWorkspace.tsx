@@ -15,8 +15,8 @@ import {
 } from '../pdf/pdf-search-model.js';
 import type { CopyLinkControlProps } from './CopyLinkControl.js';
 import { RowActionGroup, type RowAction } from './RowActionGroup.js';
-import { ReviewIcon } from './ReviewIcon.js';
-import { ReviewTooltipButton } from './ReviewTooltipButton.js';
+import { ReaderIcon } from './ReviewIcon.js';
+import { ReaderTooltipButton } from './ReviewTooltipButton.js';
 
 export interface PdfSearchWorkspaceProps {
   readonly state: PdfSearchState;
@@ -160,7 +160,7 @@ export function PdfSearchWorkspace({
         data-has-query={hasEffectiveQuery}
         onBlur={closeSuggestionsOnBlur}
       >
-        <ReviewIcon name="search" className="review-icon pdf-search__search-icon" />
+        <ReaderIcon name="search" className="review-icon pdf-search__search-icon" />
         <input
           ref={queryInputRef}
           className="pdf-search__input"
@@ -184,7 +184,7 @@ export function PdfSearchWorkspace({
           </span>
         ) : null}
         <span className="pdf-search__clear-slot" aria-hidden={!hasEffectiveQuery ? 'true' : undefined}>
-          <ReviewTooltipButton
+          <ReaderTooltipButton
             label="Clear search"
             type="button"
             className="pdf-search__clear"
@@ -195,10 +195,10 @@ export function PdfSearchWorkspace({
             onPointerDown={(event) => event.preventDefault()}
             onClick={clearQuery}
           >
-            <ReviewIcon name="close" />
-          </ReviewTooltipButton>
+            <ReaderIcon name="close" />
+          </ReaderTooltipButton>
         </span>
-        {indexing ? <ReviewIcon name="loading" className="review-icon pdf-search__spinner" /> : null}
+        {indexing ? <ReaderIcon name="loading" className="review-icon pdf-search__spinner" /> : null}
         {showSymbolSuggestions ? (
           <div
             id="pdf-search-symbol-suggestions"
@@ -237,7 +237,7 @@ export function PdfSearchWorkspace({
       ) : state.message ? (
         <div className="pdf-search__message" role="status">
           {state.status === 'partial' || state.status === 'unavailable'
-            ? <ReviewIcon name="warning" /> : null}
+            ? <ReaderIcon name="warning" /> : null}
           <span>{state.message}</span>
         </div>
       ) : null}

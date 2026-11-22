@@ -7,7 +7,7 @@ import { expect, test } from '@playwright/test';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { RESOURCE_MIME_TYPE } from '@modelcontextprotocol/ext-apps/server';
-import { CODEX_REVIEW_UI_RESOURCE } from '../../packages/core/src/codex-mcp-protocol.js';
+import { CODEX_DOCUMENT_UI_RESOURCE } from '../../packages/core/src/codex-mcp-protocol.js';
 import { candidateExecutable } from './electron-installed-harness.js';
 
 function packagedResources(): string {
@@ -101,8 +101,8 @@ test('bundled independent Node serves MCP tools and the packaged review resource
     for (const name of ['display_review', 'open_pdf', 'open_placekeeper']) {
       expect(tools.tools.find(tool => tool.name === name)?._meta).toHaveProperty('ui.resourceUri', uri);
     }
-    const legacy = await client.readResource({ uri: CODEX_REVIEW_UI_RESOURCE }, { timeout: 10_000 });
-    expect(legacy.contents[0]).toMatchObject({ uri: CODEX_REVIEW_UI_RESOURCE, text: html });
+    const legacy = await client.readResource({ uri: CODEX_DOCUMENT_UI_RESOURCE }, { timeout: 10_000 });
+    expect(legacy.contents[0]).toMatchObject({ uri: CODEX_DOCUMENT_UI_RESOURCE, text: html });
     expect(html).toContain('<!doctype html>');
     await client.close();
     await expect(stat(appSupportRoot(env))).rejects.toMatchObject({ code: 'ENOENT' });

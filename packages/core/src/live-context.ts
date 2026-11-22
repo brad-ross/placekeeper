@@ -1,19 +1,19 @@
 import { documentOrderedItems } from "./annotation-projection.js";
 import { sha256Hex } from "./sha256.js";
 import {
-  projectStructuredReviewItem,
+  projectStructuredAnnotation,
   type SourceHint,
-  type StructuredReviewItem,
+  type StructuredAnnotation,
 } from "./structured-review-item.js";
 import type { PdfRect } from "./pdf-writer.js";
 import type {
   JsonValue,
-  PendingReviewDraftV1,
-  ReviewItem,
-  ReviewSourceIdentity,
-  ReviewWorkflowStateV1,
+  PendingDocumentDraftV1,
+  Annotation,
+  DocumentSourceIdentity,
+  DocumentWorkflowStateV1,
 } from "./review-model.js";
-import { assertReviewItem } from "./review-reducer.js";
+import { assertAnnotation } from "./review-reducer.js";
 import type { SaveFailureReason } from "./save-status.js";
 
 const SHA256_PATTERN = /^[0-9a-f]{64}$/u;
@@ -30,7 +30,7 @@ export class InvalidLiveContextContractError extends Error {
 export interface LiveObservationIdentity {
   readonly placekeeperSessionId: string;
   readonly documentGeneration: number;
-  readonly source: ReviewSourceIdentity;
+  readonly source: DocumentSourceIdentity;
   readonly reviewRevision: number;
   readonly stateDigest: string;
 }
@@ -68,24 +68,24 @@ export type LiveContextBindingStatus =
       readonly lastVerified?: LiveObservationIdentity;
     };
 
-export interface ReviewSnapshot {
+export interface DocumentSnapshot {
   readonly cursor: string;
   readonly revision: number;
   readonly semanticDigest: string;
-  readonly items: readonly StructuredReviewItem[];
+  readonly items: readonly StructuredAnnotation[];
 }
 
-export type ReviewExportBlockReason =
+export type DocumentExportBlockReason =
   | "unresolved-items"
   | "pending-drafts"
   | "possibly-stale";
 
-export interface ReviewStateSummaryV1 {
+export interface DocumentStateSummaryV1 {
   readonly schemaVersion: 1;
   readonly document: {
-    readonly role: ReviewWorkflowStateV1["documentRole"];
+    readonly role: DocumentWorkflowStateV1["documentRole"];
     readonly generation: number;
-    readonly freshness: ReviewWorkflowStateV1["freshness"];
+    readonly freshness: DocumentWorkflowStateV1["freshness"];
   };
   readonly reconciliation: {
     readonly complete: boolean;
@@ -98,32 +98,32 @@ export interface ReviewStateSummaryV1 {
     | {
         readonly eligible: false;
         readonly requiresStaleConfirmation: boolean;
-        readonly reasons: readonly ReviewExportBlockReason[];
+        readonly reasons: readonly DocumentExportBlockReason[];
       };
 }
 
-interface ReviewChangeBase {
+interface DocumentChangeBase {
   readonly cursor: string;
   readonly revision: number;
   readonly semanticDigest: string;
   readonly itemCount: number;
 }
 
-export type ReviewItemChanges =
-  | (ReviewChangeBase & {
+export type AnnotationChanges =
+  | (DocumentChangeBase & {
       readonly mode: "full";
       readonly reason: "initial" | "unknown-cursor";
-      readonly items: readonly StructuredReviewItem[];
+      readonly items: readonly StructuredAnnotation[];
     })
-  | (ReviewChangeBase & {
+  | (DocumentChangeBase & {
       readonly mode: "unchanged";
       readonly baseCursor: string;
     })
-  | (ReviewChangeBase & {
+  | (DocumentChangeBase & {
       readonly mode: "delta";
       readonly baseCursor: string;
-      readonly added: readonly StructuredReviewItem[];
-      readonly edited: readonly StructuredReviewItem[];
+      readonly added: readonly StructuredAnnotation[];
+      readonly edited: readonly StructuredAnnotation[];
       readonly removed: readonly string[];
     });
 
@@ -205,10 +205,10 @@ export interface AtomicLiveContextObservationV1 {
   readonly observedAt: string;
   readonly identity: LiveObservationIdentity;
   readonly saveStatus: LiveSaveStatus;
-  readonly reviewItems: ReviewItemChanges;
+  readonly reviewItems: AnnotationChanges;
   readonly existingPdfAnnotations: ExistingPdfAnnotationInventory;
   readonly evidence: PdfEvidenceCatalog;
-  readonly reviewState?: ReviewStateSummaryV1;
+  readonly reviewState?: DocumentStateSummaryV1;
 }
 
 export interface UnavailableLiveContextObservationV1 {
@@ -253,7 +253,7 @@ export interface LiveExecutionBaselineV1 {
   readonly executionId: string;
   readonly capturedAt: string;
   readonly identity: LiveObservationIdentity;
-  readonly items: readonly StructuredReviewItem[];
+  readonly items: readonly StructuredAnnotation[];
   readonly sourceFingerprints: readonly SourceFingerprint[];
   readonly baselineDigest: string;
 }
@@ -363,16 +363,16 @@ function assertUnique(values: readonly string[], label: string): void {
   }
 }
 
-function structuredItemDigest(item: StructuredReviewItem): string {
+function structuredItemDigest(item: StructuredAnnotation): string {
   return sha256(item);
 }
 
-function structuredItemCoordinate(item: StructuredReviewItem, field: "x" | "y"): number {
+function structuredItemCoordinate(item: StructuredAnnotation, field: "x" | "y"): number {
   const value = item.coordinates.rect[field];
   return typeof value === "number" && Number.isFinite(value) ? value : Number.MAX_SAFE_INTEGER;
 }
 
-function orderStructuredItems(items: readonly StructuredReviewItem[]): StructuredReviewItem[] {
+function orderStructuredItems(items: readonly StructuredAnnotation[]): StructuredAnnotation[] {
   return items.toSorted((left, right) =>
     left.pageIndex - right.pageIndex ||
     structuredItemCoordinate(left, "y") - structuredItemCoordinate(right, "y") ||
@@ -380,10 +380,10 @@ function orderStructuredItems(items: readonly StructuredReviewItem[]): Structure
     left.id.localeCompare(right.id));
 }
 
-export function reviewSemanticDigest(items: readonly ReviewItem[]): string {
+export function documentSemanticDigest(items: readonly Annotation[]): string {
   assertUnique(items.map(({ id }) => id), "Review Item IDs");
   const canonical = items.map((item) => {
-    assertReviewItem(item);
+    assertAnnotation(item);
     return {
       id: item.id,
       kind: item.kind,
@@ -395,10 +395,10 @@ export function reviewSemanticDigest(items: readonly ReviewItem[]): string {
   return sha256(canonical);
 }
 
-export function reviewDispositionDigest(input: {
-  readonly workflow: ReviewWorkflowStateV1;
-  readonly items: readonly ReviewItem[];
-  readonly pendingDrafts: readonly PendingReviewDraftV1[];
+export function documentDispositionDigest(input: {
+  readonly workflow: DocumentWorkflowStateV1;
+  readonly items: readonly Annotation[];
+  readonly pendingDrafts: readonly PendingDocumentDraftV1[];
 }): string {
   return sha256({
     generation: input.workflow.documentGeneration,
@@ -417,18 +417,18 @@ export function reviewDispositionDigest(input: {
   });
 }
 
-export function createReviewStateSummary(input: {
-  readonly workflow: ReviewWorkflowStateV1;
+export function createDocumentStateSummary(input: {
+  readonly workflow: DocumentWorkflowStateV1;
   readonly revision: number;
-  readonly items: readonly ReviewItem[];
-  readonly pendingDrafts: readonly PendingReviewDraftV1[];
-}): ReviewStateSummaryV1 {
+  readonly items: readonly Annotation[];
+  readonly pendingDrafts: readonly PendingDocumentDraftV1[];
+}): DocumentStateSummaryV1 {
   const unresolvedItemIds = input.items
     .filter((item) => item.reconciliation !== undefined && item.reconciliation.disposition.kind !== "resolved")
     .map(({ id }) => id)
     .toSorted();
   const pendingDraftIds = input.pendingDrafts.map(({ id }) => id).toSorted();
-  const reasons: ReviewExportBlockReason[] = [];
+  const reasons: DocumentExportBlockReason[] = [];
   if (unresolvedItemIds.length > 0) reasons.push("unresolved-items");
   if (pendingDraftIds.length > 0) reasons.push("pending-drafts");
   if (input.workflow.freshness === "possibly-stale") reasons.push("possibly-stale");
@@ -442,7 +442,7 @@ export function createReviewStateSummary(input: {
     },
     reconciliation: {
       complete: unresolvedItemIds.length === 0 && pendingDraftIds.length === 0,
-      dispositionDigest: reviewDispositionDigest(input),
+      dispositionDigest: documentDispositionDigest(input),
       unresolvedItemIds,
       pendingDraftIds,
     },
@@ -452,12 +452,12 @@ export function createReviewStateSummary(input: {
   };
 }
 
-export function createReviewSnapshot(input: {
+export function createDocumentSnapshot(input: {
   readonly cursor: string;
   readonly revision: number;
-  readonly items: readonly ReviewItem[];
+  readonly items: readonly Annotation[];
   readonly sourceHints?: ReadonlyMap<string, SourceHint>;
-}): ReviewSnapshot {
+}): DocumentSnapshot {
   assertNonEmpty(input.cursor, "cursor");
   if (!Number.isSafeInteger(input.revision) || input.revision < 0) {
     throw new InvalidLiveContextContractError("revision must be a non-negative safe integer");
@@ -465,22 +465,22 @@ export function createReviewSnapshot(input: {
   assertUnique(input.items.map(({ id }) => id), "Review Item IDs");
   const ordered = documentOrderedItems(input.items);
   const items = ordered.map((item) => {
-    assertReviewItem(item);
-    return projectStructuredReviewItem(item, input.sourceHints?.get(item.id));
+    assertAnnotation(item);
+    return projectStructuredAnnotation(item, input.sourceHints?.get(item.id));
   });
   return {
     cursor: input.cursor,
     revision: input.revision,
-    semanticDigest: reviewSemanticDigest(input.items),
+    semanticDigest: documentSemanticDigest(input.items),
     items,
   };
 }
 
-export function diffReviewSnapshots(input: {
-  readonly current: ReviewSnapshot;
-  readonly previous?: ReviewSnapshot;
+export function diffDocumentSnapshots(input: {
+  readonly current: DocumentSnapshot;
+  readonly previous?: DocumentSnapshot;
   readonly cursorStatus?: "known" | "unknown";
-}): ReviewItemChanges {
+}): AnnotationChanges {
   const common = {
     cursor: input.current.cursor,
     revision: input.current.revision,
@@ -623,13 +623,13 @@ export function createAtomicLiveContextObservation(input: {
   readonly observedAt: string;
   readonly identity: LiveObservationIdentity;
   readonly saveStatus: LiveSaveStatus;
-  readonly reviewItems: ReviewItemChanges;
+  readonly reviewItems: AnnotationChanges;
   readonly existingPdfAnnotations: {
     readonly items: readonly ExistingPdfAnnotation[];
     readonly warnings: readonly string[];
   };
   readonly evidence: PdfEvidenceCatalog;
-  readonly reviewState?: ReviewStateSummaryV1;
+  readonly reviewState?: DocumentStateSummaryV1;
 }): AtomicLiveContextObservationV1 {
   assertIsoDate(input.observedAt, "observedAt");
   assertIdentity(input.identity);
@@ -684,7 +684,7 @@ export function createExecutionBaseline(input: {
   readonly executionId: string;
   readonly capturedAt: string;
   readonly identity: LiveObservationIdentity;
-  readonly items: readonly StructuredReviewItem[];
+  readonly items: readonly StructuredAnnotation[];
   readonly sourceFingerprints: readonly SourceFingerprint[];
 }): LiveExecutionBaselineV1 {
   assertNonEmpty(input.executionId, "executionId");

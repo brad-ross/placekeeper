@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { RuntimeProductionReviewApp } from '../production-entry.js';
+import { RuntimeProductionReaderApp } from '../production-entry.js';
 import { createStaticHostRuntime } from '../host/static-runtime.js';
 import type { HostRuntime, HostRuntimeBootstrap } from '../host/runtime.js';
 import type { ViewerAssetUrls } from '../pdf/embedpdf-viewer.js';
@@ -35,7 +35,7 @@ function DemoApp({ runtime, initial, mode }: { runtime: HostRuntime; initial: Ho
   }, []);
   return <MainDocumentPreviewLimit value={DEMO_PAGE_RANGE}><DocumentActionsEnabled value={false}><WorkspaceInitialReferenceDock value="right"><WorkspaceModeAvailability value={selectedMode === 'read' ? ['outline'] : selectedMode === 'reference' ? ['references'] : ['annotations']}>
     <WorkspacePresentation value={ready ? { activation, mode: selectedMode === 'read' ? 'outline' : selectedMode === 'reference' ? 'references' : 'annotations', open: selectedMode !== 'read', referenceDock: 'bottom', sampleReference: { page: 31, label: 'Appendix A', pdfY: 175.702 }, bottomHeight: 260, initialLocation: { pageIndex: 13, top: 300 } } : null}>
-    <RuntimeProductionReviewApp runtime={runtime} initial={initial}
+    <RuntimeProductionReaderApp runtime={runtime} initial={initial}
       onDocumentReady={() => { document.body.dataset.demoReady = 'true'; setReady(true); }}
     />
     </WorkspacePresentation>

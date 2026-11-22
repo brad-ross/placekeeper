@@ -1,4 +1,4 @@
-import type { ReviewItem } from '../../../../packages/core/src/review-model.js';
+import type { Annotation } from '../../../../packages/core/src/review-model.js';
 import type { ExistingAnnotation, ImportedMarkedText } from '../pdf/existing-annotations.js';
 import type { MarkedText } from '../pdf/markup-text.js';
 import {
@@ -8,7 +8,7 @@ import {
   trailingContext,
 } from '../pdf/context-excerpt.js';
 
-function payloadString(item: ReviewItem, field: string): string {
+function payloadString(item: Annotation, field: string): string {
   const value = item.payload[field];
   return typeof value === 'string' ? value : '';
 }
@@ -35,7 +35,7 @@ export interface AnnotationContent {
  * suffix are cut from the page at a fixed length, so a full-length one is
  * assumed to continue beyond what was kept.
  */
-export function annotationQuoteContext(item: ReviewItem): QuoteContext | undefined {
+export function annotationQuoteContext(item: Annotation): QuoteContext | undefined {
   return quoteContextFrom(payloadString(item, 'prefix'), payloadString(item, 'suffix'));
 }
 
@@ -74,7 +74,7 @@ export function existingAnnotationContent(
 /** Viewer-only payload key for the words under an imported annotation. */
 const DISPLAYED_MARKED_TEXT = 'displayedMarkedText';
 
-function displayedMarkedText(item: ReviewItem): MarkedText | undefined {
+function displayedMarkedText(item: Annotation): MarkedText | undefined {
   const value = item.payload[DISPLAYED_MARKED_TEXT];
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
   const { quote, prefix, suffix } = value as Record<string, unknown>;
@@ -91,9 +91,9 @@ function displayedMarkedText(item: ReviewItem): MarkedText | undefined {
  * never part of a command or of saved review state.
  */
 export function withImportedMarkedText(
-  items: readonly ReviewItem[],
+  items: readonly Annotation[],
   imported: ImportedMarkedText | undefined,
-): readonly ReviewItem[] {
+): readonly Annotation[] {
   if (imported === undefined || imported.size === 0) return items;
   let changed = false;
   const displayed = items.map((item) => {
@@ -107,7 +107,7 @@ export function withImportedMarkedText(
   return changed ? displayed : items;
 }
 
-export function annotationContent(item: ReviewItem): AnnotationContent {
+export function annotationContent(item: Annotation): AnnotationContent {
   const quote = payloadString(item, 'quote');
   const proposedText = payloadString(item, 'proposedText');
   const comment = payloadString(item, 'comment');

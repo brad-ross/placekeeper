@@ -1,5 +1,5 @@
 import { externalWebUrl } from "../../../../packages/core/src/external-web-url.js";
-import { REVIEW_RUNTIME_PROTOCOL, REVIEW_RUNTIME_VERSION, type ReviewRuntimeMethod } from '../../../../packages/core/src/review-runtime-protocol.js';
+import { DOCUMENT_RUNTIME_PROTOCOL, DOCUMENT_RUNTIME_VERSION, type DocumentRuntimeMethod } from '../../../../packages/core/src/review-runtime-protocol.js';
 import { NativeOperationError, type CodexResourceDescriptor } from '../../../../packages/core/src/codex-mcp-protocol.js';
 import { VerifiedResourceMaterializer, resourceDescriptors } from '../../../codex-mcp/src/resources.js';
 import { createRpcHostRuntime, type MaterializedViewerResource } from './vscode-runtime.js';
@@ -11,7 +11,7 @@ export interface CodexRuntimePort {
   readonly contextOwner?: 'app';
   readonly reviewedCopyExport?: boolean;
   openExternalUrl?(url: string): Promise<void>;
-  call(method: ReviewRuntimeMethod | 'resource' | 'createLink', payload: unknown): Promise<unknown>;
+  call(method: DocumentRuntimeMethod | 'resource' | 'createLink', payload: unknown): Promise<unknown>;
   subscribeInvalidations(listener: (event: HostRuntimeInvalidation) => void): () => void;
 }
 
@@ -32,7 +32,7 @@ export function createCodexHostRuntime(port: CodexRuntimePort, environment: {
   const revokeURL = environment.revokeObjectURL ?? URL.revokeObjectURL.bind(URL);
   const digest = environment.digest ?? (async (bytes) => Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))).map(byte => byte.toString(16).padStart(2, '0')).join(''));
   const publish = (message: unknown) => { if (!disposed) for (const listener of listeners) listener(message); };
-  const unsubscribe = port.subscribeInvalidations(event => publish({ protocol: REVIEW_RUNTIME_PROTOCOL, version: REVIEW_RUNTIME_VERSION, kind: 'event', runtimeId: port.runtimeId, event: 'session-invalidated', payload: event }));
+  const unsubscribe = port.subscribeInvalidations(event => publish({ protocol: DOCUMENT_RUNTIME_PROTOCOL, version: DOCUMENT_RUNTIME_VERSION, kind: 'event', runtimeId: port.runtimeId, event: 'session-invalidated', payload: event }));
   const materialize = (role: 'document' | 'pdfiumWasm' | 'worker') => async (handle: string): Promise<MaterializedViewerResource> => {
     const descriptor = descriptors.get(handle);
     if (descriptor === undefined) throw new Error('Native resource is unavailable.');
@@ -50,7 +50,7 @@ export function createCodexHostRuntime(port: CodexRuntimePort, environment: {
     runtimeId: port.runtimeId,
     subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); },
     postMessage(raw) {
-      const message = raw as { kind: string; requestId: string; method: ReviewRuntimeMethod; payload: unknown; sessionId?: string; generation?: number; revision?: number };
+      const message = raw as { kind: string; requestId: string; method: DocumentRuntimeMethod; payload: unknown; sessionId?: string; generation?: number; revision?: number };
       if (message.kind !== 'request') return;
       if (message.method === 'bootstrap') bootstrapRequestId = message.requestId;
       void port.call(message.method, message.payload).then(value => {
@@ -77,8 +77,8 @@ export function createCodexHostRuntime(port: CodexRuntimePort, environment: {
           value = { ...value as object, resources };
         }
         const identity = message.method === 'bootstrap' ? value as object : { sessionId: message.sessionId, generation: message.generation, revision: message.revision };
-        publish({ protocol: REVIEW_RUNTIME_PROTOCOL, version: REVIEW_RUNTIME_VERSION, kind: 'response', runtimeId: port.runtimeId, requestId: message.requestId, method: message.method, ...identity, ok: true, payload: value });
-      }).catch(error => publish({ protocol: REVIEW_RUNTIME_PROTOCOL, version: REVIEW_RUNTIME_VERSION, kind: 'response', runtimeId: port.runtimeId, requestId: message.requestId, method: message.method, sessionId: message.sessionId, generation: message.generation, revision: message.revision, ok: false, error: { kind: error instanceof NativeOperationError ? 'export-conflict' : 'native-resource-or-command-failed' } }));
+        publish({ protocol: DOCUMENT_RUNTIME_PROTOCOL, version: DOCUMENT_RUNTIME_VERSION, kind: 'response', runtimeId: port.runtimeId, requestId: message.requestId, method: message.method, ...identity, ok: true, payload: value });
+      }).catch(error => publish({ protocol: DOCUMENT_RUNTIME_PROTOCOL, version: DOCUMENT_RUNTIME_VERSION, kind: 'response', runtimeId: port.runtimeId, requestId: message.requestId, method: message.method, sessionId: message.sessionId, generation: message.generation, revision: message.revision, ok: false, error: { kind: error instanceof NativeOperationError ? 'export-conflict' : 'native-resource-or-command-failed' } }));
     },
   }, { host: 'codex', materializeDocument: materialize('document'), materializePdfiumWasm: materialize('pdfiumWasm'), materializePdfiumWorker: materialize('worker') });
   // Context ownership belongs to the admitted shell, outside the wire scope projection.

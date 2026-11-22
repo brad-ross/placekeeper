@@ -7,11 +7,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
   PdfWriteResult,
   PdfWriter,
-  ReviewAnnotation,
+  PdfWriterAnnotation,
 } from "../../../packages/core/src/pdf-writer.js";
 import { addHighlight, setAnnotationName } from "../../../packages/core/src/review-commands.js";
-import type { ReviewSourceIdentity } from "../../../packages/core/src/review-model.js";
-import { createReviewState } from "../../../packages/core/src/review-model.js";
+import type { DocumentSourceIdentity } from "../../../packages/core/src/review-model.js";
+import { createDocumentState } from "../../../packages/core/src/review-model.js";
 import { FileCapabilityRegistry } from "../src/files/file-capabilities.js";
 import { ExportCoordinator } from "../src/export/export-coordinator.js";
 import { DraftSnapshotStore } from "../src/recovery/draft-snapshot.js";
@@ -36,7 +36,7 @@ async function temporaryDirectory(): Promise<string> {
   return path;
 }
 
-function annotation(): ReviewAnnotation {
+function annotation(): PdfWriterAnnotation {
   return {
     kind: "highlight",
     id: randomUUID(),
@@ -56,24 +56,24 @@ async function exportFixture() {
   const originalPath = join(directory, "paper.pdf");
   const snapshotPath = join(directory, "snapshot.pdf");
   const original = Buffer.from("%PDF-1.7\noriginal immutable bytes\n%%EOF");
-  const reviewed = Buffer.from("%PDF-1.7\nreviewed bytes\n%%EOF");
+  const annotated = Buffer.from("%PDF-1.7\nreviewed bytes\n%%EOF");
   await writeFile(originalPath, original);
   await writeFile(snapshotPath, original);
   const capabilities = new FileCapabilityRegistry();
   const approved = await capabilities.approvePdf(originalPath);
-  const source: ReviewSourceIdentity = {
+  const source: DocumentSourceIdentity = {
     fileId: approved.id,
     digest: sha256(original),
     byteLength: original.byteLength,
   };
   const item = annotation();
   const result: PdfWriteResult = {
-    pdfBytes: reviewed,
+    pdfBytes: annotated,
     evidence: {
       backend: "embedpdf",
       backendVersion: "2.14.4",
       originalSha256: source.digest,
-      outputSha256: sha256(reviewed),
+      outputSha256: sha256(annotated),
       pageCount: 1,
       structurallyValid: true,
       preexistingAnnotationIds: [],
@@ -85,13 +85,13 @@ async function exportFixture() {
     originalPath,
     snapshotPath,
     original,
-    reviewed,
+    reviewed: annotated,
     capabilities,
     approved,
     source,
     item,
     result,
-    delivery: (revision = 1, annotations: readonly ReviewAnnotation[] = [item]) => ({
+    delivery: (revision = 1, annotations: readonly PdfWriterAnnotation[] = [item]) => ({
       sessionId: "00000000-0000-4000-8000-000000000099",
       source,
       originalDigest: source.digest,
@@ -216,14 +216,14 @@ describe("reviewed PDF export transaction", () => {
     const originalPath = join(directory, "paper.pdf");
     const snapshotPath = join(directory, "snapshot.pdf");
     const original = Buffer.from("%PDF-1.7\noriginal immutable bytes\n%%EOF");
-    const reviewed = Buffer.from("%PDF-1.7\nreviewed bytes\n%%EOF");
+    const annotated = Buffer.from("%PDF-1.7\nreviewed bytes\n%%EOF");
     await writeFile(originalPath, original);
     await writeFile(snapshotPath, original);
 
     const capabilities = new FileCapabilityRegistry();
     const approved = await capabilities.approvePdf(originalPath);
     const state = {
-      ...createReviewState({
+      ...createDocumentState({
         sessionId: randomUUID(),
         source: {
           fileId: approved.id,
@@ -235,12 +235,12 @@ describe("reviewed PDF export transaction", () => {
     };
     const item = annotation();
     const result: PdfWriteResult = {
-      pdfBytes: reviewed,
+      pdfBytes: annotated,
       evidence: {
         backend: "embedpdf",
         backendVersion: "2.14.4",
         originalSha256: sha256(original),
-        outputSha256: sha256(reviewed),
+        outputSha256: sha256(annotated),
         pageCount: 1,
         structurallyValid: true,
         preexistingAnnotationIds: [],
@@ -270,7 +270,7 @@ describe("reviewed PDF export transaction", () => {
     expect(exported.path).toBe(
       join(dirname(approved.canonicalPath), "paper-reviewed.pdf"),
     );
-    expect(await readFile(exported.path)).toEqual(reviewed);
+    expect(await readFile(exported.path)).toEqual(annotated);
     expect(await readFile(originalPath)).toEqual(original);
     expect(recorded).toBe(1);
   });
@@ -368,7 +368,7 @@ describe("reviewed PDF export transaction", () => {
     const directory = await temporaryDirectory();
     const originalPath = join(directory, "paper.pdf");
     const original = Buffer.from("%PDF-1.7\nrecoverable original\n%%EOF");
-    const reviewed = Buffer.from("%PDF-1.7\nrecoverable reviewed\n%%EOF");
+    const annotated = Buffer.from("%PDF-1.7\nrecoverable reviewed\n%%EOF");
     await writeFile(originalPath, original);
     const recoveryRoot = join(directory, "recovery");
     const broker = new SessionBroker({ recoveryRoot });
@@ -412,12 +412,12 @@ describe("reviewed PDF export transaction", () => {
       setAnnotationName(broker.state(opened.launch.sessionId)!, "Later Name"));
     expect(frozen.stateDigest).not.toBe((await broker.freezeDelivery(opened.launch.sessionId)).stateDigest);
     const result: PdfWriteResult = {
-      pdfBytes: reviewed,
+      pdfBytes: annotated,
       evidence: {
         backend: "embedpdf",
         backendVersion: "2.14.4",
         originalSha256: frozen.source.digest,
-        outputSha256: sha256(reviewed),
+        outputSha256: sha256(annotated),
         pageCount: 1,
         structurallyValid: true,
         preexistingAnnotationIds: [],

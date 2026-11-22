@@ -9,11 +9,11 @@ import {
   type LiveDispositionItemV1,
 } from "../../../../packages/core/src/disposition.js";
 import {
-  reviewSemanticDigest,
+  documentSemanticDigest,
   type AtomicLiveContextObservationV1,
   type LiveExecutionBaselineV1,
 } from "../../../../packages/core/src/live-context.js";
-import type { ReviewItem } from "../../../../packages/core/src/review-model.js";
+import type { Annotation } from "../../../../packages/core/src/review-model.js";
 import {
   inspectPdfWithEmbedPdf,
   type InspectedPdf,
@@ -353,12 +353,12 @@ export class LiveSourceWorkflowService {
       throw new Error("The rebuilt PDF could not be structurally observed");
     }
     const validatedOwnedIds = new Set(inspected.portableItems.map(({ id }) => id));
-    const inheritedReview = inspected.portableItems.some(({ id }) => plan.baselineItemIds.has(id)) ||
+    const inheritedDocument = inspected.portableItems.some(({ id }) => plan.baselineItemIds.has(id)) ||
       inspected.annotations.some((annotation) =>
         plan.baselineItemIds.has(annotation.id) ||
         validatedOwnedIds.has(annotation.id),
       );
-    if (inheritedReview) throw new Error("The rebuilt PDF still contains review annotations");
+    if (inheritedDocument) throw new Error("The rebuilt PDF still contains review annotations");
     const verificationId = this.#id();
     execution.verifiedRebuilds.add(verificationId);
     return {
@@ -396,7 +396,7 @@ export class LiveSourceWorkflowService {
     });
     this.#assertSameObservation(observation, report);
     validateDispositionAgainstReconciliation(input.items, report, execution);
-    const currentItems = await this.#currentReviewItems(execution.taskSessionId, observation.identity.stateDigest);
+    const currentItems = await this.#currentAnnotations(execution.taskSessionId, observation.identity.stateDigest);
     const baselineIds = new Set(execution.baseline.items.map(({ id }) => id));
     const laterItems = currentItems
       .filter(({ id }) => !baselineIds.has(id))
@@ -521,13 +521,13 @@ export class LiveSourceWorkflowService {
     return scope;
   }
 
-  async #currentReviewItems(taskSessionId: string, expectedDigest: string): Promise<readonly ReviewItem[]> {
+  async #currentAnnotations(taskSessionId: string, expectedDigest: string): Promise<readonly Annotation[]> {
     const binding = this.#broker.taskBindings.bindingForTask(taskSessionId);
     if (binding === undefined) throw new Error("The Codex task has no active PDF binding");
     const items = await this.#broker.projectAtomicSession(binding.reviewSessionId, async (snapshot) => {
       if (
         snapshot.documentGeneration !== binding.documentGeneration ||
-        reviewSemanticDigest(snapshot.state.items) !== expectedDigest
+        documentSemanticDigest(snapshot.state.items) !== expectedDigest
       ) throw new Error("Review State changed before disposition completion");
       return snapshot.state.items;
     });

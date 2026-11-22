@@ -1,15 +1,15 @@
-import type { UpgradeReviewSettlement, UpgradeReviewStatus } from '../../../../packages/core/src/upgrade-review-protocol.js';
+import type { UpgradeDocumentSettlement, UpgradeDocumentStatus } from '../../../../packages/core/src/upgrade-review-protocol.js';
 import type { UpgradeParticipantCredentials, UpgradePreparationCoordinator } from './upgrade-preparation.js';
 import type { SessionBroker } from '../sessions/session-broker.js';
 import type { PdfSaveCoordinator } from '../saving/pdf-save-coordinator.js';
 
-interface ReviewProtection {
+interface DocumentProtection {
   readonly revision: () => string;
   readonly generation?: () => number;
   /** Resolves only after recovery protection, broker writes and PDF saves are durable. */
   readonly protect: () => Promise<void>;
 }
-export function createUpgradeReviewProtection(broker: SessionBroker, saving: PdfSaveCoordinator, sessionId: string): ReviewProtection {
+export function createUpgradeDocumentProtection(broker: SessionBroker, saving: PdfSaveCoordinator, sessionId: string): DocumentProtection {
   return {
     generation: () => broker.state(sessionId)?.workflow.documentGeneration ?? -1,
     revision: () => {
@@ -27,8 +27,8 @@ export function createUpgradeReviewProtection(broker: SessionBroker, saving: Pdf
   };
 }
 /** Trusted adapters key participants by admitted connection ownership, never renderer IDs. */
-export class UpgradeReviewParticipants {
-  readonly #views = new Map<string, { credentials: UpgradeParticipantCredentials; protection: ReviewProtection; generation: number | undefined; retiring?: boolean }>();
+export class UpgradeDocumentParticipants {
+  readonly #views = new Map<string, { credentials: UpgradeParticipantCredentials; protection: DocumentProtection; generation: number | undefined; retiring?: boolean }>();
   constructor(readonly coordinator: UpgradePreparationCoordinator) {}
   retireMetadata(id: string): void {
     const view = this.#views.get(id);
@@ -41,7 +41,7 @@ export class UpgradeReviewParticipants {
   }
   refresh(): void { for (const id of this.#views.keys()) this.changed(id); }
   has(id: string): boolean { return this.#views.has(id); }
-  attach(id: string, protection: ReviewProtection): void {
+  attach(id: string, protection: DocumentProtection): void {
     if (this.#views.has(id)) return;
     this.#views.set(id, { protection, generation: protection.generation?.(), credentials: this.coordinator.registerParticipant({ id, revision: protection.revision() }) });
   }
@@ -61,7 +61,7 @@ export class UpgradeReviewParticipants {
     if (!admittedInputMayStillFlush && !view.retiring) this.coordinator.updateParticipant(view.credentials, view.protection.revision());
     view.generation = generation;
   }
-  poll(id: string): UpgradeReviewStatus {
+  poll(id: string): UpgradeDocumentStatus {
     const view = this.#views.get(id);
     if (!view) throw new Error('Upgrade review is detached');
     this.changed(id);
@@ -70,7 +70,7 @@ export class UpgradeReviewParticipants {
       settlementRequired: status.phase === 'preparing' && status.participants.some(p => p.id === id && !p.acknowledged),
       ...(status.reason === undefined ? {} : { reason: status.reason }) };
   }
-  async settle(id: string, request: UpgradeReviewSettlement): Promise<UpgradeReviewStatus> {
+  async settle(id: string, request: UpgradeDocumentSettlement): Promise<UpgradeDocumentStatus> {
     const view = this.#views.get(id);
     if (!view) throw new Error('Upgrade review is detached');
     const status = this.coordinator.poll(view.credentials);

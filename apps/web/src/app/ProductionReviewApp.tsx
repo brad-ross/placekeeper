@@ -1,7 +1,7 @@
 import { ContextNoteComposer } from '../review/ContextNoteComposer.js';
-import { reviewAgentSearchResult, type ReviewAgentBridge, type ReviewAgentActions, type ReviewAgentContextInput } from '../host/review-agent-bridge.js';
+import { documentAgentSearchResult, type DocumentAgentBridge, type DocumentAgentActions, type DocumentAgentContextInput } from '../host/review-agent-bridge.js';
 import { documentContextSourceKey, INACTIVE_DOCUMENT_CONTEXT, sameDocumentContextVersion, type DocumentContextSource, type DocumentContextState } from '../host/document-in-context.js';
-import { reviewContextSnapshot, type ReviewContextSnapshot } from '../host/review-context-snapshot.js';
+import { documentContextSnapshot, type DocumentContextSnapshot } from '../host/review-context-snapshot.js';
 import { pdfNavigationTargetFromPlacekeeperLocation, type PdfNavigationTarget } from '../pdf/pdf-navigation-target.js';
 import { ExternalLinkRecovery } from '../review/ExternalLinkRecovery.js';
 import { externalWebUrl } from '../../../../packages/core/src/external-web-url.js';
@@ -23,18 +23,18 @@ import {
   referencePdfIsVisible,
   referenceReturnForActiveTab,
 } from "../review/reference-presentation.js";
-import { firstUnresolvedReviewItemId, canonicalStateSupersedes } from "../review/canonical-state.js";
+import { firstUnresolvedAnnotationId, canonicalStateSupersedes } from "../review/canonical-state.js";
 import { isVisibleFocusTarget } from '../review/focus-target.js';
 import {
   viewerAssetUrlsEqual,
   viewerResourcePoliciesEqual,
 } from "../host/viewer-resource-equivalence.js";
 import { visibleCodexContext } from "../host/context-projection.js";
-import type { ReviewCommand, ReviewItem, ReviewStateView } from "../../../../packages/core/src/review-model.js";
-import type { ReviewAnnotation } from '../../../../packages/core/src/pdf-writer.js';
+import type { DocumentCommand, Annotation, DocumentStateView } from "../../../../packages/core/src/review-model.js";
+import type { PdfWriterAnnotation } from '../../../../packages/core/src/pdf-writer.js';
 import type { SaveStatus } from "../../../../packages/core/src/save-status.js";
 import {
-  sanitizeReviewRuntimeDisplayString,
+  sanitizeDocumentRuntimeDisplayString,
 } from "../../../../packages/core/src/review-runtime-protocol.js";
 import type { CaretAnchor } from "../pdf/selection-anchor.js";
 import {
@@ -81,7 +81,7 @@ import {
 import { isEditableTarget } from '../review/input-controller.js';
 import { App } from "./App.js";
 import { WorkspaceInitialReferenceDock, WorkspaceModeAvailability, WorkspacePresentation } from '../review/WorkspaceModeStrip.js';
-import { ReviewShell } from "./ReviewShell.js";
+import { ReaderShell } from "./ReviewShell.js";
 import type {
   ProductionSession,
   ProductionScope,
@@ -89,7 +89,7 @@ import type {
   ReverseSyncTexRequest,
   HostForwardSyncTexRequest,
 } from "../host/session-contracts.js";
-import { projectReviewItems } from "../../../../packages/core/src/annotation-projection.js";
+import { projectAnnotations } from "../../../../packages/core/src/annotation-projection.js";
 import {
   createViewerControls,
   unavailableViewerControls,
@@ -145,10 +145,10 @@ import {
   type DestinationSnippetRenderer,
 } from '../pdf/destination-snippet.js';
 import {
-  BrowserReviewLocationHistory,
-  type ReviewLocationHistoryEnvironment,
-  type ReviewLocationHistoryPort,
-  type ReviewLocationHistorySnapshot,
+  BrowserDocumentLocationHistory,
+  type DocumentLocationHistoryEnvironment,
+  type DocumentLocationHistoryPort,
+  type DocumentLocationHistorySnapshot,
 } from '../review/review-location-history.js';
 import {
   createReferenceNavigationState,
@@ -160,10 +160,10 @@ import type { PendingReferencePanel } from "../review/ReferenceWorkspace.js";
 import { PdfSearchWorkspace } from '../review/PdfSearchWorkspace.js';
 import {
   createTrailingTaskScheduler,
-  waitForReviewNavigationReady,
+  waitForDocumentNavigationReady,
 } from "../review/main-location-refresh.js";
 import {
-  reviewItemNavigationTarget,
+  annotationNavigationTarget,
 } from "../review/annotation-outline-context.js";
 import {
   BOTTOM_REFERENCES_RAIL_FOCUS_TOKEN,
@@ -176,7 +176,7 @@ import {
 } from "../review/reference-workspace-layout.js";
 import { SaveDestinationDialog } from "../save/SaveDestinationDialog.js";
 import {
-  gateReviewCommand,
+  gateDocumentCommand,
   canonicalSaveStatusCanApply,
   pollSaveStatusUntilSettled,
 } from "../save/save-state-controller.js";
@@ -191,8 +191,8 @@ import {
 import type { ViewerAssetUrls, ViewerResourcePolicy } from '../pdf/embedpdf-viewer.js';
 import type { GenerationRefreshStatus, LocationRestoreStatus } from '../generation-status.js';
 import type {
-  ReviewCommandInvocation,
-  ReviewCommandSurfaceSnapshot,
+  DocumentCommandInvocation,
+  DocumentCommandSurfaceSnapshot,
 } from '../review/review-command-surface.js';
 import type { AccessibilityTransitionEffect } from './accessibility-transitions.js';
 import { renderedPdfPageIsUsable } from './document-readiness.js';
@@ -453,7 +453,7 @@ function referenceTargetFromNaturalAnchor(input: {
 export function annotationReferenceRequest(
   identity: AnnotationReaderIdentity,
   sources: {
-    readonly items: readonly ReviewItem[];
+    readonly items: readonly Annotation[];
     readonly existingAnnotations: ExistingAnnotationsDiscovery;
     readonly documentGeneration: number;
     readonly pageCount: number;
@@ -469,7 +469,7 @@ export function annotationReferenceRequest(
   let label: string;
   if (identity.origin === 'owned') {
     const item = sources.items.find(({ id }) => id === identity.itemId);
-    const location = item === undefined ? null : reviewItemNavigationTarget(item);
+    const location = item === undefined ? null : annotationNavigationTarget(item);
     if (item === undefined || location === null) return null;
     ({ pageIndex, point } = location);
     label = `Annotation on page ${pageIndex + 1}`;
@@ -523,11 +523,11 @@ export function authoringReferenceTarget(
   });
 }
 
-export interface ProductionReviewAppProps {
-  readonly agentBridge?: ReviewAgentBridge;
-  readonly onContextSnapshot?: (snapshot: ReviewContextSnapshot) => void;
+export interface ProductionReaderAppProps {
+  readonly agentBridge?: DocumentAgentBridge;
+  readonly onContextSnapshot?: (snapshot: DocumentContextSnapshot) => void;
   readonly session: ProductionSession;
-  readonly initialState: ReviewStateView;
+  readonly initialState: DocumentStateView;
   readonly activeAuthoringDraftIds?: readonly string[];
   readonly initialSaveStatus?: SaveStatus;
   readonly scope: ProductionScope;
@@ -536,7 +536,7 @@ export interface ProductionReviewAppProps {
   readonly viewerAssets?: ViewerAssetUrls;
   readonly resourcePolicy?: ViewerResourcePolicy;
   /** Host-owned semantic history. `null` explicitly disables address-bar history. */
-  readonly locationHistory?: ReviewLocationHistoryPort | null;
+  readonly locationHistory?: DocumentLocationHistoryPort | null;
   readonly viewer?: ReactNode;
   readonly generationRefreshStatus?: GenerationRefreshStatus;
   readonly hostReattachRequestToken?: number;
@@ -557,17 +557,17 @@ export interface ProductionReviewAppProps {
   readonly onDocumentTitleChange?: (title: string, generation: number) => void;
   /** Registers the shared authoring settlement used before a native window closes. */
   readonly registerCloseSettlement?: (settle: (() => Promise<void>) | undefined) => void;
-  readonly onCommandSurfaceChange?: (snapshot: ReviewCommandSurfaceSnapshot) => void;
+  readonly onCommandSurfaceChange?: (snapshot: DocumentCommandSurfaceSnapshot) => void;
   /** Native commands re-enter the same handlers used by web controls and shortcuts. */
-  readonly commandInvocation?: ReviewCommandInvocation;
+  readonly commandInvocation?: DocumentCommandInvocation;
   readonly accessibilityTransition?: AccessibilityTransitionEffect;
 }
 
 export function acceptedAuthoringCommandRequiresPersistence(
-  state: ReviewStateView,
+  state: DocumentStateView,
   status: SaveStatus,
   authoringPersistenceRequired: boolean,
-  commandType: ReviewCommand['type'],
+  commandType: DocumentCommand['type'],
 ): boolean {
   return commandType !== 'put-draft'
     && authoringPersistenceRequired
@@ -587,7 +587,7 @@ export function initialWorkspaceLocationForGeneration(
 const noDocumentContextSubscription = () => () => {};
 const inactiveDocumentContext = () => INACTIVE_DOCUMENT_CONTEXT;
 
-export function ProductionReviewApp(props: ProductionReviewAppProps) {
+export function ProductionReaderApp(props: ProductionReaderAppProps) {
   const availableModes = useContext(WorkspaceModeAvailability);
   const workspacePresentation = useContext(WorkspacePresentation);
   const initialReferenceDock = useContext(WorkspaceInitialReferenceDock);
@@ -646,7 +646,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const [authoringAnchorNavigation, setAuthoringAnchorNavigation] = useState<
     AuthoringAnchorNavigationState | null
   >(null);
-  const [authoringPreview, setAuthoringPreview] = useState<readonly ReviewAnnotation[] | null>(null);
+  const [authoringPreview, setAuthoringPreview] = useState<readonly PdfWriterAnnotation[] | null>(null);
   const [selectionUpdate, setSelectionUpdate] = useState<SelectionUpdate>(INITIAL_SELECTION_UPDATE);
   const selectionUpdateRef = useRef(selectionUpdate);
   selectionUpdateRef.current = selectionUpdate;
@@ -921,17 +921,17 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const locationHistory = useMemo(() => {
     if (props.locationHistory !== undefined) return props.locationHistory ?? undefined;
     if (props.session.appLinkBase === undefined || typeof window === 'undefined') return undefined;
-    const environment: ReviewLocationHistoryEnvironment = {
+    const environment: DocumentLocationHistoryEnvironment = {
       location: window.location,
       history: window.history,
       addEventListener: (type, listener) => window.addEventListener(type, listener),
       removeEventListener: (type, listener) => window.removeEventListener(type, listener),
     };
-    return new BrowserReviewLocationHistory(environment);
+    return new BrowserDocumentLocationHistory(environment);
   }, [props.locationHistory, props.session.appLinkBase]);
   const locationHistoryRef = useRef(locationHistory);
   locationHistoryRef.current = locationHistory;
-  const [locationHistorySnapshot, setLocationHistorySnapshot] = useState<ReviewLocationHistorySnapshot>({
+  const [locationHistorySnapshot, setLocationHistorySnapshot] = useState<DocumentLocationHistorySnapshot>({
     canBack: false,
     canForward: false,
   });
@@ -939,7 +939,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const activationTokenRef = useRef(0);
   useEffect(() => {
     if (props.hostReattachRequestToken === undefined || props.hostReattachRequestToken <= 0) return;
-    const id = firstUnresolvedReviewItemId(stateRef.current.items);
+    const id = firstUnresolvedAnnotationId(stateRef.current.items);
     setCommandNotice(null);
     if (id === undefined) {
       setCommandNotice('No annotations need reattachment.');
@@ -994,7 +994,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   ]);
   useEffect(() => props.api.presence?.(), [props.api]);
   const ownedAnnotations = useMemo(
-    () => projectReviewItems(
+    () => projectAnnotations(
       authoringEnabled ? state.items : [],
       state.workflow.documentGeneration,
       { includePortableMetadata: false },
@@ -1197,7 +1197,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       resolvePortableItem: (itemId: string) => {
         if (!portableItemIdsRef.current.has(itemId)) return null;
         const item = stateRef.current.items.find(({ id }) => id === itemId);
-        return item === undefined ? null : reviewItemNavigationTarget(item);
+        return item === undefined ? null : annotationNavigationTarget(item);
       },
     });
   }
@@ -1492,18 +1492,18 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
     scope.documentTitle,
   );
   const pageTitle = scope.launchSurface === 'chrome'
-    ? sanitizeReviewRuntimeDisplayString(resolvedPageTitle) ?? scope.documentTitle
+    ? sanitizeDocumentRuntimeDisplayString(resolvedPageTitle) ?? scope.documentTitle
     : resolvedPageTitle;
   useEffect(() => {
     // Publish only after the active main viewer has accepted this canonical generation.
     if (!initialViewReady || !viewerState.ready || !viewerResourcesAreCurrent || mainDocumentReadyGeneration !== state.workflow.documentGeneration || documentGenerationRef.current !== state.workflow.documentGeneration) return;
-    props.onContextSnapshot?.(reviewContextSnapshot({ state, title: pageTitle,
+    props.onContextSnapshot?.(documentContextSnapshot({ state, title: pageTitle,
       page: viewerState.currentPage, pageCount: viewerState.totalPages,
       ...(activeItemId === undefined ? {} : { activeAnnotationId: activeItemId }),
       selection: selectionUpdate, selectionIsCurrent: selectionUpdate.kind === 'reliable' && currentAnnotationSurface(selectionUpdate.surface) !== null,
     }));
   }, [props.onContextSnapshot, state, pageTitle, initialViewReady, viewerState, viewerResourcesAreCurrent, mainDocumentReadyGeneration, selectionUpdate, currentAnnotationSurface, activeItemId]);
-  const liveAgentActions = useRef<ReviewAgentActions | null>(null);
+  const liveAgentActions = useRef<DocumentAgentActions | null>(null);
   const agentReady = initialViewReady && viewerState.ready && viewerResourcesAreCurrent
     && mainDocumentReadyGeneration === state.workflow.documentGeneration;
   const documentController = props.agentBridge?.documentContext;
@@ -1546,7 +1546,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   liveAgentActions.current = {
     snapshot: () => {
       if (!agentReady || documentGenerationRef.current !== state.workflow.documentGeneration || mainNavigationRef.current === null) throw Error('Reader unavailable');
-      return reviewContextSnapshot({ state: stateRef.current, title: pageTitle,
+      return documentContextSnapshot({ state: stateRef.current, title: pageTitle,
         page: (mainNavigationRef.current.captureLocation()?.pageIndex ?? viewerState.currentPage - 1) + 1,
         pageCount: viewerState.totalPages, selection: selectionUpdate,
         selectionIsCurrent: selectionUpdate.kind === 'reliable' && currentAnnotationSurface(selectionUpdate.surface) !== null, ...(activeItemId === undefined ? {} : { activeAnnotationId: activeItemId }) });
@@ -1555,7 +1555,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       const generation = documentGenerationRef.current;
       const result = await search.searchQuery(query);
       if (generation !== documentGenerationRef.current) throw Error('Document changed');
-      return reviewAgentSearchResult(result, generation);
+      return documentAgentSearchResult(result, generation);
     },
     navigate: async target => {
       const navigation = mainNavigationRef.current;
@@ -1616,21 +1616,21 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       }
       return settle(async () => {
         const item = stateRef.current.items.find(item => item.id === target.annotationId);
-        const destination = item && reviewItemNavigationTarget(item);
+        const destination = item && annotationNavigationTarget(item);
         return !!destination && navigationCoordinator.navigateMainAnnotation(destination);
       });
     },
   };
   type ContextCapture = {
     readonly key: string;
-    readonly input: ReviewAgentContextInput;
+    readonly input: DocumentAgentContextInput;
     readonly excerpt: string;
   };
   const [contextCapture, setContextCapture] = useState<ContextCapture | null>(null);
   const [contextNote, setContextNote] = useState('');
   const contextNotes = useRef(new Map<string, string>());
   const addContext = props.agentBridge?.addContext;
-  const currentContextSource = (snapshot: ReviewContextSnapshot) => (
+  const currentContextSource = (snapshot: DocumentContextSnapshot) => (
     snapshot.documentGeneration === documentGenerationRef.current
     && snapshot.source.fileId === stateRef.current.source.fileId
     && snapshot.source.digest === stateRef.current.source.digest
@@ -1813,7 +1813,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       let restored = false;
       let settled = false;
       try {
-        const ready = await waitForReviewNavigationReady({
+        const ready = await waitForDocumentNavigationReady({
           isCurrent: () => !cancelled && generation === documentGenerationRef.current,
           isReady: () => (
             viewerControlsGenerationRef.current === generation
@@ -2105,7 +2105,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
           return;
         }
         const item = stateRef.current.items.find((candidate) => candidate.id === id);
-        const location = item === undefined ? null : reviewItemNavigationTarget(item);
+        const location = item === undefined ? null : annotationNavigationTarget(item);
         if (location === null) return;
         cancelReferenceInspectionDismiss();
         const referenceRecovery = referenceRecoveryForSurface(surface);
@@ -2129,7 +2129,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
         if (authoringActiveRef.current) return;
         if (surface.kind === 'reference') {
           const item = stateRef.current.items.find((candidate) => candidate.id === id);
-          const location = item === undefined ? null : reviewItemNavigationTarget(item);
+          const location = item === undefined ? null : annotationNavigationTarget(item);
           if (location === null) return;
           const referenceRecovery = referenceRecoveryForSurface(surface);
           cancelReferenceInspectionDismiss();
@@ -2787,7 +2787,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
         }} />
       )}
       <NativePdfSelectionBridge owner={pdfCopyOwner} snapshots={pdfCopySnapshots} />
-      <ReviewShell
+      <ReaderShell
         {...(documentController === undefined ? {} : {
           documentContext: {
             state: displayedDocumentContext,
@@ -2869,7 +2869,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
         }}
         onActiveItemChange={setActiveItemId}
         onNavigate={(item) => {
-          const target = reviewItemNavigationTarget(item);
+          const target = annotationNavigationTarget(item);
           if (target === null) return;
           const portable = portableItemIdsRef.current.has(item.id)
             && saveStatusIsCleanCurrent(state, saveStatus);
@@ -2917,7 +2917,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
           ...(state.workflow.mode === 'generated-output' || exportOnly
             ? {}
             : { onSaveOptions: () => openCopyDialog("menu") }),
-          ...(props.api.capabilities?.reviewedCopyExport === false ? {} : { onExportReviewedCopy: annotationExport.open }),
+          ...(props.api.capabilities?.reviewedCopyExport === false ? {} : { onExportAnnotatedCopy: annotationExport.open }),
         }}
         selection={{
           onSelectionPageLimitExceeded: () => setCommandError(PDF_SELECTION_PAGE_LIMIT_MESSAGE),
@@ -3073,7 +3073,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
             // ordinary destination prerequisite before broker finalization.
             const gated = command.type === 'put-draft'
               ? { kind: 'submit' as const, command }
-              : gateReviewCommand(
+              : gateDocumentCommand(
               currentState,
               saveStatus,
               command,
@@ -3264,7 +3264,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
         }}
       >
         {viewer}
-      </ReviewShell>
+      </ReaderShell>
       {addContext === undefined || !contextCaptureIsCurrent ? null : <ContextNoteComposer
         key={contextCapture.key}
         kind={contextCapture.input.kind}

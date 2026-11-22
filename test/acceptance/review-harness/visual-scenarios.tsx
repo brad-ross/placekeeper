@@ -7,7 +7,7 @@ import {
   unavailableViewerControls,
   type ViewerControlsSnapshot,
 } from '../../../apps/web/src/pdf/viewer-controls.js';
-import type { ReviewItem, ReviewState } from '../../../packages/core/src/review-model.js';
+import type { Annotation, DocumentState } from '../../../packages/core/src/review-model.js';
 import type {
   ReferenceReturnControlState,
   ReferenceWorkspaceTab,
@@ -42,7 +42,7 @@ function isVisualSceneName(value: string): value is VisualSceneName {
 export interface VisualScenario {
   readonly name: VisualSceneName;
   readonly documentTitle: string;
-  readonly state: ReviewState;
+  readonly state: DocumentState;
   readonly listOpen: boolean;
   readonly correspondingItemId?: string;
   readonly pageMenuOpen: boolean;
@@ -60,14 +60,14 @@ const baseSource = { fileId: 'visual-source', digest: 'a'.repeat(64), byteLength
 
 function item(
   id: string,
-  kind: ReviewItem['kind'],
+  kind: Annotation['kind'],
   pageIndex: number,
-  payload: ReviewItem['payload'],
-): ReviewItem {
+  payload: Annotation['payload'],
+): Annotation {
   return { id, kind, pageIndex, createdAt: timestamp, updatedAt: timestamp, payload };
 }
 
-const seededItems: readonly ReviewItem[] = [
+const seededItems: readonly Annotation[] = [
   item('owned-highlight', 'highlight', 0, {
     quote: 'identifying variation is local to the comparison group',
     prefix: 'Our design compares outcomes within narrowly defined markets. The ',
@@ -93,7 +93,7 @@ const seededItems: readonly ReviewItem[] = [
   }),
 ];
 
-const trayItems: readonly ReviewItem[] = [
+const trayItems: readonly Annotation[] = [
   item('owned-highlight', 'highlight', 0, {
     quote: 'identifying variation is local to the comparison group',
     prefix: 'Our design compares outcomes within narrowly defined markets. The ',
@@ -119,7 +119,7 @@ const trayItems: readonly ReviewItem[] = [
   }),
 ];
 
-function stateFor(items: readonly ReviewItem[]): ReviewState {
+function stateFor(items: readonly Annotation[]): DocumentState {
   return {
     schemaVersion: 1,
     sessionId: 'warm-neutral-visual',
@@ -382,7 +382,7 @@ export function VisualDocument({
   items,
   onCorrespondenceChange,
 }: {
-  readonly items: readonly ReviewItem[];
+  readonly items: readonly Annotation[];
   readonly onCorrespondenceChange: (id: string | undefined) => void;
 }) {
   return (

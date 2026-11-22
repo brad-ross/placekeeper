@@ -1,7 +1,7 @@
 import { documentOrderedItems } from "./annotation-projection.js";
 import type { LiveExecutionBaselineV1 } from "./live-context.js";
-import type { ReviewItem } from "./review-model.js";
-import { assertReviewItem } from "./review-reducer.js";
+import type { Annotation } from "./review-model.js";
+import { assertAnnotation } from "./review-reducer.js";
 
 export const LIVE_DISPOSITION_STATUSES = [
   "applied",
@@ -22,8 +22,8 @@ export interface LiveDispositionItemV1 {
   readonly changedPaths?: readonly string[];
 }
 
-export interface LaterReviewItemDispositionV1 {
-  readonly item: ReviewItem;
+export interface LaterAnnotationDispositionV1 {
+  readonly item: Annotation;
   readonly status: "preserved-unprocessed";
   readonly explanation: string;
 }
@@ -34,7 +34,7 @@ export interface CompleteDispositionV1 {
   readonly baselineDigest: string;
   readonly completedAt: string;
   readonly items: readonly LiveDispositionItemV1[];
-  readonly laterItems: readonly LaterReviewItemDispositionV1[];
+  readonly laterItems: readonly LaterAnnotationDispositionV1[];
 }
 
 function duplicate(values: readonly string[]): boolean {
@@ -49,7 +49,7 @@ export function createCompleteDisposition(input: {
   readonly baseline: LiveExecutionBaselineV1;
   readonly completedAt: string;
   readonly items: readonly LiveDispositionItemV1[];
-  readonly laterItems: readonly LaterReviewItemDispositionV1[];
+  readonly laterItems: readonly LaterAnnotationDispositionV1[];
 }): CompleteDispositionV1 {
   if (!Number.isFinite(Date.parse(input.completedAt))) {
     throw new Error("Disposition completedAt must be a valid timestamp");
@@ -84,7 +84,7 @@ export function createCompleteDisposition(input: {
     throw new Error("A baseline Review Item cannot also be reported as a later item");
   }
   for (const later of input.laterItems) {
-    assertReviewItem(later.item);
+    assertAnnotation(later.item);
     assertExplanation(later.explanation);
   }
   const laterItems = documentOrderedItems(input.laterItems.map(({ item }) => item)).map((item) => {

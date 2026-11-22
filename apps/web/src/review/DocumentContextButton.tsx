@@ -1,6 +1,6 @@
 import type { DocumentContextState } from '../host/document-in-context.js';
-import { ReviewIcon } from './ReviewIcon.js';
-import { ReviewTooltipButton } from './ReviewTooltipButton.js';
+import { ReaderIcon } from './ReviewIcon.js';
+import { ReaderTooltipButton } from './ReviewTooltipButton.js';
 
 export interface DocumentContextButtonProps {
   readonly state: DocumentContextState;
@@ -29,7 +29,7 @@ export function DocumentContextButton({ state, onActivate }: DocumentContextButt
       : state.status === 'idle' ? 'idle' : 'unavailable';
 
   return <>
-    <ReviewTooltipButton
+    <ReaderTooltipButton
       type="button"
       className={`codex-context-status codex-context-status--${visualStatus} document-context-button`}
       data-document-context={state.status}
@@ -39,8 +39,8 @@ export function DocumentContextButton({ state, onActivate }: DocumentContextButt
       keepTooltipOnKeyboardActivation
       onClick={canActivate ? onActivate : undefined}
     >
-      <ReviewIcon name="agent" />
-    </ReviewTooltipButton>
+      <ReaderIcon name="agent" />
+    </ReaderTooltipButton>
     <span className="sr-only" role="status" aria-atomic="true">
       {state.status === 'idle' ? '' : label}
     </span>

@@ -1163,7 +1163,7 @@ test('keeps live protected drafts out of every attachment and reveals exact aban
           reconciliationDraftId === abandonedDraftId && painted
         )))).toBe(true);
       expect(frames.every(({ allRows }) => allRows
-        .some(({ reviewItemId }) => reviewItemId === siblingId))).toBe(true);
+        .some(({ reviewItemId: annotationId }) => annotationId === siblingId))).toBe(true);
     }
   }
   expect(peerActiveBeforeRelease).toBe(0);
@@ -1454,11 +1454,11 @@ test.describe('passage edit continuity', () => {
   const edited = `${LONG_ANNOTATION} Applied without a viewer flash.`;
   await composer.getByRole('textbox', { name: 'Comment (optional)' }).fill(edited);
   await beginAnnotationEditFrameAudit(page);
-  await page.evaluate((reviewId) => {
+  await page.evaluate((documentId) => {
     const image = document.querySelector<HTMLImageElement>(
       ".pdf-workspace:not(.pdf-workspace--reference) [data-page-index='0'] > img",
     );
-    const mark = document.querySelector<HTMLElement>(`[data-review-id="${reviewId}"]`);
+    const mark = document.querySelector<HTMLElement>(`[data-review-id="${documentId}"]`);
     if (image === null || mark === null) throw new Error('Viewer continuity targets are unavailable.');
     const baseline = image.getBoundingClientRect();
     const baselineSource = image.currentSrc || image.src;
@@ -1485,7 +1485,7 @@ test.describe('passage edit continuity', () => {
       const currentImage = document.querySelector<HTMLImageElement>(
         ".pdf-workspace:not(.pdf-workspace--reference) [data-page-index='0'] > img",
       );
-      const currentMark = document.querySelector<HTMLElement>(`[data-review-id="${reviewId}"]`);
+      const currentMark = document.querySelector<HTMLElement>(`[data-review-id="${documentId}"]`);
       const bounds = image.getBoundingClientRect();
       const style = getComputedStyle(image);
       let ancestor: HTMLElement | null = image;

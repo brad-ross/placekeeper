@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { startHttpServer, type LocalHttpServer } from "./server/http-server.js";
 import {
   SessionBroker,
-  type OpenReviewRequest,
+  type OpenDocumentRequest,
   type SessionLaunch,
 } from "./sessions/session-broker.js";
 
@@ -16,7 +16,7 @@ export interface RunningLocalService {
 }
 
 export async function startLocalService(
-  request: OpenReviewRequest,
+  request: OpenDocumentRequest,
   recoveryRoot = join(
     homedir(),
     "Library",

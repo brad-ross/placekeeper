@@ -10,7 +10,7 @@ import { addStaticKeyboardPageNote, waitForStaticPdf } from "../../scripts/stati
 const annotatedPdf = resolve("test/fixtures/pdfs/text-native-with-annotations.pdf");
 const representativePdf = resolve("test/fixtures/pdfs/rotation-0-crop.pdf");
 
-async function exportReviewedPdf(page: Page, options: {
+async function exportAnnotatedPdf(page: Page, options: {
   readonly annotationName?: string;
   readonly expectedName?: string;
 } = {}): Promise<string> {
@@ -221,7 +221,7 @@ test("@critical @representative keeps the local keyboard journey private and rou
   expect(sourceCatalog.annotations.map(({ author }) => author)).toEqual([
     'Original reviewer 1', 'Original reviewer 2',
   ]);
-  const firstDownload = await exportReviewedPdf(page, { expectedName: 'Placekeeper', annotationName: '  Brad Ross  ' });
+  const firstDownload = await exportAnnotatedPdf(page, { expectedName: 'Placekeeper', annotationName: '  Brad Ross  ' });
   expect(downloads).toBe(1);
   const firstCatalog = await inspectPdfAnnotationCatalogWithEmbedPdf(new Uint8Array(await readFile(firstDownload)));
   expect(firstCatalog.annotations).toEqual(expect.arrayContaining([
@@ -254,7 +254,7 @@ test("@critical @representative keeps the local keyboard journey private and rou
   await expect(reopened.locator("[data-review-item]", { hasText: "Existing unsupported stamp" })).toHaveCount(1);
   await expect(reopened.locator("[data-review-item]", { hasText: "Static export proof." })).toHaveCount(1);
   await expect(reopened.getByRole("button", { name: /Open document actions$/u })).toBeVisible();
-  const secondDownload = await exportReviewedPdf(reopened, { expectedName: 'Brad Ross' });
+  const secondDownload = await exportAnnotatedPdf(reopened, { expectedName: 'Brad Ross' });
   const secondCatalog = await inspectPdfAnnotationCatalogWithEmbedPdf(new Uint8Array(await readFile(secondDownload)));
   expect(secondCatalog.portableItems).toHaveLength(1);
   expect(secondCatalog.annotations.find(({ contents }) => contents === 'Static export proof.')?.author).toBe('Brad Ross');
@@ -295,7 +295,7 @@ test("@representative creates a selection-derived highlight on a cropped PDF wit
   await composer.getByRole("textbox", { name: "Comment" }).fill("Representative multi-segment highlight.");
   await composer.getByRole("button", { name: "Save", exact: true }).click();
   await expect(page.locator("[data-owned-mark='highlight']").first()).toBeVisible();
-  const path = await exportReviewedPdf(page);
+  const path = await exportAnnotatedPdf(page);
   const catalog = await inspectPdfAnnotationCatalogWithEmbedPdf(new Uint8Array(await readFile(path)));
   const item = catalog.portableItems.find(
     (candidate) => candidate.kind === "highlight"
@@ -411,7 +411,7 @@ test("exhaustive profile exports and reopens all five editable annotation kinds"
   await pageNote.getByRole("button", { name: "Save", exact: true }).click();
   await expect(page.locator("[data-review-item]")).toHaveCount(7);
 
-  const path = await exportReviewedPdf(page);
+  const path = await exportAnnotatedPdf(page);
   const catalog = await inspectPdfAnnotationCatalogWithEmbedPdf(new Uint8Array(await readFile(path)));
   expect(catalog.portableItems.map(({ kind }) => kind).sort()).toEqual([
     "delete",
@@ -533,7 +533,7 @@ for (const rotation of [0, 90]) test(`imported annotations use reader defaults a
   await page.setViewportSize({ width: 760, height: 900 });
   await expect(highlights.first()).toBeVisible();
   await page.screenshot({ path: `tmp/source-annotation-styles-narrow-${rotation}.png`, fullPage: true });
-  const exportedPath = await exportReviewedPdf(page);
+  const exportedPath = await exportAnnotatedPdf(page);
   const exported = await PDFDocument.load(await readFile(exportedPath));
   const reopened = exported.getPage(0).node.lookup(PDFName.of('Annots'), PDFArray);
   expect(reopened.size()).toBe(8);

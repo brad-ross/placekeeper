@@ -50,9 +50,9 @@ it("limits a run to 64 reserved writers and rejects symlink directories and exce
 
 it("records both simultaneous native ownership conflicts from the deciding state without changing claims", () => {
   const f = fixture(); f.write(); const registry = new TaskBindingRegistry({ qualification: f.observer });
-  const claim = (taskSessionId: string, reviewSessionId: string, browserCapability: string, generation = 1) => {
-    const bindProof = registry.issueBindProof({ reviewSessionId, documentGeneration: 1, browserCapability, native: true });
-    return registry.claimNative({ taskSessionId, reviewSessionId, bindProof, documentGeneration: generation });
+  const claim = (taskSessionId: string, documentSessionId: string, browserCapability: string, generation = 1) => {
+    const bindProof = registry.issueBindProof({ reviewSessionId: documentSessionId, documentGeneration: 1, browserCapability, native: true });
+    return registry.claimNative({ taskSessionId, reviewSessionId: documentSessionId, bindProof, documentGeneration: generation });
   };
   expect(claim("task-a", "review-a", "capability-a")).toMatchObject({ status: "pending" });
   expect(claim("task-b", "review-b", "capability-b")).toMatchObject({ status: "pending" });

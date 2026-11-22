@@ -1,4 +1,4 @@
-import { ReviewIcon, type ReviewIconName } from './ReviewIcon.js';
+import { ReaderIcon, type ReaderIconName } from './ReviewIcon.js';
 
 export interface AnnotationMetadataProps {
   readonly kind: string;
@@ -6,7 +6,7 @@ export interface AnnotationMetadataProps {
   readonly lastPageNumber?: number;
   readonly sectionLabel?: string;
   readonly rowHead?: boolean;
-  readonly statusIcon?: ReviewIconName;
+  readonly statusIcon?: ReaderIconName;
   readonly statusIconLabel?: string;
 }
 
@@ -23,7 +23,7 @@ const ANNOTATION_KIND_LABELS: Readonly<Record<string, string>> = {
   replace: 'Replace',
 };
 
-const ANNOTATION_KIND_ICONS: Readonly<Record<string, ReviewIconName>> = {
+const ANNOTATION_KIND_ICONS: Readonly<Record<string, ReaderIconName>> = {
   delete: 'delete',
   highlight: 'highlight',
   insert: 'insert',
@@ -33,7 +33,7 @@ const ANNOTATION_KIND_ICONS: Readonly<Record<string, ReviewIconName>> = {
   text: 'note',
 };
 
-export function annotationKindIcon(kind: string): ReviewIconName {
+export function annotationKindIcon(kind: string): ReaderIconName {
   return ANNOTATION_KIND_ICONS[kind.toLowerCase()] ?? 'annotations';
 }
 
@@ -76,7 +76,7 @@ export function AnnotationMetadata({
         data-annotation-kind-icon={icon}
         title={kindLabel}
       >
-        <ReviewIcon name={icon} size={16} />
+        <ReaderIcon name={icon} size={16} />
       </span>
       {statusIcon === undefined ? <span className="annotation-item__page">
           {lastPageNumber !== undefined && lastPageNumber !== pageNumber
@@ -86,7 +86,7 @@ export function AnnotationMetadata({
           className="annotation-item__kind-icon annotation-item__status-icon"
           data-annotation-status-icon={statusIcon}
           title={statusIconLabel}
-        ><ReviewIcon name={statusIcon} size={16} /></span>}
+        ><ReaderIcon name={statusIcon} size={16} /></span>}
       {sectionLabel ? (
         <>
           <span className="annotation-item__separator">·</span>

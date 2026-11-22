@@ -1,4 +1,4 @@
-export const REVIEW_COMMAND_IDS = [
+export const DOCUMENT_COMMAND_IDS = [
   "undo",
   "redo",
   "navigate-back",
@@ -14,30 +14,30 @@ export const REVIEW_COMMAND_IDS = [
   "zoom-out",
 ] as const;
 
-export type ReviewSemanticCommand = typeof REVIEW_COMMAND_IDS[number];
-export type ReviewCommandFocusContext = "review" | "editable" | "dialog";
+export type DocumentSemanticCommand = typeof DOCUMENT_COMMAND_IDS[number];
+export type DocumentCommandFocusContext = "review" | "editable" | "dialog";
 
-export interface ReviewCommandPresentation {
-  readonly id: ReviewSemanticCommand;
+export interface DocumentCommandPresentation {
+  readonly id: DocumentSemanticCommand;
   readonly label: string;
   readonly enabled: boolean;
   readonly shortcut?: string;
 }
 
-export interface ReviewCommandSurfaceSnapshot {
-  readonly focusContext: ReviewCommandFocusContext;
-  readonly commands: readonly ReviewCommandPresentation[];
+export interface DocumentCommandSurfaceSnapshot {
+  readonly focusContext: DocumentCommandFocusContext;
+  readonly commands: readonly DocumentCommandPresentation[];
 }
 
-export interface ReviewCommandInvocation {
-  readonly id: ReviewSemanticCommand;
+export interface DocumentCommandInvocation {
+  readonly id: DocumentSemanticCommand;
   readonly token: number;
 }
 
-export type ReviewCommandHandlers = Readonly<Partial<Record<ReviewSemanticCommand, () => void>>>;
+export type DocumentCommandHandlers = Readonly<Partial<Record<DocumentSemanticCommand, () => void>>>;
 
-export function createReviewCommandSurface(input: {
-  readonly focusContext: ReviewCommandFocusContext;
+export function createDocumentCommandSurface(input: {
+  readonly focusContext: DocumentCommandFocusContext;
   readonly canUndo: boolean;
   readonly canRedo: boolean;
   readonly canNavigateBack: boolean;
@@ -51,13 +51,13 @@ export function createReviewCommandSurface(input: {
   readonly canOpenSaveOptions: boolean;
   readonly canFitWidth: boolean;
   readonly canZoom: boolean;
-  readonly handlers: ReviewCommandHandlers;
+  readonly handlers: DocumentCommandHandlers;
 }): {
-  readonly snapshot: ReviewCommandSurfaceSnapshot;
-  invoke(command: ReviewSemanticCommand): boolean;
+  readonly snapshot: DocumentCommandSurfaceSnapshot;
+  invoke(command: DocumentSemanticCommand): boolean;
 } {
   const blockedByText = input.focusContext === "editable";
-  const commands: readonly ReviewCommandPresentation[] = [
+  const commands: readonly DocumentCommandPresentation[] = [
     { id: "undo", label: "Undo Annotation Change", enabled: input.canUndo && !blockedByText, shortcut: "Meta+Z" },
     { id: "redo", label: "Redo Annotation Change", enabled: input.canRedo && !blockedByText, shortcut: "Meta+Shift+Z" },
     { id: "navigate-back", label: "Back", enabled: input.canNavigateBack, shortcut: "Meta+[" },
@@ -86,10 +86,10 @@ export function createReviewCommandSurface(input: {
 }
 
 /** Host-reserved keys can only route here when the host delivers the event. */
-export function reviewCommandForShortcut(event: {
+export function documentCommandForShortcut(event: {
   readonly key: string; readonly metaKey: boolean; readonly ctrlKey: boolean;
   readonly altKey: boolean; readonly shiftKey: boolean; readonly isComposing: boolean;
-}): ReviewSemanticCommand | undefined {
+}): DocumentSemanticCommand | undefined {
   if (event.isComposing || event.shiftKey || !event.ctrlKey || event.metaKey === event.altKey) return undefined;
   const key = event.key.toLowerCase();
   switch (key) {

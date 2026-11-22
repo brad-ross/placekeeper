@@ -9,11 +9,11 @@ import { basename, isAbsolute, join, resolve } from 'node:path';
 import { defaultDaemonPaths, installedSmokeDaemonPaths, installedSmokeDaemonArgs, electronRuntimeThroughDaemon, electronAppControlThroughDaemon, resolveElectronLaunchThroughDaemon, preflightLinkThroughDaemon, openLinkThroughDaemon } from '../../service/src/host/service-daemon.js';
 import { resolvePackagedRuntime, type PackagedRuntimeManifest } from '../../service/src/platform/runtime-layout.js';
 import { encodeElectronHelperFrame } from '../../../packages/core/src/electron-helper-protocol.js';
-import { ReviewBridge, acceptsRenderer } from './review-bridge.js';
+import { DocumentBridge, acceptsRenderer } from './review-bridge.js';
 import { readNativeFrames } from '../../service/src/desktop/framed-input.js';
 import { parseElectronAppControlResponse } from '../../../packages/core/src/electron-app-control-protocol.js';
 import { assetResponse, documentResponse } from './resource-protocol.js';
-import { REVIEW_RUNTIME_PROTOCOL, REVIEW_RUNTIME_VERSION } from '../../../packages/core/src/review-runtime-protocol.js';
+import { DOCUMENT_RUNTIME_PROTOCOL, DOCUMENT_RUNTIME_VERSION } from '../../../packages/core/src/review-runtime-protocol.js';
 import { handleWindowsProtocolInstall } from './protocol-install.js';
 import { parseInstallerRequest, isolateInstallerProfile, runInstallerUI } from './installer-ui.js';
 import { parseStandaloneChooser, runStandaloneChooser } from './standalone-chooser.js';
@@ -32,7 +32,7 @@ import { parseStartupRequest, writeStartupReceipt, writeStartupLoadFailure, reta
 import { alignNativeWindowButtons, nativeTitlebarOptions, trackTitlebarHover } from './titlebar.js';
 import { parseElectronLocation } from '../../../packages/core/src/electron-shell-protocol.js';
 import { decodePlacekeeperLink } from '../../../packages/core/src/placekeeper-link.js';
-import { REVIEW_COMMAND_IDS } from '../../web/src/review/review-command-surface.js';
+import { DOCUMENT_COMMAND_IDS } from '../../web/src/review/review-command-surface.js';
 import { macAppHasCompletedInstallation } from '../../../packaging/desktop/install-location.mjs';
 const nativeInstaller = parseInstallerRequest(process.argv.slice(1));
 const installerPreflight = process.argv[1] === '--placekeeper-installer-preflight';
@@ -100,12 +100,12 @@ async function start() {
     if (smokePaths !== undefined && smokePaths.isolatedTestRoot === undefined) {
         throw new Error('Electron installed smoke requires an explicit isolated test root');
     }
-    const timing = (stage: string, bridge?: ReviewBridge, details?: { readonly inputLength: number }) => { if (smokePaths) process.stdout.write(JSON.stringify({ type: 'electron-timing', stage, elapsedMs: performance.now() - startupTime, windowId: bridge?.windowId, attemptId: bridge?.attemptId, ...details }) + '\n'); };
+    const timing = (stage: string, bridge?: DocumentBridge, details?: { readonly inputLength: number }) => { if (smokePaths) process.stdout.write(JSON.stringify({ type: 'electron-timing', stage, elapsedMs: performance.now() - startupTime, windowId: bridge?.windowId, attemptId: bridge?.attemptId, ...details }) + '\n'); };
     timing('startup');
     const paths = { ...(smokePaths ?? defaultDaemonPaths()), webAssetsRoot: runtime.webAssetsRoot, packagedRuntime: { root, manifest, expectedIdentity } };
     const appInstanceId = randomUUID();
     const lifecycle = spawn(runtime.nodeExecutable, [runtime.serviceEntry, 'electron-lifecycle-control', ...(startupRequest ? ['--installed-startup-lease'] : []), ...installedSmokeDaemonArgs(paths)], { stdio: ['pipe', 'pipe', 'inherit'], env: { ...process.env, PLACEKEEPER_APP_INSTANCE_ID: appInstanceId, PLACEKEEPER_DAEMON_IDENTITY: manifest.daemonIdentity, PLACEKEEPER_INSTALL_ARTIFACT_IDENTITY: manifest.installArtifactIdentity, PLACEKEEPER_PDFIUM_WASM: join(runtime.webAssetsRoot, 'pdfium.wasm') } });
-    let handleUpgrade: ((status: import("../../../packages/core/src/upgrade-review-protocol.js").UpgradeReviewStatus) => void) | undefined;
+    let handleUpgrade: ((status: import("../../../packages/core/src/upgrade-review-protocol.js").UpgradeDocumentStatus) => void) | undefined;
     let lifecycleStopping = false;
     let lifecycleFailureShown = false;
     const activityAcknowledgements = new ActivityAcknowledgements();
@@ -148,7 +148,7 @@ async function start() {
     lifecycle.stdin.on('error', failLifecycle);
     app.on('will-quit', () => { lifecycleStopping = true; lifecycle.stdin.end(); });
     const registry = new DocumentWindowRegistry<BrowserWindow>();
-    type Entry = { window: BrowserWindow; bridge: ReviewBridge; commands?: WindowCommands; configureSource?: () => void; sourceEndpoint?: { token: string; resolve: (endpoint: string | null) => void }; intent: WindowIntent; closeToken?: string; focusedVisibility: FocusedVisibilityGate; permitClose: boolean; rendererReady: boolean; failureShown: boolean; retirement: AbortController; toolbarHeight: number; timer?: ReturnType<typeof setInterval> };
+    type Entry = { window: BrowserWindow; bridge: DocumentBridge; commands?: WindowCommands; configureSource?: () => void; sourceEndpoint?: { token: string; resolve: (endpoint: string | null) => void }; intent: WindowIntent; closeToken?: string; focusedVisibility: FocusedVisibilityGate; permitClose: boolean; rendererReady: boolean; failureShown: boolean; retirement: AbortController; toolbarHeight: number; timer?: ReturnType<typeof setInterval> };
     const entries = new Map<number, Entry>();
     const ownedWindows = new WindowActivityRegistry();
     const statePath = join(app.getPath('userData'), 'windows.json');
@@ -265,7 +265,7 @@ async function start() {
     });
     ipcMain.handle('review:commands', (event, id, revision, snapshot) => {
         const e = verify(event, id);
-        if (!Number.isSafeInteger(revision) || revision <= (e.commands?.revision ?? 0) || !snapshot || !['review', 'editable', 'dialog'].includes(snapshot.focusContext) || !Array.isArray(snapshot.commands) || snapshot.commands.length !== REVIEW_COMMAND_IDS.length || snapshot.commands.some((c: { id: unknown; label: unknown; enabled: unknown }) => !REVIEW_COMMAND_IDS.includes(c.id as never) || typeof c.label !== 'string' || c.label.length > 200 || typeof c.enabled !== 'boolean')) throw new Error('Invalid commands');
+        if (!Number.isSafeInteger(revision) || revision <= (e.commands?.revision ?? 0) || !snapshot || !['review', 'editable', 'dialog'].includes(snapshot.focusContext) || !Array.isArray(snapshot.commands) || snapshot.commands.length !== DOCUMENT_COMMAND_IDS.length || snapshot.commands.some((c: { id: unknown; label: unknown; enabled: unknown }) => !DOCUMENT_COMMAND_IDS.includes(c.id as never) || typeof c.label !== 'string' || c.label.length > 200 || typeof c.enabled !== 'boolean')) throw new Error('Invalid commands');
         e.commands = { revision, snapshot }; if (focused() === e) menus();
     });
     ipcMain.handle('review:close-settled', async (event, id, token, error) => {
@@ -292,8 +292,8 @@ async function start() {
     isolated.setPermissionCheckHandler(() => false);
     isolated.protocol.handle('placekeeper-app', request => assetResponse(assetRoot, inventory, request.url));
     const retirement = new AbortController();
-    let bridge: ReviewBridge;
-    bridge = new ReviewBridge((message, signal) => electronRuntimeThroughDaemon(appInstanceId, bridge.helperId, message, signal === undefined ? retirement.signal : AbortSignal.any([signal, retirement.signal]), paths, startupRequest ? process.env.PLACEKEEPER_LIFECYCLE_LOCK_TOKEN : undefined), generation => `placekeeper-resource://document/${bridge.attemptId}/${generation}`);
+    let bridge: DocumentBridge;
+    bridge = new DocumentBridge((message, signal) => electronRuntimeThroughDaemon(appInstanceId, bridge.helperId, message, signal === undefined ? retirement.signal : AbortSignal.any([signal, retirement.signal]), paths, startupRequest ? process.env.PLACEKEEPER_LIFECYCLE_LOCK_TOKEN : undefined), generation => `placekeeper-resource://document/${bridge.attemptId}/${generation}`);
     const bounds = restored?.bounds ?? { width: 1200, height: 900 };
     const usable = screen.getAllDisplays().some(d => (bounds.x ?? d.workArea.x) < d.workArea.x + d.workArea.width && (bounds.y ?? d.workArea.y) < d.workArea.y + d.workArea.height && (bounds.x ?? d.workArea.x) + bounds.width > d.workArea.x && (bounds.y ?? d.workArea.y) + bounds.height > d.workArea.y);
     const window = new BrowserWindow({ ...(startupRequest ? { show:false } : {}), ...nativeTitlebarOptions(), ...(usable ? bounds : { width: bounds.width, height: bounds.height }), minWidth: 600, minHeight: 400, title: basename(sourcePath), backgroundColor: '#f7f7f7', webPreferences: { preload: join(__dirname, 'preload.cjs'), session: isolated, sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true } });
@@ -411,7 +411,7 @@ async function start() {
         }, launchId, navigationHandle);
         let checking = false;
         entry.timer = setInterval(() => { if (!bridge.active || bridge.retired || checking) return; checking = true; void bridge.send({ type: 'keepalive' }).then(result => {
-            if (result.type === 'invalidation') contents.send('review:event', { protocol: REVIEW_RUNTIME_PROTOCOL, version: REVIEW_RUNTIME_VERSION, kind: 'event', event: 'session-invalidated', runtimeId: bridge.windowId, payload: { sessionId: bridge.projection!.sessionId, generation: result.generation, revision: result.revision, reason: result.reason === 'save' || result.reason === 'recovery' ? 'freshness' : result.reason } });
+            if (result.type === 'invalidation') contents.send('review:event', { protocol: DOCUMENT_RUNTIME_PROTOCOL, version: DOCUMENT_RUNTIME_VERSION, kind: 'event', event: 'session-invalidated', runtimeId: bridge.windowId, payload: { sessionId: bridge.projection!.sessionId, generation: result.generation, revision: result.revision, reason: result.reason === 'save' || result.reason === 'recovery' ? 'freshness' : result.reason } });
             else return bridge.pollNavigation();
         }).catch(error => { void fail(error); }).finally(() => { checking = false; }); }, 1000);
         if (restored?.maximized) window.maximize();

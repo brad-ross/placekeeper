@@ -24,7 +24,7 @@ import { isLaunchSurface, isRecoveryDecision } from "../sessions/session-broker.
 import { isChromeBrowserSourceOpenRequest, type ChromeBrowserSourceOpenRequest } from "../browser/browser-source-store.js";
 import { type ChromeRuntimeHostMessage } from "../../../../packages/core/src/chrome-native-runtime-protocol.js";
 
-import { parseElectronReviewHelperMessage, type ElectronReviewHelperResponse } from "../../../../packages/core/src/electron-helper-protocol.js";
+import { parseElectronDocumentHelperMessage, type ElectronDocumentHelperResponse } from "../../../../packages/core/src/electron-helper-protocol.js";
 import { parseElectronAppControlMessage, type ElectronAppControlResponse } from "../../../../packages/core/src/electron-app-control-protocol.js";
 
 export const MANAGEMENT_PROTOCOL_VERSION = 1;
@@ -203,7 +203,7 @@ export type PlacekeeperControlResponse =
   | { readonly kind: "chrome-open"; readonly response: LaunchResponse }
   | { readonly kind: "chrome-runtime"; readonly messages: readonly ChromeRuntimeHostMessage[] }
   | { readonly kind: "chrome-runtime-detached" }
-  | { readonly kind: "electron-runtime"; readonly response: ElectronReviewHelperResponse }
+  | { readonly kind: "electron-runtime"; readonly response: ElectronDocumentHelperResponse }
   | { readonly kind: "electron-runtime-detached" }
   | { readonly kind: "electron-app-control"; readonly response: ElectronAppControlResponse }
   | { readonly kind: "link-preflight"; readonly response: LinkPreflightResponse }
@@ -309,7 +309,7 @@ export function isControlRequest(value: unknown): value is PlacekeeperControlReq
     return Object.keys(value).length === 4 && typeof value.appInstanceId === "string"
       && /^[A-Za-z0-9_-]{8,128}$/u.test(value.appInstanceId)
       && typeof value.helperId === "string" && /^[A-Za-z0-9_-]{8,128}$/u.test(value.helperId)
-      && parseElectronReviewHelperMessage(value.message) !== undefined;
+      && parseElectronDocumentHelperMessage(value.message) !== undefined;
   }
   if (value.kind === "electron-runtime-detach") {
     return Object.keys(value).length === 3 && typeof value.appInstanceId === "string"

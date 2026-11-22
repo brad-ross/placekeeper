@@ -236,7 +236,7 @@ describe("task-scoped PDF evidence service", () => {
 
   it("paginates complete canonical Review Items through the current opaque handle", async () => {
     const { service, identity, bytes } = fixture();
-    const reviewItems = [0, 1, 2].map((pageIndex) => ({
+    const annotations = [0, 1, 2].map((pageIndex) => ({
       id: `item-${pageIndex}`,
       intent: "pageNote" as const,
       pageIndex,
@@ -245,14 +245,14 @@ describe("task-scoped PDF evidence service", () => {
       payload: { comment: `comment ${pageIndex}` },
     }));
     const catalog = service.mint({
-      reviewItems,
+      reviewItems: annotations,
       taskSessionId: "task-a",
       identity,
       pageCount: 3,
       sourceByteLength: bytes.byteLength,
       existingAnnotations: [],
     });
-    const result = service.retrieveReviewItemsWithHandle({
+    const result = service.retrieveAnnotationsWithHandle({
       handle: catalog.handle.value,
       pageIndex: 1,
       offset: 0,
@@ -269,7 +269,7 @@ describe("task-scoped PDF evidence service", () => {
       limit: 1,
       total: 1,
       pageIndex: 1,
-      items: [reviewItems[1]],
+      items: [annotations[1]],
     });
   });
 
