@@ -1516,3 +1516,43 @@ describe('plain MCP Apps host (Claude Desktop)', () => {
         await f.shell.teardown();
     });
 });
+
+it.each([
+    ['recover', { canResume: false, canRecover: true }, 'This PDF is open in another Placekeeper reader that is no longer connected.', 'Transfer this review here'],
+    ['resume', { canResume: true }, 'You have earlier work on this PDF.', 'Continue with your existing annotations'],
+] as const)('explains the %s recovery dialog and shows each choice beside its consequence', async (choice, flags, explanation, consequence) => {
+    const f = fixture(async () => reply({ status: 'closed' }));
+    await f.shell.receive({ status: 'busy', recoveryToken: 'r'.repeat(43), ...flags });
+    const dialog = descendants(f.controls).find(node => node.tagName === 'DIALOG');
+    const nodes = descendants(dialog);
+    const description = nodes.find(node => node.id === 'extension-recovery-description');
+    expect(description.textContent).toBe(explanation);
+    expect(dialog.setAttribute).toHaveBeenCalledWith('aria-describedby', description.id);
+    const rows = nodes.filter(node => node.className === 'terminal-recovery__choice');
+    expect(rows).toHaveLength(2);
+    const [primary, copy] = rows.map((row): { button: any; detail: any } => {
+        const [button, detail] = descendants(row);
+        expect(button.tagName).toBe('BUTTON');
+        expect(detail.tagName).toBe('P');
+        expect(button.setAttribute).toHaveBeenCalledWith('aria-describedby', detail.id);
+        return { button, detail };
+    });
+    if (!primary || !copy) throw Error("missing choice rows");
+    expect(primary.button).toMatchObject({ textContent: 'Continue', className: 'terminal-recovery__primary' });
+    expect(primary.detail.id).toBe(`extension-recovery-${choice}`);
+    expect(primary.detail.textContent).toContain(consequence);
+    expect(copy.button).toMatchObject({ textContent: 'Open Copy', className: 'terminal-recovery__secondary' });
+    expect(copy.detail.textContent).toBe('Start a separate review and keep the existing work in place.');
+    const footer = nodes.find(node => node.className === 'terminal-recovery__footer-actions');
+    expect(descendants(footer).map(node => node.textContent)).toEqual(['Cancel']);
+    await f.shell.teardown();
+});
+
+it.each([['plain MCP Apps', undefined], ['OpenAI', { getCurrent: () => undefined, update: async () => ({}) }]] as const)('asks before resuming earlier work in a %s host', async (_host, openai) => {
+    const f = fixture(async () => reply({ status: 'closed' }), () => undefined, () => openai);
+    await f.shell.receive({ status: 'busy', recoveryToken: 'r'.repeat(43), canResume: true });
+    expect(f.calls.some(call => call.action === 'choose')).toBe(false);
+    const dialog = descendants(f.controls).find(node => node.tagName === 'DIALOG');
+    expect(dialog?.showModal).toHaveBeenCalledOnce();
+    await f.shell.teardown();
+});

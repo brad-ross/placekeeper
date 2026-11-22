@@ -365,11 +365,12 @@ export class ExtensionShell {
         title.textContent = 'Reopen Document';
         const description = document.createElement('p');
         description.id = 'extension-recovery-description';
+        // Always say why the dialog appeared; each choice below carries its own consequence.
         description.textContent = offer.canRecover
-            ? 'The previous reader is disconnected. You can resume its protected work here.'
+            ? 'This PDF is open in another Placekeeper reader that is no longer connected.'
             : offer.matchingCopy
                 ? 'A saved-copy review has matching PDF contents and a similar filename.'
-                : available ? 'Protected review work is available for this PDF.'
+                : available ? 'You have earlier work on this PDF.'
                     : 'This review is still open elsewhere. Return to the previous reader or check again after its connection ends.';
         const feedback = document.createElement('p');
         feedback.className = 'extension-recovery__feedback terminal-recovery__status';
@@ -381,11 +382,8 @@ export class ExtensionShell {
         const footerActions = document.createElement('div');
         footerActions.className = 'terminal-recovery__footer-actions';
         header.append(title);
-        if (!available || offer.matchingCopy) {
-            body.append(description);
-            dialog.setAttribute('aria-describedby', description.id);
-        }
-        body.append(choices, feedback);
+        body.append(description, choices, feedback);
+        dialog.setAttribute('aria-describedby', description.id);
         footer.append(footerActions);
         dialog.append(header, body, footer);
         const buttons: HTMLButtonElement[] = [];
@@ -430,13 +428,19 @@ export class ExtensionShell {
             parent.append(button);
             return button;
         };
+        // Same row as the desktop recovery surface: the button beside its visible consequence.
         const addChoice = (choice: 'recover' | 'resume' | 'fork', label: string, consequence: string) => {
             const row = document.createElement('div');
+            row.className = 'terminal-recovery__choice';
             const operationId = crypto.randomUUID();
             const request = { action: 'choose', recoveryToken: offer.recoveryToken, choice, operationId } as const;
             const button = action(label, row, () => { void run(request, 'Opening review…'); });
-            if (choice !== 'fork') button.className = 'terminal-recovery__primary';
-            button.title = consequence;
+            button.className = choice === 'fork' ? 'terminal-recovery__secondary' : 'terminal-recovery__primary';
+            const detail = document.createElement('p');
+            detail.id = `extension-recovery-${choice}`;
+            detail.textContent = consequence;
+            button.setAttribute('aria-describedby', detail.id);
+            row.append(detail);
             choices.append(row);
         };
         if (offer.canRecover) addChoice('recover', 'Continue', 'Transfer this review here and prevent the previous reader from making further changes.');

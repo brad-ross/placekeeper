@@ -56,6 +56,9 @@ dialog.extension-recovery {
 .extension-recovery:not([open]) { display: none; }
 .extension-recovery::backdrop { background: var(--review-backdrop); }
 .extension-recovery__feedback:empty { display: none; }
+/* The secondary choice sits on the subtle row surface; give it the panel fill so it reads as a button.
+   `#root` only lifts specificity over the shared ID-weighted button rule; hover there still wins. */
+dialog.extension-recovery .terminal-recovery__choice > :is(#root, .terminal-recovery__secondary) { background: var(--review-surface-panel); }
 @media (max-width: 420px) {
   .extension-recovery .terminal-recovery__choice { grid-template-columns: minmax(0, 1fr); gap: 6px; }
 }
