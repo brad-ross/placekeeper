@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { App } from '@modelcontextprotocol/ext-apps';
-import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ExtensionShell } from '../src/extension-shell.js';
 import { HostResourceAdapter } from '../src/host-resource-adapter.js';
 import { EXTENSION_META_KEY } from '../../../packages/core/src/extension-protocol.js';
@@ -1201,4 +1201,138 @@ it.each([
     expect(successor.getState().status).toBe(outcome);
     expect(f.documents()).toHaveLength(pdfWrites);
     await f.shell.teardown();
+});
+
+describe('plain MCP Apps host (Claude Desktop)', () => {
+    // Standard MCP Apps only: no OpenAI resources/modelContext, no WebMCP, no advertised capabilities.
+    function plainHost(context: Record<string, unknown> = { displayMode: 'inline' }, handler?: (request: any) => Promise<any>) {
+        const f = fixture(handler ?? (async request => {
+            if (request.action === 'recent-list') return reply({ status: 'recent-reviews', items: [] });
+            if (request.action === 'open') return reply({ status: 'provisional', grant });
+            if (request.action === 'activate') return reply(active(nextGrant));
+            if (request.action === 'revoke') return reply({ status: 'closed' });
+            return reply({ status: 'ok', payload: {} });
+        }));
+        Object.assign(f.app, { getHostCapabilities: () => ({}), getHostContext: () => context, downloadFile: undefined });
+        return f;
+    }
+    const button = (f: ReturnType<typeof fixture>, label: string) => descendants(f.controls).filter(node => node.textContent === label).at(-1);
+
+    it.each([[{ displayMode: 'inline' }], [{}]])('opens from the chooser to a mounted compact reader with no OpenAI APIs (context %j)', async context => {
+        const f = plainHost(context);
+        expect(await f.shell.receive({ status: 'chooser' })).toBe(true);
+        await vi.advanceTimersByTimeAsync(0);
+        expect(f.controls.dataset.mode).toBe('chooser');
+        button(f, 'New Document').onclick(); await vi.advanceTimersByTimeAsync(0);
+        expect(f.calls.map(c => c.action)).toEqual(expect.arrayContaining(['recent-list', 'open', 'activate']));
+        expect(host.mounts).toHaveLength(1);
+        expect(host.options[0]).not.toHaveProperty('reviewedCopyExport');
+        expect(f.controls.dataset.mode).toBe('review');
+        expect(f.root.hidden).toBe(true);
+        expect(button(f, 'Open reader').hidden).toBe(false);
+        host.mounts[0][3]();
+        host.mounts[0][6]('Paper.pdf', 1);
+        expect(f.status.hidden).toBe(false);
+        expect(f.status.textContent).toContain('Paper.pdf');
+        expect(f.status.textContent).toContain('Open the reader to edit');
+        expect(f.status.textContent).not.toMatch(/Codex|host PDF/);
+        await f.shell.teardown();
+        expect(f.calls.filter(c => c.action === 'revoke')).toEqual([{ action: 'revoke', grant: nextGrant }]);
+    });
+
+    it('activates a provisional open_pdf_file result and mounts', async () => {
+        const f = plainHost();
+        await f.shell.receive({ status: 'provisional', grant });
+        expect(f.calls.find(c => c.action === 'activate')).toMatchObject({ grant });
+        expect(host.mounts).toHaveLength(1);
+        expect(f.root.inert).toBe(false);
+        await f.shell.teardown();
+    });
+
+    it('reveals the reader when the host answers fullscreen', async () => {
+        const f = plainHost();
+        const expand = vi.fn(async () => ({ mode: 'fullscreen' })); Object.assign(f.app, { requestDisplayMode: expand });
+        await f.shell.receive({ status: 'provisional', grant });
+        const open = button(f, 'Open reader');
+        open.onclick(); await vi.advanceTimersByTimeAsync(0);
+        expect(expand).toHaveBeenCalledWith({ mode: 'fullscreen' });
+        expect(f.root.hidden).toBe(false); expect(open.hidden).toBe(true);
+        expect(f.status.textContent).not.toContain('could not expand');
+        f.shell.hostContextChanged({ displayMode: 'inline' });
+        expect(f.root.hidden).toBe(true); expect(open.hidden).toBe(false);
+        await f.shell.teardown();
+    });
+
+    it.each([
+        ['rejects', vi.fn(async () => { throw Error('unsupported'); })],
+        ['answers inline', vi.fn(async () => ({ mode: 'inline' }))],
+    ])('shows the fallback message when the host %s the fullscreen request', async (_name, expand) => {
+        const f = plainHost();
+        Object.assign(f.app, { requestDisplayMode: expand });
+        await f.shell.receive({ status: 'provisional', grant });
+        const open = button(f, 'Open reader');
+        expect(() => open.onclick()).not.toThrow(); await vi.advanceTimersByTimeAsync(0);
+        expect(f.root.hidden).toBe(true);
+        expect(f.status.textContent).toContain('This app could not expand the reader.');
+        expect(f.status.textContent).not.toContain('conversation panel');
+        expect(open.disabled).toBe(false);
+        await f.shell.teardown();
+    });
+
+    it('keeps the OpenAI fullscreen fallback wording when the host exposes OpenAI extensions', async () => {
+        let openai = false;
+        const f = fixture(async request => reply(request.action === 'activate' ? active(nextGrant) : request.action === 'revoke' ? { status: 'closed' } : { status: 'ok', payload: {} }), () => openai ? {} : undefined);
+        Object.assign(f.app, { requestDisplayMode: vi.fn(async () => ({ mode: 'inline' })), getHostContext: () => ({ displayMode: 'inline' }) });
+        await f.shell.receive({ status: 'provisional', grant });
+        openai = true;
+        button(f, 'Open reader').onclick(); await vi.advanceTimersByTimeAsync(0);
+        expect(f.status.textContent).toContain('This host could not expand the reader. Open Placekeeper in the conversation panel to edit.');
+        openai = false;
+        await f.shell.teardown();
+    });
+
+    it('words load failure and expired choices without a file menu', async () => {
+        const failed = plainHost();
+        await failed.shell.receive(active());
+        host.mounts.at(-1)![2](new Error('fixture load failure'));
+        expect(failed.status.textContent).toContain('The PDF could not be loaded. Ask to open it in Placekeeper again; protected work is retained.');
+        await failed.shell.teardown();
+
+        const f = plainHost(undefined, async request => reply(request.action === 'choose' ? { status: 'unavailable' } : { status: 'closed' }));
+        await f.shell.receive({ status: 'busy', recoveryToken: 'r'.repeat(43), canResume: true });
+        const oldButtons = descendants(f.controls);
+        await vi.advanceTimersByTimeAsync(95_000);
+        oldButtons.find(node => node.textContent === 'Open Copy').onclick();
+        await vi.advanceTimersByTimeAsync(0);
+        expect(f.status.textContent).toContain('This review choice is no longer available. Choose the PDF again or ask to open it in Placekeeper again. Protected work is retained.');
+        expect(f.status.textContent).not.toMatch(/file menu|conversation panel/);
+        await f.shell.teardown();
+    });
+
+    it('reports document-in-context as unsupported and links as unavailable without erroring', async () => {
+        const f = plainHost();
+        await f.shell.receive({ status: 'provisional', grant });
+        const bridge = host.mounts[0][4];
+        const source = { sourceKey: 'session:paper', generation: 1, digest: 'd', title: 'Paper', readBytes: vi.fn() };
+        expect(() => bridge.documentContext.setSource(source)).not.toThrow();
+        expect(bridge.documentContext.getState()).toMatchObject({ status: 'unsupported', canActivate: false });
+        bridge.documentContext.activate();
+        expect(source.readBytes).not.toHaveBeenCalled();
+        await expect(bridge.addContext({ snapshot: { documentGeneration: 1 } })).rejects.toThrow('Context sharing is unavailable');
+        await expect(host.options[0].openExternalUrl('https://example.com')).rejects.toThrow('Host link opening is unavailable.');
+        await f.shell.teardown();
+    });
+
+    it('saves to a copy through the service without host download support', async () => {
+        const f = plainHost({ displayMode: 'inline' }, async request => {
+            if (request.action === 'activate') return reply(active());
+            if (request.action === 'revoke') return reply({ status: 'closed' });
+            if (request.action === 'app' && request.request.method === 'chooseCopy') return reply({ status: 'ok', payload: { destination: { phase: 'active', kind: 'copy' } } });
+            return reply({ status: 'ok', payload: {} });
+        });
+        await f.shell.receive({ status: 'provisional', grant });
+        await expect(host.options[0].call('chooseCopy', {})).resolves.toEqual({ destination: { phase: 'active', kind: 'copy' } });
+        expect(f.app.downloadFile).toBeUndefined();
+        await f.shell.teardown();
+    });
 });

@@ -47,6 +47,9 @@ export async function packageCandidate({ projectRoot = resolve('.'), route = 'ho
   await json(join(runtime, 'package.json'), { type: 'module', private: true });
   const env = { PLACEKEEPER_EXTENSION_DISPLAY_NAME: displayName, PLACEKEEPER_DAEMON_IDENTITY: 'development', PLACEKEEPER_MAC_DEVELOPMENT_ROOT: daemonRoot, PLACEKEEPER_MAC_DEVELOPMENT_HTTP_PORT: String(port), PLACEKEEPER_PDFIUM_WASM: join(runtime, 'web/pdfium.wasm') };
   await json(join(plugin, '.mcp.json'), { mcpServers: { [name]: { command: process.execPath, args: [join(runtime, 'codex-mcp/server.js')], env } } });
+  // Claude Desktop has no plugin marketplace: merge this server entry into claude_desktop_config.json.
+  // It runs the same candidate server and daemon, with the Claude tool surface selected.
+  if (!opaque) await json(join(output, 'claude-desktop-config.json'), { mcpServers: { 'placekeeper-candidate': { command: process.execPath, args: [join(runtime, 'codex-mcp/server.js')], env: { ...env, PLACEKEEPER_MCP_HOST: 'claude-desktop' } } } });
   await json(join(plugin, '.codex-plugin/plugin.json'), { name, version: '0.0.1', description: 'Isolated production Placekeeper PDF extension candidate for development qualification.', mcpServers: './.mcp.json', interface: { displayName, shortDescription: 'Test the production PDF reader with isolated review storage.' } });
   await json(join(output, '.agents/plugins/marketplace.json'), { name: marketplace, interface: { displayName: `${displayName} Test` }, plugins: [{ name, source: { source: 'local', path: `./${name}` }, policy: { installation: 'AVAILABLE', authentication: 'ON_INSTALL' }, category: 'Productivity' }] });
   await cp(resolve(projectRoot, 'test/fixtures/pdfs/text-native-with-annotations.pdf'), join(output, 'disposable-test.pdf'));
@@ -61,7 +64,7 @@ export async function packageCandidate({ projectRoot = resolve('.'), route = 'ho
     }
   }
   await hashTree(plugin);
-  for (const file of ['.agents/plugins/marketplace.json', 'disposable-test.pdf', 'start-daemon.mjs']) digests[file] = createHash('sha256').update(await readFile(join(output, file))).digest('hex');
+  for (const file of ['.agents/plugins/marketplace.json', 'disposable-test.pdf', 'start-daemon.mjs', ...(opaque ? [] : ['claude-desktop-config.json'])]) digests[file] = createHash('sha256').update(await readFile(join(output, file))).digest('hex');
   const productionAssets = Object.fromEntries(['service/main.js', 'codex-mcp/review-v1.html', 'web/app.js'].map(path => [path, { source: `dist/${path}`, sha256: digests[`${name}/runtime/${path}`] }]));
   await json(join(output, 'build.json'), { builtAt: new Date().toISOString(), revision: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(), workingTree: execFileSync('git', ['status', '--porcelain'], { encoding: 'utf8' }).trim() ? 'modified' : 'clean', node: process.version, sourceRoute: route, productionAssets, marketplace, plugin: name, server: name, qualificationWrapper: opaque ? { path: relative(resolve('.'), wrapperPath), sha256: createHash('sha256').update(await readFile(wrapperPath)).digest('hex'), metadataPolicy: 'omit-open-pdf-metadata' } : null, daemonIdentity: 'development', daemonRoot, httpPort: port, bundleSha256: createHash('sha256').update(JSON.stringify(digests)).digest('hex'), digests });
   return output;

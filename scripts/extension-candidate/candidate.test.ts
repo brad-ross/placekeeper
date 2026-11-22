@@ -68,6 +68,10 @@ describe('opaque native qualification candidate', () => {
     const defaultMetadata = JSON.parse(await readFile(join(defaultOutput, 'build.json'), 'utf8'));
     expect(defaultMetadata).toMatchObject({ sourceRoute: 'host-selected', plugin: 'placekeeper-extension-candidate', marketplace: 'placekeeper-extension-candidate-test', httpPort: 48763, qualificationWrapper: null });
     expect(defaultMetadata.daemonRoot).not.toBe(metadata.daemonRoot);
+    const claude = JSON.parse(await readFile(join(defaultOutput, 'claude-desktop-config.json'), 'utf8')).mcpServers['placekeeper-candidate'];
+    expect(claude.args).toEqual([join(defaultOutput, defaultMetadata.plugin, 'runtime/codex-mcp/server.js')]);
+    expect(claude.env).toMatchObject({ PLACEKEEPER_MCP_HOST: 'claude-desktop', PLACEKEEPER_MAC_DEVELOPMENT_HTTP_PORT: '48763' });
+    await expect(readFile(join(output, 'claude-desktop-config.json'))).rejects.toThrow();
     expect(await readFile(join(defaultOutput, defaultMetadata.plugin, 'runtime/codex-mcp/server.js'), 'utf8')).toBe('fixture:dist/codex-mcp/server.js');
     expect(await readFile(join(output, metadata.plugin, 'runtime/codex-mcp/server.js'), 'utf8')).toBe(bundle);
   });

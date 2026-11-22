@@ -22,6 +22,10 @@ Open that fixture through its native file-menu extension action. For recovery, e
 
 Record actual-host results separately from browser stubs in `docs/testing/chatgpt-extension-qualification.md`. Verify direct conversation entry, context removal, exact search/reveal, collapsed expansion, editable discussion drafts, sharing and mention controls, resource updates, conditional writes/conflicts, reconnect and protected recovery. Stop the candidate daemon and remove its marketplace/plugin through the supported host flow after qualification; retain needed evidence first. The earlier compatibility probe has been removed; its observations remain in the qualification record.
 
+## Claude Desktop
+
+The default candidate also writes `dist/extension-candidate/claude-desktop-config.json`; the packaging command prints its path. It holds one `placekeeper-candidate` server entry that runs this candidate's `runtime/codex-mcp/server.js` against the same isolated daemon on port 48763, with `PLACEKEEPER_MCP_HOST=claude-desktop` selecting the Claude tool surface (`open_pdf_file`, `open_placekeeper` and the `open_pdf` prompt). The opaque candidate does not write it. Merge the entry into `claude_desktop_config.json` without removing other servers, fully quit and restart Claude Desktop, and keep the daemon running. Setup and use are in `docs/guides/claude-desktop.md`; record results in `docs/testing/claude-desktop-qualification.md`. This route is experimental and not yet verified in Claude Desktop.
+
 ## Opaque-resource qualification route
 
 When the host supplies a trusted local path for native file-menu entry, use the separate opaque candidate to qualify the production host-resource path:

@@ -17,7 +17,8 @@ import { ResourceAllocationError } from "./resources.js";
 import { deniedFailure, diagnosticFailure, LifecycleDiagnostics, NativeDiagnosticError, verifiedAppReply } from "./lifecycle-diagnostics.js";
 import { PanelLiveness, type PanelConnectionState } from "./panel-liveness.js";
 
-const app = new App({ name: "Placekeeper", version: "1.0.0" });
+// Hosts that follow the MCP Apps spec (Claude) gate display-mode requests on these declared modes.
+const app = new App({ name: "Placekeeper", version: "1.0.0" }, { availableDisplayModes: ["inline", "fullscreen"] });
 const extensions = new OpenAIExtensions(app);
 const status = document.querySelector<HTMLElement>("#status")!;
 const detail = document.querySelector<HTMLElement>("#detail")!;
@@ -311,4 +312,4 @@ app.onclose = () => { if (extensionShell.ownsPanel) { extensionShell.disconnecte
 app.onerror = () => { if (!["armed", "retiring", "retired", "probing"].includes(oldAttempt.snapshot()?.phase ?? "")) return; oldAttempt.clear("unsupported"); stop(); display("Reconnect: the native bridge cannot be verified. The old-attempt probe is unsupported; accepted work remains recoverable."); };
 window.addEventListener("online", () => { extensionShell.wake(); liveness?.wake(); });
 document.addEventListener("visibilitychange", () => { extensionShell.visibilityChanged?.(document.hidden); if (!document.hidden) { extensionShell.wake(); liveness?.wake(); } });
-void app.connect().then(() => { recordDiagnostic("connected"); extensionShell.hostContextChanged?.(app.getHostContext() ?? {}, false); }).catch(() => { oldAttempt.clear("unsupported"); recordDiagnostic("failed", { failure: "transport" }); display("This host cannot connect the Placekeeper native app. Enable the plugin, reload Codex, and reopen the PDF."); });
+void app.connect().then(() => { recordDiagnostic("connected"); extensionShell.hostContextChanged?.(app.getHostContext() ?? {}, false); }).catch(() => { oldAttempt.clear("unsupported"); recordDiagnostic("failed", { failure: "transport" }); display("This app cannot connect to Placekeeper. Check that Placekeeper is running, then open the PDF again."); });

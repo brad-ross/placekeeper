@@ -119,6 +119,8 @@ export class ExtensionShell {
             throw new NativeDiagnosticError('transport');
         return parsed;
     }
+    /** OpenAI hosts advertise their extension APIs after connect; other MCP Apps hosts have no file menu or conversation panel. */
+    #forHost(openai: string, neutral: string) { return this.resources() || this.modelContext() ? openai : neutral; }
     #show(text: string) {
         if (this.#closed) return;
         this.#message = text;
@@ -215,7 +217,7 @@ export class ExtensionShell {
                     if (!current()) return;
                     await this.#request({action:'revoke',grant:result.grant}).catch(()=>undefined);
                     this.#grant=undefined;await this.#resetHost();
-                    this.#chooser('The saved host file is unavailable. Reopen the PDF through its file menu; your protected review is retained.');
+                    this.#chooser(this.#forHost('The saved host file is unavailable. Reopen the PDF through its file menu; your protected review is retained.', 'The saved host file is unavailable. Ask to open the PDF in Placekeeper again; your protected review is retained.'));
                 }
                 return;
             }
@@ -267,8 +269,9 @@ export class ExtensionShell {
             this.controls.dataset.mode = 'review';
             this.status.dataset.extensionMode = 'review';
             this.#openReader = this.#button('Open reader', async () => {
-                try { const result = await this.app.requestDisplayMode({ mode: 'fullscreen' }); this.hostContextChanged({ displayMode: result.mode }); }
-                catch { this.#show('This host could not expand the reader. Open Placekeeper in the conversation panel to edit.'); }
+                const declined = () => this.#show(this.#forHost('This host could not expand the reader. Open Placekeeper in the conversation panel to edit.', 'This app could not expand the reader.'));
+                try { const result = await this.app.requestDisplayMode({ mode: 'fullscreen' }); this.hostContextChanged({ displayMode: result.mode }); if (result.mode !== 'fullscreen') declined(); }
+                catch { declined(); }
             });
             this.hostContextChanged(this.app.getHostContext?.() ?? {}, false);
             this.#mount();
@@ -379,7 +382,7 @@ export class ExtensionShell {
                     return;
                 }
                 if (result.status === 'unavailable') {
-                    this.#chooser('This review choice is no longer available. Choose the PDF again or reopen it from its file menu. Protected work is retained.', 'Choose PDF again', true, true);
+                    this.#chooser(this.#forHost('This review choice is no longer available. Choose the PDF again or reopen it from its file menu. Protected work is retained.', 'This review choice is no longer available. Choose the PDF again or ask to open it in Placekeeper again. Protected work is retained.'), 'Choose PDF again', true, true);
                 } else if (result.status === 'host-resource') {
                     await this.#restartHost(result);
                 } else {
@@ -597,7 +600,7 @@ export class ExtensionShell {
                     }
                     retryChoice = undefined;
                     if (!current()) { if (parsed) await this.#discardObsolete(parsed); return; }
-                    if (parsed?.status === 'chooser') { this.#show('Use the PDF’s file menu to open it in Placekeeper on this host.'); return; }
+                    if (parsed?.status === 'chooser') { this.#show(this.#forHost('Use the PDF’s file menu to open it in Placekeeper on this host.', 'Ask to open the PDF in Placekeeper again.')); return; }
                     if (parsed?.status === 'unavailable' && request.action === 'recent-open') { if (feedback) feedback.textContent = 'Could not open this document. Try again.'; return; }
                     // A local picker selection changes the source route; cancellation retains it.
                     if (request.action === 'open' && (parsed?.status === 'provisional' || parsed?.status === 'busy')) this.#resetHost();
@@ -708,7 +711,7 @@ export class ExtensionShell {
         this.#show('');
         this.#unmount = mountCodexProductionReview(this.root, runtime, () => { if (epoch === this.#epoch) {
             this.#clearLoading();
-            this.#show('The PDF could not be loaded. Reopen it through the file menu; protected work is retained.'); } }, () => { if (epoch === this.#epoch) {
+            this.#show(this.#forHost('The PDF could not be loaded. Reopen it through the file menu; protected work is retained.', 'The PDF could not be loaded. Ask to open it in Placekeeper again; protected work is retained.')); } }, () => { if (epoch === this.#epoch) {
             this.#clearLoading();
             this.#show(this.#connected ? this.#hostNotice : this.#message); } }, this.#contextBridge(this.#readerTools, epoch), snapshot => { if (epoch !== this.#epoch || this.#closed || !this.#connected || snapshot.documentGeneration !== this.#active?.generation) return; this.#snapshot = snapshot; this.#rememberPage(snapshot); this.#context?.publish(snapshot); this.#show(this.#message); }, (title, generation) => { if (epoch !== this.#epoch || this.#closed || generation !== this.#active?.generation) return; this.#title = title; this.#show(this.#message); });
         this.#liveness?.stop();
@@ -924,7 +927,7 @@ export class ExtensionShell {
         return this.#resume;
     }
     #ended() { if (this.#closed)
-        return; this.#clearLoading(); this.#connected = false; this.#endDocumentContext(); this.#readerTools?.dispose(); this.#closeRecovery(); this.#context?.dispose(); this.#liveness?.stop(); void this.#host?.dispose().catch(() => undefined); this.root.inert = true; this.#show('This connection ended. Reopen the PDF through its file menu; accepted annotations and protected drafts are retained.'); this.#closed = true; this.#epoch++; }
+        return; this.#clearLoading(); this.#connected = false; this.#endDocumentContext(); this.#readerTools?.dispose(); this.#closeRecovery(); this.#context?.dispose(); this.#liveness?.stop(); void this.#host?.dispose().catch(() => undefined); this.root.inert = true; this.#show(this.#forHost('This connection ended. Reopen the PDF through its file menu; accepted annotations and protected drafts are retained.', 'This connection ended. Ask to open the PDF in Placekeeper again; accepted annotations and protected drafts are retained.')); this.#closed = true; this.#epoch++; }
     #endDocumentContext() {
         this.#documentChoice = undefined;
         this.#documentSource = undefined;
