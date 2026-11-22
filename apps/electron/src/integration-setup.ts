@@ -1,7 +1,8 @@
 import { readFile } from 'node:fs/promises';
 
-export const integrationHosts = ['chrome', 'vscode', 'codex'] as const;
+export const integrationHosts = ['chrome', 'vscode', 'codex', 'claude'] as const;
 export type IntegrationHost = typeof integrationHosts[number];
+export const integrationHostLabels: Record<IntegrationHost, string> = { chrome: 'Chrome', vscode: 'VS Code', codex: 'Codex', claude: 'Claude Desktop (experimental)' };
 interface SetupDialog { title: string; message: string; detail?: string; buttons: string[]; defaultId: number; cancelId: number }
 export function createIntegrationSetup(options: {
     statePath: string;
@@ -14,7 +15,7 @@ export function createIntegrationSetup(options: {
         if (options.isolated) return;
         const choices = {} as Record<IntegrationHost, 'setup' | 'skip'>;
         for (const host of integrationHosts) {
-            const response = await options.present({title:'Optional integrations',message:`Set up ${host === 'vscode' ? 'VS Code' : host === 'chrome' ? 'Chrome' : 'Codex'}?`,detail:'You can skip each integration and open PDFs normally. Revisit these choices from Help → Set Up Integrations. Setup may require host installation, permission, trust or restart.',buttons:['Skip','Set Up'],defaultId:0,cancelId:0});
+            const response = await options.present({title:'Optional integrations',message:`Set up ${integrationHostLabels[host]}?`,detail:'You can skip each integration and open PDFs normally. Revisit these choices from Help → Set Up Integrations. Setup may require host installation, permission, trust or restart.',buttons:['Skip','Set Up'],defaultId:0,cancelId:0});
             choices[host] = response === 1 ? 'setup' : 'skip';
         }
         try {

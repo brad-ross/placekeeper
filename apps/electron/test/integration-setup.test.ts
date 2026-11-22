@@ -7,9 +7,9 @@ it('defaults every host off, permits later opt-in, and suppresses isolated start
  const root=await mkdtemp(join(tmpdir(),'pk-first-')); const statePath=join(root,'choices');
  const seen: unknown[]=[]; let enabled=false; let dialogs=0;
  const setup=createIntegrationSetup({statePath,isolated:false,present:async options=>{dialogs++;expect(options.defaultId).toBe(0);return enabled && options.message.includes('Chrome')?1:0;},setup:async choices=>{seen.push(choices);await writeFile(statePath,'{}');return {outcomes:[]};}});
- await setup.firstLaunch();expect(seen).toEqual([{chrome:'skip',vscode:'skip',codex:'skip'}]);
- await setup.firstLaunch();expect(dialogs).toBe(3);
- enabled=true;await setup.open();expect(seen[1]).toEqual({chrome:'setup',vscode:'skip',codex:'skip'});
+ await setup.firstLaunch();expect(seen).toEqual([{chrome:'skip',vscode:'skip',codex:'skip',claude:'skip'}]);
+ await setup.firstLaunch();expect(dialogs).toBe(4);
+ enabled=true;await setup.open();expect(seen[1]).toEqual({chrome:'setup',vscode:'skip',codex:'skip',claude:'skip'});
  const isolated=createIntegrationSetup({statePath:join(root,'missing'),isolated:true,present:async()=>{throw Error('No isolated prompt');},setup:async()=>{throw Error('No isolated host writes');}});
  await isolated.firstLaunch();await isolated.open();
 });
@@ -23,5 +23,15 @@ it('repairs previously opted-in integrations without opting into skipped hosts',
  const root=await mkdtemp(join(tmpdir(),'pk-refresh-'));const statePath=join(root,'choices');await writeFile(statePath,JSON.stringify({choices:{chrome:true}}));
  const choicesSeen:unknown[]=[];const messages:string[]=[];
  const action=createIntegrationSetup({statePath,isolated:false,present:async options=>{messages.push(options.message);return 0;},setup:async choices=>{choicesSeen.push(choices);return {outcomes:[{host:'chrome',status:'pending',registration:'repaired',message:'Reload Chrome'}]};}});
- await action.firstLaunch();expect(choicesSeen).toEqual([{chrome:'setup',vscode:'skip',codex:'skip'}]);expect(messages).toEqual(['Integration refresh needs host action']);
+ await action.firstLaunch();expect(choicesSeen).toEqual([{chrome:'setup',vscode:'skip',codex:'skip',claude:'skip'}]);expect(messages).toEqual(['Integration refresh needs host action']);
+});
+it('offers Claude Desktop as an experimental host and forwards its choice like Codex', async () => {
+ const root=await mkdtemp(join(tmpdir(),'pk-claude-'));const statePath=join(root,'choices');const messages:string[]=[];const seen:unknown[]=[];
+ const action=createIntegrationSetup({statePath,isolated:false,present:async options=>{messages.push(options.message);return /Codex|Claude/.test(options.message)?1:0;},setup:async choices=>{seen.push(choices);return {outcomes:[]};}});
+ await action.open();
+ expect(messages).toEqual(['Set up Chrome?','Set up VS Code?','Set up Codex?','Set up Claude Desktop (experimental)?']);
+ expect(seen).toEqual([{chrome:'skip',vscode:'skip',codex:'setup',claude:'setup'}]);
+ await writeFile(statePath,JSON.stringify({choices:{claude:true}}));
+ await createIntegrationSetup({statePath,isolated:false,present:async()=>0,setup:async choices=>{seen.push(choices);return {outcomes:[]};}}).firstLaunch();
+ expect(seen[1]).toEqual({chrome:'skip',vscode:'skip',codex:'skip',claude:'setup'});
 });

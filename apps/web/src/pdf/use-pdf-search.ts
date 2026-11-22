@@ -109,6 +109,11 @@ export function usePdfSearch() {
     getPageCount: () => searchDocumentRef.current?.pages.length ?? 0,
     isCurrentDocument: (document: PdfDocumentObject) => searchDocumentRef.current === document,
     selectResult: (id: string) => searchControllerRef.current?.selectResult(id),
+    pageTexts: (firstPageIndex: number, lastPageIndex: number) => {
+      const controller = searchControllerRef.current;
+      if (controller === null) return Promise.reject(new Error('The PDF is not ready to read.'));
+      return controller.pageTexts(firstPageIndex, lastPageIndex);
+    },
     prepare: () => {
       searchRequestedRef.current = true;
       void searchControllerRef.current?.prepare();

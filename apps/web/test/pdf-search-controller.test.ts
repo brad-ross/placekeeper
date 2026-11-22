@@ -40,6 +40,22 @@ function reader(pages: readonly string[]): PdfSearchPageReader {
 }
 
 describe('PDF search controller', () => {
+  it('reads indexed page text for a range, marking pages without reliable text', async () => {
+    const controller = createPdfSearchController({
+      documentGeneration: 1,
+      reader: reader(['First page text.', '', 'Third page text.']),
+    });
+
+    expect(await controller.pageTexts(0, 2)).toEqual([
+      { pageIndex: 0, text: 'First page text.' },
+      { pageIndex: 1, text: null },
+      { pageIndex: 2, text: 'Third page text.' },
+    ]);
+    expect(await controller.pageTexts(2, 9)).toEqual([{ pageIndex: 2, text: 'Third page text.' }]);
+    controller.dispose();
+    await expect(controller.pageTexts(0, 0)).rejects.toThrow();
+  });
+
   it('separates exact and related matches in document order', async () => {
     const controller = createPdfSearchController({
       documentGeneration: 7,

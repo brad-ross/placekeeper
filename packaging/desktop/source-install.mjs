@@ -14,10 +14,10 @@ const target = `${process.platform}-${process.arch}`;
 if (!pins.default.targets[target]) throw new Error(`Unsupported source-install target: ${target}`);
 if (Number(process.versions.node.split('.')[0]) < 24) throw new Error('Source installation requires Node.js 24 or newer');
 const args = process.argv.slice(2);
-const choices = { chrome: 'ask', vscode: 'ask', codex: 'ask', zed: 'ask' };
+const choices = { chrome: 'ask', vscode: 'ask', codex: 'ask', claude: 'ask', zed: 'ask' };
 for (const argument of args) {
   if (argument === '--dry-run') continue;
-  const match = /^--(chrome|vscode|codex|zed)=(setup|skip|ask|manual|preview)$/u.exec(argument);
+  const match = /^--(chrome|vscode|codex|claude|zed)=(setup|skip|ask|manual|preview)$/u.exec(argument);
   if (!match || (match[1] !== 'zed' && ['manual', 'preview'].includes(match[2]))) throw new Error(`Unsupported installer option: ${argument}`);
   choices[match[1]] = match[2];
 }

@@ -9,6 +9,7 @@ import { EXTENSION_META_KEY, EXTENSION_TOOL } from '../../../packages/core/src/e
 import { admitLocalPdf, callClaudeDesktopTool, getClaudeDesktopPrompt, mcpHostFromEnv, OPEN_PDF_FILE_TOOL } from '../src/claude-desktop-server.js';
 import { createNativeServer } from '../src/server.js';
 import type { NativeServiceClient } from '../src/service-client.js';
+import { READER_BRIDGE_TOOL } from '../src/reader-bridge-protocol.js';
 
 const grant = 'p'.repeat(43);
 function fixture() { return { display: vi.fn(), app: vi.fn(), extension: vi.fn(async () => ({ status: 'provisional' as const, grant })) } as unknown as NativeServiceClient; }
@@ -35,12 +36,14 @@ describe('Claude Desktop host mode', () => {
     const { client, close } = await connect(fixture(), 'claude-desktop');
     try {
       const tools = (await client.listTools()).tools;
-      expect(tools.map(tool => tool.name)).toEqual([OPEN_PDF_FILE_TOOL, 'open_placekeeper', EXTENSION_TOOL]);
+      expect(tools.map(tool => tool.name)).toEqual([OPEN_PDF_FILE_TOOL, 'open_placekeeper', EXTENSION_TOOL,
+        'inspect_review', 'search_document', 'navigate_page', 'reveal_search_result', 'reveal_annotation', 'read_document_text', READER_BRIDGE_TOOL]);
       const shell = (await client.listResources()).resources[0]!.uri;
       for (const tool of tools.slice(0, 2)) {
         expect(tool._meta).toEqual({ ui: { resourceUri: shell } });
       }
       expect(tools[2]?._meta).toEqual({ ui: { visibility: ['app'] } });
+      expect(tools.at(-1)?._meta).toEqual({ ui: { visibility: ['app'] } });
       expect(JSON.stringify(tools)).not.toContain('openai/');
       expect((await client.listPrompts()).prompts.map(prompt => prompt.name)).toEqual(['open_pdf']);
       // Claude reads its preferred mode from the standard ui metadata; it ignores the openai/ui hint.

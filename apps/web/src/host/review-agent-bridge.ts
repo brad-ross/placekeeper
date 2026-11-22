@@ -14,6 +14,13 @@ export interface ReviewAgentActions {
   snapshot(): ReviewAgentSnapshot;
   search(query: string): Promise<ReturnType<typeof reviewAgentSearchResult>>;
   navigate(target: ReviewAgentTarget): Promise<boolean>;
+  /** Extracted text of one-based pages firstPage..lastPage from the reader's search index; null where a page has no reliable text. */
+  pageText?(firstPage: number, lastPage: number): Promise<ReviewAgentPageText>;
+}
+
+export interface ReviewAgentPageText {
+  readonly documentGeneration: number;
+  readonly pages: readonly { readonly page: number; readonly text: string | null }[];
 }
 
 export type ReviewAgentContextInput = (

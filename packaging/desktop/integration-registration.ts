@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { lstat, mkdir, readFile, readdir, unlink, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdir, readFile, readdir, realpath, rename, rm, stat, unlink, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join } from "node:path";
 
 export interface CandidateIntegrationFile {
@@ -191,4 +191,102 @@ export async function candidateCodexPluginFiles(options: {
   await visit();
   files.push({ path: join(destination, ".agents/plugins/marketplace.json"), content: JSON.stringify({ name: `placekeeper-${installationId}`, interface: { displayName: "Placekeeper Installed" }, plugins: [{ name: "codex-plugin", source: { source: "local", path: "./codex-plugin" }, policy: { installation: "AVAILABLE", authentication: "ON_INSTALL" }, category: "Productivity" }] }, null, 2) + "\n" });
   return files;
+}
+
+/** Claude Desktop keeps every local MCP server in one user-owned JSON file. */
+export const CLAUDE_DESKTOP_SERVER_NAME = "placekeeper";
+export interface ClaudeDesktopServerEntry {
+  readonly command: string;
+  readonly args: readonly string[];
+  readonly env: Readonly<Record<string, string>>;
+}
+interface ClaudeDesktopReceipt {
+  readonly schemaVersion: 1;
+  readonly host: "claude-desktop";
+  readonly installationId: string;
+  readonly configPath: string;
+  readonly entrySha256: string;
+  readonly pendingSha256?: string;
+}
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
+// Claude Desktop rewrites its configuration when its own settings change, so
+// ownership compares the entry's value, not its formatting or key order.
+function canonical(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
+  if (isRecord(value)) return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${canonical(value[key])}`).join(",")}}`;
+  return JSON.stringify(value) ?? "null";
+}
+const entryDigest = (value: unknown) => digest(canonical(value));
+const missing = (error: NodeJS.ErrnoException) => { if (error.code === "ENOENT") return undefined; throw error; };
+
+export function renderClaudeDesktopServer(options: { readonly node: string; readonly server: string; readonly resources: string; readonly launcher: string }): ClaudeDesktopServerEntry {
+  const paths = [options.node, options.server, options.resources, options.launcher];
+  if (!paths.every(isAbsolute) || paths.some(path => /[\0\r\n]/u.test(path))) throw new Error("Select identified packaged Claude Desktop assets");
+  return { command: options.node, args: [options.server], env: { PLACEKEEPER_MCP_HOST: "claude-desktop", PLACEKEEPER_APP_RESOURCES: options.resources, PLACEKEEPER_LAUNCHER: options.launcher } };
+}
+
+/** Merge one owned `placekeeper` server into Claude Desktop's configuration.
+ * Every other key is preserved. A `placekeeper` entry that this receipt did not
+ * record, or a configuration that cannot be parsed, is left untouched. */
+export async function registerClaudeDesktopServer(options: {
+  readonly installationId: string;
+  readonly receiptPath: string;
+  readonly configPath: string;
+  readonly entry: ClaudeDesktopServerEntry;
+}): Promise<"registered" | "current" | "repaired"> {
+  const { installationId, receiptPath, configPath, entry } = options;
+  if (!/^[a-f0-9]{64}$/u.test(installationId)) throw new Error("Invalid candidate registration");
+  validatePaths(receiptPath, [{ path: configPath, content: "" }]);
+  const folder = await stat(dirname(configPath)).catch(missing);
+  if (!folder?.isDirectory()) throw new Error("Claude Desktop was not found; its configuration folder does not exist");
+  const retained = await readFile(receiptPath, "utf8").catch(missing);
+  let receipt: ClaudeDesktopReceipt | undefined;
+  if (retained !== undefined) {
+    receipt = JSON.parse(retained) as ClaudeDesktopReceipt;
+    if (receipt.schemaVersion !== 1 || receipt.host !== "claude-desktop" || !/^[a-f0-9]{64}$/u.test(receipt.installationId) || !/^[a-f0-9]{64}$/u.test(receipt.entrySha256) ||
+        (receipt.pendingSha256 !== undefined && !/^[a-f0-9]{64}$/u.test(receipt.pendingSha256))) throw new Error("Invalid retained registration receipt");
+    if (receipt.configPath !== configPath) throw new Error("The retained receipt names a different Claude Desktop configuration. Registration changed; existing files were preserved");
+  }
+  // Follow a linked configuration so the rename replaces its target, not the link.
+  const target = await realpath(configPath).catch(missing) ?? configPath;
+  let text: string | undefined;
+  try { text = await readFile(target, "utf8").catch(missing); }
+  catch (error) { throw new Error(`Claude Desktop configuration could not be read (${(error as NodeJS.ErrnoException).code ?? "error"}); it was left unchanged`); }
+  let config: Record<string, unknown> = {};
+  if (text !== undefined) {
+    let parsed: unknown;
+    try { parsed = JSON.parse(text); } catch { throw new Error(`Claude Desktop configuration at ${configPath} is not valid JSON; it was left unchanged. Fix the file, then retry setup`); }
+    if (!isRecord(parsed)) throw new Error(`Claude Desktop configuration at ${configPath} is not a JSON object; it was left unchanged`);
+    config = parsed;
+  }
+  const servers = config.mcpServers;
+  if (servers !== undefined && !isRecord(servers)) throw new Error(`Claude Desktop mcpServers in ${configPath} is not a JSON object; it was left unchanged`);
+  const existing = servers !== undefined && Object.hasOwn(servers, CLAUDE_DESKTOP_SERVER_NAME) ? servers[CLAUDE_DESKTOP_SERVER_NAME] : undefined;
+  const wanted = entryDigest(entry);
+  const found = existing === undefined ? undefined : entryDigest(existing);
+  if (found !== undefined && (receipt === undefined || (found !== receipt.entrySha256 && found !== receipt.pendingSha256))) {
+    throw new Error(`Claude Desktop already has a different "${CLAUDE_DESKTOP_SERVER_NAME}" server in ${configPath}. Registration changed; existing files were preserved`);
+  }
+  const record = (fields: { entrySha256: string; pendingSha256?: string }, flag?: "wx") =>
+    writeFile(receiptPath, JSON.stringify({ schemaVersion: 1, host: "claude-desktop", installationId, configPath, ...fields }), { mode: 0o600, ...(flag ? { flag } : {}) });
+  if (found === wanted) {
+    if (receipt!.installationId !== installationId || receipt!.entrySha256 !== wanted || receipt!.pendingSha256 !== undefined) await record({ entrySha256: wanted });
+    return "current";
+  }
+  // Reserve ownership of the entry about to be written before the host write,
+  // so an interrupted setup can still recognize and finish its own entry.
+  await mkdir(dirname(receiptPath), { recursive: true, mode: 0o700 });
+  if (receipt === undefined) await record({ entrySha256: wanted }, "wx");
+  else await record({ entrySha256: receipt.entrySha256, pendingSha256: wanted });
+  const next = { ...config, mcpServers: { ...(servers ?? {}), [CLAUDE_DESKTOP_SERVER_NAME]: entry } };
+  const mode = text === undefined ? 0o600 : (await stat(target)).mode & 0o777;
+  const temporary = join(dirname(target), `.claude_desktop_config.${randomUUID()}.tmp`);
+  try {
+    await writeFile(temporary, `${JSON.stringify(next, null, 2)}\n`, { flag: "wx", mode });
+    if (process.platform !== "win32") await chmod(temporary, mode);
+    if (await readFile(target, "utf8").catch(missing) !== text) throw new Error("Claude Desktop changed its configuration during setup; it was left unchanged. Retry setup");
+    await rename(temporary, target);
+  } finally { await rm(temporary, { force: true }); }
+  await record({ entrySha256: wanted });
+  return receipt === undefined ? "registered" : "repaired";
 }

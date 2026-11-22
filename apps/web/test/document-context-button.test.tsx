@@ -12,6 +12,7 @@ describe('document context button', () => {
     [{ status: 'idle', canActivate: true }, 'Put document in context', true],
     [{ status: 'publishing', canActivate: false }, 'Putting document in context…', false],
     [{ status: 'available', canActivate: false }, 'Document in context', false],
+    [{ status: 'available', canActivate: false, detail: 'Claude can read this PDF on request.' }, 'Document in context: Claude can read this PDF on request.', false],
     [{ status: 'unsupported', canActivate: false, reason: 'This host does not support PDF delivery.' }, 'Document not in context. This host does not support PDF delivery.', false],
     [{ status: 'unavailable', canActivate: true, reason: 'The host declined the PDF.' }, 'Document not in context. The host declined the PDF. Try again', true],
     [{ status: 'unavailable', canActivate: false, reason: 'PDF bytes are unavailable.' }, 'Document not in context. PDF bytes are unavailable.', false],

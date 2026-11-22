@@ -11,13 +11,13 @@ import { setupChrome } from './setup-chrome.mjs';
 
 const execute = promisify(execFile);
 const hosts = ['chrome', 'vscode', 'codex', 'zed'];
-const labels = { chrome: 'Chrome (experimental)', vscode: 'VS Code', codex: 'Codex', zed: 'Zed' };
+const labels = { chrome: 'Chrome (experimental)', vscode: 'VS Code', codex: 'Codex', claude: 'Claude Desktop (experimental)', zed: 'Zed' };
 const marketplaceName = 'placekeeper-installed';
 
 export function parseChoices(args) {
   const choices = {};
   for (const argument of args) {
-    const match = /^--(chrome|vscode|codex|zed)=(.*)$/u.exec(argument);
+    const match = /^--(chrome|vscode|codex|claude|zed)=(.*)$/u.exec(argument);
     if (!match) throw new Error(`Unknown integration option: ${argument}`);
     if (!['setup', 'skip', 'ask'].includes(match[2]) && !(match[1] === 'zed' && ['manual', 'preview'].includes(match[2]))) throw new Error(`${match[1]} choice must be ${match[1] === 'zed' ? 'manual, preview, setup, skip, or ask' : 'setup, skip, or ask'}`);
     if (choices[match[1]]) throw new Error(`Duplicate integration option: ${match[1]}`);
@@ -160,6 +160,9 @@ export async function setupIntegrations({ appPath, choices = {}, prompt = prompt
         : `${error.stderr?.trim() || error.message}. Retry this integration after resolving the diagnostic.` });
     }
   }
+  // Claude Desktop registration belongs to the desktop app's setup helper; this
+  // compatibility flow accepts the shared option but never prompts for it.
+  if (choices.claude && choices.claude !== 'skip') outcomes.push({ host: 'claude', status: 'pending', message: 'Claude Desktop setup is available from the Placekeeper desktop app. Open Placekeeper and choose Help → Set Up Integrations.' });
   write(`\nMac: ${macStatus === 'current' ? 'already current' : 'installed'}.`);
   for (const result of outcomes) write(`${labels[result.host]}: ${result.status}. ${result.message}`);
   if (noTerminal) write('No terminal was available. Rerun in a terminal, or choose explicitly: --chrome=setup --vscode=setup --codex=setup --zed=manual (use =skip to decline).');
@@ -173,7 +176,7 @@ if (process.argv[1] && realpathSync(process.argv[1]) === realpathSync(fileURLToP
       if (!process.env.PLACEKEEPER_LIFECYCLE_LOCK_TOKEN) throw new Error('Host setup requires daemon coordinate-host');
       console.log(JSON.stringify(await setupHost({ appPath: process.argv[3], host: process.argv[4], zedMode: process.argv[5] })));
     } else {
-      if (!process.argv[2]) throw new Error('Usage: setup-integrations.mjs <installed-app> [--chrome=setup|skip|ask] [--vscode=setup|skip|ask] [--codex=setup|skip|ask] [--zed=manual|preview|skip|ask]');
+      if (!process.argv[2]) throw new Error('Usage: setup-integrations.mjs <installed-app> [--chrome=setup|skip|ask] [--vscode=setup|skip|ask] [--codex=setup|skip|ask] [--claude=setup|skip|ask] [--zed=manual|preview|skip|ask]');
       const result = await setupIntegrations({ appPath: resolve(process.argv[2]), choices: parseChoices(process.argv.slice(3)) });
       process.exitCode = result.exitCode;
     }

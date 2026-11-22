@@ -17,6 +17,9 @@ import { CallToolRequestSchema, GetPromptRequestSchema, ListPromptsRequestSchema
 import { getUiCapability, RESOURCE_MIME_TYPE } from "@modelcontextprotocol/ext-apps/server";
 import { CODEX_MAX_ENCODED_RESPONSE_BYTES, CODEX_REVIEW_UI_RESOURCE, parseCodexAppRequest, parseCodexDisplayRequest } from "../../../packages/core/src/codex-mcp-protocol.js";
 import { createServiceClient, type NativeServiceClient } from "./service-client.js";
+import { callReaderBridgeTool, callReaderServerTool, ReaderBridge, readerBridgeTool, readerServerTools } from "./reader-bridge.js";
+import { READER_BRIDGE_TOOL } from "./reader-bridge-protocol.js";
+import { isReaderToolName } from "./reader-tool-definitions.js";
 
 import { APP_TOOL, PENDING_META_KEY, RESPONSE_META_KEY, QUALIFICATION_META_KEY } from "./transport-contract.js";
 const unavailable = (): CallToolResult => ({ isError: true, content: [{ type: "text", text: "Placekeeper native integration is unavailable. Check that the installed app and plugin versions match, enable the plugin MCP server and hooks, reload Codex, then reopen the PDF." }] });
@@ -64,12 +67,14 @@ export async function callNativeTool(client: NativeServiceClient, name: string, 
   } catch { /* Never expose socket errors, paths, or capability-bearing responses. */ }
   return unavailable();
 }
-export function createNativeServer(client: NativeServiceClient, shell: string, dependencies: NativeQualificationDependencies = {}, host: McpHost = "codex"): Server {
+export function createNativeServer(client: NativeServiceClient, shell: string, dependencies: NativeQualificationDependencies = {}, host: McpHost = "codex", readerBridge?: ReaderBridge): Server {
   // Host caches may outlive an MCP process. New shell bytes need a new address.
   const shellUri = `ui://placekeeper/review-v1-${createHash("sha256").update(shell).digest("hex")}.html`;
   const displayName = process.env.PLACEKEEPER_EXTENSION_DISPLAY_NAME?.trim();
   const claude = host === "claude-desktop";
-  const tools = (claude ? claudeDesktopTools : [...nativeTools, ...extensionTools]).map((original): Tool => {
+  // Claude Desktop calls only server-listed tools, so the view's reader tools are relayed through this process.
+  const bridge = claude ? readerBridge ?? new ReaderBridge() : undefined;
+  const tools = (claude ? [...claudeDesktopTools, ...readerServerTools, readerBridgeTool] : [...nativeTools, ...extensionTools]).map((original): Tool => {
     const tool = displayName && ["open_pdf", "open_placekeeper", "open_pdf_file"].includes(original.name)
       ? { ...original, title: displayName } : original;
     const ui = tool._meta?.ui;
@@ -85,6 +90,8 @@ export function createNativeServer(client: NativeServiceClient, shell: string, d
   }
   server.setRequestHandler(CallToolRequestSchema, async ({ params }) => {
     if (!getUiCapability({ extensions: server.getClientCapabilities()?.extensions ?? {} })?.mimeTypes?.includes(RESOURCE_MIME_TYPE)) return claude ? claudeDesktopUnsupported() : unavailable();
+    if (bridge && params.name === READER_BRIDGE_TOOL) return callReaderBridgeTool(bridge, params.arguments);
+    if (bridge && isReaderToolName(params.name)) return callReaderServerTool(bridge, params.name, params.arguments);
     if (claude) return callClaudeDesktopTool(client, params.name, params.arguments, params._meta);
     if (extensionTools.some(tool => tool.name === params.name)) return callExtensionTool(client, params.name, params.arguments, params._meta);
     return callNativeTool(client, params.name, params.arguments, dependencies);
@@ -94,6 +101,7 @@ export function createNativeServer(client: NativeServiceClient, shell: string, d
     if (params.uri !== shellUri && params.uri !== CODEX_REVIEW_UI_RESOURCE) throw new Error("Unknown resource");
     return { contents: [{ uri: params.uri, mimeType: RESOURCE_MIME_TYPE, text: shell, _meta: { ui: { csp: { connectDomains: [], resourceDomains: [] }, prefersBorder: true, ...(claude ? { preferredDisplayMode: "fullscreen" } : {}) }, "openai/ui": { preferredDisplayMode: "fullscreen", availableDisplayModes: ["fullscreen", "inline"] } } }] };
   });
+  if (bridge) server.onclose = () => bridge.dispose();
   return server;
 }
 export async function startStdioServer(): Promise<void> {

@@ -68,21 +68,25 @@ Use **Help → Check for Updates** to check manually. It reports a newer release
 
 ## Optional integrations
 
-First launch offers independent, default-off **VS Code**, **Chrome**, and **Codex** setup choices. Choose **Skip** to read PDFs immediately, or return through **Help → Set Up Integrations**. Failure of an integration does not prevent ordinary reading. Setup reports skipped, prepared/registered with host action pending, or failed outcomes. Registration is not completed interactive verification.
+First launch offers independent, default-off **VS Code**, **Chrome**, **Codex**, and **Claude Desktop** (experimental) setup choices. Choose **Skip** to read PDFs immediately, or return through **Help → Set Up Integrations**. Failure of an integration does not prevent ordinary reading. Setup reports skipped, prepared/registered with host action pending, or failed outcomes. Registration is not completed interactive verification.
 
 Source installation offers the same portable operations through prompts or explicit choices:
 
 ```sh
-./install.sh --chrome=setup --vscode=skip --codex=ask --zed=skip
+./install.sh --chrome=setup --vscode=skip --codex=ask --claude=skip --zed=skip
 ```
 
-Chrome, VS Code and Codex accept `ask`, `setup`, or `skip`; prompts default to skip. The older Mac source-compatible Zed option also accepts `manual` and `preview`. It remains available on macOS through the source installer; use the [editor guide](guides/editor-synctex.md) for other editors and SyncTeX. Setup grants no source-folder access.
+Chrome, VS Code, Codex and Claude accept `ask`, `setup`, or `skip`; prompts default to skip. The older Mac source-compatible Zed option also accepts `manual` and `preview`. It remains available on macOS through the source installer; use the [editor guide](guides/editor-synctex.md) for other editors and SyncTeX. Setup grants no source-folder access.
 
 VS Code setup prepares the launcher setting and may submit the VSIX to its CLI. Apply the reported setting, install the bundled VSIX through **Extensions: Install from VSIX** if needed, reload, check extension enablement and workspace trust, and verify a PDF handoff. Windows setup reports the manual VSIX step.
 
 Chrome setup registers the native host. In `chrome://extensions`, enable **Developer mode** and **Load unpacked** from the reported runtime's `integrations/chrome-extension` folder. Approve permissions, reload Chrome and verify a PDF handoff. A legacy 0.2.4 extension must be loaded again from the new folder.
 
 Codex setup prepares a complete local marketplace in the support root's `integrations/codex` directory. In Codex Plugins add that marketplace, install/update `codex-plugin`, review trust and enablement, fully restart Codex and use a new chat. Verify the Placekeeper skill, display tool and trusted hooks. Existing plugin caches may require reinstall/update; never edit caches to force enablement.
+
+Claude Desktop setup adds one `placekeeper` server to Claude Desktop's `claude_desktop_config.json` (`~/Library/Application Support/Claude` on macOS, `%APPDATA%\Claude` on Windows, `~/.config/Claude` on Linux). The entry runs the installation's bundled Node with its `codex-mcp/server.js` and `PLACEKEEPER_MCP_HOST=claude-desktop`. Every other server and setting in that file is kept. Setup writes the file only when Claude Desktop's folder already exists; otherwise it reports Claude Desktop as not found and changes nothing, so open Claude Desktop once and rerun setup. A malformed file, or a `placekeeper` entry that Placekeeper did not write or that was edited since, is left untouched and reported. Fully quit Claude Desktop (closing its window is not enough) and reopen it, check that the `placekeeper` connector is enabled, then ask Claude to open a local PDF. Rerunning setup updates the entry after the app moves or upgrades.
+
+Skipping an integration later leaves its existing registration in place. To remove the Claude Desktop entry, choose **Skip** for Claude Desktop in **Help → Set Up Integrations**, quit Claude Desktop, delete the `placekeeper` key under `mcpServers` in `claude_desktop_config.json`, then delete `claude.receipt.json` from the support root's `integrations` directory.
 
 Owned registration receipts and choices live under the support root's `integrations` directory. Edited/unowned registrations are preserved for inspection. Retry setup after resolving a reported issue or moving an installation. Real-host trust and end-to-end verification remain separate qualification steps.
 

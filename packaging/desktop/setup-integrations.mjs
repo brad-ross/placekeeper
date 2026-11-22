@@ -1,10 +1,10 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { resolveInstallLayout } from './install-layout.ts';
 import { execFile } from 'node:child_process';
-import { readFile, mkdir, writeFile, open, realpath, rename, rm } from 'node:fs/promises';
+import { readFile, mkdir, writeFile, open, realpath, rename, rm, stat } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { delimiter, dirname, join, resolve } from 'node:path';
+import { delimiter, dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { integrationLauncher } from './launcher.mjs';
@@ -14,11 +14,12 @@ async function atomicJson(path, value) {
   try { await writeFile(temporary,JSON.stringify(value)+'\n',{flag:'wx',mode:0o600}); await rename(temporary,path); }
   finally { await rm(temporary,{force:true}); }
 }
-export const hosts = ['chrome', 'vscode', 'codex'];
+export const hosts = ['chrome', 'vscode', 'codex', 'claude'];
+export const labels = { chrome: 'Chrome (experimental)', vscode: 'VS Code', codex: 'Codex', claude: 'Claude Desktop (experimental)', zed: 'Zed' };
 export function parseChoices(args) {
   const choices = {};
   for (const arg of args) {
-    const match = /^--(chrome|vscode|codex|zed)=(ask|setup|skip|manual|preview)$/u.exec(arg);
+    const match = /^--(chrome|vscode|codex|claude|zed)=(ask|setup|skip|manual|preview)$/u.exec(arg);
     if (!match || (match[1] !== 'zed' && ['manual','preview'].includes(match[2])) || choices[match[1]]) throw Error(`Invalid integration choice: ${arg}`);
     choices[match[1]] = match[2];
   }
@@ -28,7 +29,7 @@ export async function promptFromTerminal(host) {
   let terminal;
   try { terminal = await open(process.platform === 'win32' ? 'CONIN$' : '/dev/tty', 'r+'); } catch { return false; }
   try {
-    await terminal.write(host === 'zed' ? 'zed: jump on demand, after build, or skip? [manual/preview/skip, default skip] ' : `${host}: set up optional integration? [y/N] `);
+    await terminal.write(host === 'zed' ? 'zed: jump on demand, after build, or skip? [manual/preview/skip, default skip] ' : `${host === 'claude' ? labels.claude : host}: set up optional integration? [y/N] `);
     let line = ''; const byte = Buffer.alloc(1);
     for (;;) { const {bytesRead} = await terminal.read(byte, 0, 1, null); if (!bytesRead || byte[0] === 10 || byte[0] === 13) break; line += byte.toString(); }
     if(host === 'zed' && ['manual','preview'].includes(line.trim().toLowerCase())) return line.trim().toLowerCase();
@@ -38,7 +39,13 @@ export async function promptFromTerminal(host) {
 export function integrationStatePath(home = homedir(), platform = process.platform, env = process.env) {
   return join(resolveInstallLayout({platform,homeDirectory:home,env}).supportRoot, 'integrations/choices.json');
 }
-export async function setupIntegrations({appPath, resources, choices = {}, statePath, home = homedir(), platform = process.platform, run = promisify(execFile), prompt = async () => false, write = () => {}, codePath}) {
+/** Claude Desktop reads local MCP servers from this per-user file. */
+export function claudeDesktopConfigPath(home = homedir(), platform = process.platform, env = process.env) {
+  if (platform === 'darwin') return join(home,'Library/Application Support/Claude/claude_desktop_config.json');
+  if (platform === 'win32') return join(env.APPDATA && isAbsolute(env.APPDATA) ? env.APPDATA : join(home,'AppData','Roaming'),'Claude','claude_desktop_config.json');
+  return join(home,'.config/Claude/claude_desktop_config.json');
+}
+export async function setupIntegrations({appPath, resources, choices = {}, statePath, home = homedir(), platform = process.platform, env = process.env, run = promisify(execFile), prompt = async () => false, write = () => {}, codePath}) {
   resources ??= join(resolve(appPath), platform === 'darwin' ? 'Contents/Resources/desktop' : 'resources/desktop');
   statePath ??= integrationStatePath(home, platform);
   const prior = await readFile(statePath,'utf8').then(JSON.parse, error => { if(error.code === 'ENOENT') return {choices:{}}; throw error; });
@@ -56,7 +63,15 @@ export async function setupIntegrations({appPath, resources, choices = {}, state
       const owned = dirname(statePath);
       const receipt = join(owned,`${host}.receipt.json`);
       let destination; let args;
-      if (host === 'codex') {
+      if (host === 'claude') {
+        destination = claudeDesktopConfigPath(home,platform,env);
+        // Create Claude's configuration file only inside a folder Claude Desktop already made.
+        if (!await stat(dirname(destination)).then(info=>info.isDirectory(),()=>false)) {
+          outcomes.push({host,status:'pending',hostAction:'host-not-found',path:destination,message:`Claude Desktop was not found (${dirname(destination)} does not exist); nothing was changed. Install Claude Desktop and open it once, then rerun setup from Help → Set Up Integrations.`});
+          continue;
+        }
+        args = ['--destination',destination,'--node',join(resources,`node/bin/node${suffix}`),'--server',join(resources,'codex-mcp/server.js'),'--launcher',launcher];
+      } else if (host === 'codex') {
         destination = join(owned,'codex');
         args = ['--destination',destination,'--node',join(resources,`node/bin/node${suffix}`),'--server',join(resources,'codex-mcp/server.js'),'--launcher',launcher];
       } else if (host === 'vscode') {
@@ -86,6 +101,7 @@ export async function setupIntegrations({appPath, resources, choices = {}, state
         }
         message = `VS Code launcher setting prepared at ${destination}. Apply it in VS Code settings. ${code && platform !== 'win32' ? 'The bundled extension was submitted to VS Code.' : `Install ${vsix} using Extensions: Install from VSIX.`} Reload VS Code, check enablement, and verify a PDF handoff.`;
       } else if (host === 'chrome') message = `Chrome native host registered. Load or update the unpacked extension at ${join(resources,'integrations/chrome-extension')}, approve permissions, reload Chrome and verify a PDF handoff. A previous 0.2.4 extension must be reloaded from this folder.`;
+      else if (host === 'claude') message = `Claude Desktop server "placekeeper" ${registration === 'current' ? 'is current' : 'was written'} in ${destination}; other servers and settings were preserved. Fully quit Claude Desktop (not just its window) and reopen it, check that the placekeeper connector is enabled, then ask Claude to open a local PDF in Placekeeper.`;
       else message = `Codex plugin prepared at ${destination}. In Codex Plugins add this local marketplace, install or update codex-plugin, review trust and enablement, fully restart Codex, and verify the Placekeeper skill, display tool and trusted hooks. Previous 0.2.4 plugin caches require reinstall or update and restart.`;
       outcomes.push({host,status:'pending',registration,hostAction:'pending',path:destination,message});
     } catch (error) { outcomes.push({host,status:'failed',message:`${error.message}. Existing edited or unowned registrations are preserved; inspect the ownership receipt before retrying.`}); }

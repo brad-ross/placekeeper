@@ -1557,6 +1557,12 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       if (generation !== documentGenerationRef.current) throw Error('Document changed');
       return reviewAgentSearchResult(result, generation);
     },
+    pageText: async (firstPage, lastPage) => {
+      const generation = documentGenerationRef.current;
+      const pages = await search.pageTexts(firstPage - 1, lastPage - 1);
+      if (generation !== documentGenerationRef.current) throw Error('Document changed');
+      return { documentGeneration: generation, pages: pages.map(({ pageIndex, text }) => ({ page: pageIndex + 1, text })) };
+    },
     navigate: async target => {
       const navigation = mainNavigationRef.current;
       const root = productionRootRef.current;
@@ -1687,7 +1693,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
       if (generation !== documentGenerationRef.current || liveAgentActions.current === null) throw Error('Document changed');
       return liveAgentActions.current;
     };
-    return props.agentBridge.attach({ snapshot: () => actions().snapshot(), search: query => actions().search(query), navigate: target => actions().navigate(target) });
+    return props.agentBridge.attach({ snapshot: () => actions().snapshot(), search: query => actions().search(query), navigate: target => actions().navigate(target), pageText: (firstPage, lastPage) => actions().pageText!(firstPage, lastPage) });
   }, [props.agentBridge, agentReady, state.workflow.documentGeneration]);
   useEffect(() => {
     document.title = pageTitle;
