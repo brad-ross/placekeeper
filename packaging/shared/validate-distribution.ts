@@ -641,7 +641,7 @@ async function validateAgentMetadata(pluginRoot: string): Promise<void> {
     !agent.includes('icon_small: "./assets/placekeeper.svg"') ||
     !agent.includes('icon_large: "./assets/placekeeper.svg"') ||
     !agent.includes('brand_color: "#264F7D"') ||
-    !agent.includes(`default_prompt: "Use $${CODEX_SKILL_NAME} to open this local PDF for review."`)
+    !agent.includes(`default_prompt: "Use $${CODEX_SKILL_NAME} to open and annotate this local PDF."`)
   ) {
     throw new Error(`The packaged ${CODEX_SKILL_NAME} agent metadata must expose its Placekeeper identity and prompt`);
   }
