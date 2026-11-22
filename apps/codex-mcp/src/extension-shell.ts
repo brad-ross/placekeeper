@@ -385,24 +385,20 @@ export class ExtensionShell {
         title.textContent = 'Reopen Document';
         const description = document.createElement('p');
         description.id = 'extension-recovery-description';
-        // Always say why the dialog appeared; each choice below carries its own consequence.
-        description.textContent = offer.canRecover
-            ? 'This PDF is open in another Placekeeper reader that is no longer connected.'
-            : offer.matchingCopy
-                ? 'A saved-copy review has matching PDF contents and a similar filename.'
-                : available ? 'You have earlier work on this PDF.'
-                    : 'This review is still open elsewhere. Return to the previous reader or check again after its connection ends.';
+        // One line says why the dialog appeared; the button labels carry the choices.
+        description.textContent = offer.matchingCopy
+            ? 'A saved-copy review has matching PDF contents and a similar filename.'
+            : available ? 'You had this document open earlier.'
+            : 'This review is still open elsewhere. Return to the previous reader or check again after its connection ends.';
         const feedback = document.createElement('p');
         feedback.className = 'extension-recovery__feedback terminal-recovery__status';
         feedback.setAttribute('role', 'status');
-        const choices = document.createElement('div');
-        choices.className = 'extension-recovery__choices';
         const footer = document.createElement('div');
         footer.className = 'terminal-recovery__footer';
         const footerActions = document.createElement('div');
         footerActions.className = 'terminal-recovery__footer-actions';
         header.append(title);
-        body.append(description, choices, feedback);
+        body.append(description, feedback);
         dialog.setAttribute('aria-describedby', description.id);
         footer.append(footerActions);
         dialog.append(header, body, footer);
@@ -454,30 +450,15 @@ export class ExtensionShell {
             if (this.#active && this.#grant) void this.#apply({ status: 'active', grant: this.#grant, presentation: this.#active });
             else this.#chooser(undefined, undefined, false, true);
         };
-        // One action row (Cancel, alternatives, primary last); a short line above each names its consequence.
+        // One action row: Cancel, alternatives, primary last.
         action('Cancel', footerActions, cancel);
-        const choice = (kind: 'recover' | 'resume' | 'fork', label: string, consequence: string) => {
-            const line = document.createElement('p');
-            line.className = 'extension-recovery__choice';
-            const name = document.createElement('span');
-            name.className = 'extension-recovery__choice-label';
-            name.textContent = label;
-            const detail = document.createElement('span');
-            detail.id = `extension-recovery-${kind}`;
-            detail.textContent = consequence;
-            line.append(name, ' ', detail);
-            choices.append(line);
+        const choice = (kind: 'recover' | 'resume' | 'fork', label: string) => {
             const request = { action: 'choose', recoveryToken: offer.recoveryToken, choice: kind, operationId: crypto.randomUUID() } as const;
-            return () => {
-                const button = action(label, footerActions, () => { void run(request, 'Opening review…'); });
-                button.className = kind === 'fork' ? 'terminal-recovery__secondary' : 'terminal-recovery__primary';
-                button.setAttribute('aria-describedby', detail.id);
-            };
+            action(label, footerActions, () => { void run(request, 'Opening review…'); }).className = kind === 'fork' ? 'terminal-recovery__secondary' : 'terminal-recovery__primary';
         };
-        const proceed = offer.canRecover ? choice('recover', 'Continue', 'moves this review here and stops the other reader from making changes.')
-            : offer.canResume ? choice('resume', 'Continue', 'picks up your existing annotations and protected draft.') : undefined;
-        choice('fork', 'Open Copy', 'starts a separate review and keeps the existing work in place.')();
-        if (proceed) proceed();
+        choice('fork', 'Open Copy');
+        if (offer.canRecover) choice('recover', 'Continue');
+        else if (offer.canResume) choice('resume', 'Continue');
         else action('Check again', footerActions, () => {
             void run({ action: 'recheck', recoveryToken: offer.recoveryToken }, 'Checking the previous connection…');
         }).className = 'terminal-recovery__primary';

@@ -1557,9 +1557,9 @@ describe('plain MCP Apps host (Claude Desktop)', () => {
 });
 
 it.each([
-    ['recover', { canResume: false, canRecover: true }, 'This PDF is open in another Placekeeper reader that is no longer connected.', 'moves this review here'],
-    ['resume', { canResume: true }, 'You have earlier work on this PDF.', 'picks up your existing annotations'],
-] as const)('explains the %s recovery dialog with one action row and a described consequence per choice', async (choice, flags, explanation, consequence) => {
+    ['recover', { canResume: false, canRecover: true }],
+    ['resume', { canResume: true }],
+] as const)('shows the %s recovery dialog as one reason line and one action row', async (_choice, flags) => {
     const f = fixture(async () => reply({ status: 'closed' }));
     await f.shell.receive({ status: 'busy', recoveryToken: 'r'.repeat(43), ...flags });
     const dialog = descendants(f.controls).find(node => node.tagName === 'DIALOG');
@@ -1569,7 +1569,7 @@ it.each([
     // Initial focus rests on the title, as on the desktop recovery page, so no action looks preselected.
     expect(title).toMatchObject({ tagName: 'H1', textContent: 'Reopen Document', tabIndex: -1, autofocus: true });
     const description = nodes.find(node => node.id === 'extension-recovery-description');
-    expect(description.textContent).toBe(explanation);
+    expect(description.textContent).toBe('You had this document open earlier.');
     expect(dialog.setAttribute).toHaveBeenCalledWith('aria-describedby', description.id);
     const footer = nodes.find(node => node.className === 'terminal-recovery__footer-actions');
     const buttons = descendants(footer);
@@ -1579,13 +1579,8 @@ it.each([
     expect(cancel.autofocus).toBeUndefined();
     expect(copy.className).toBe('terminal-recovery__secondary');
     expect(primary.className).toBe('terminal-recovery__primary');
-    const lines = nodes.filter(node => node.className === 'extension-recovery__choice');
-    expect(lines.map(line => descendants(line)[0].textContent)).toEqual(['Continue', 'Open Copy']);
-    const detail = (id: string) => nodes.find(node => node.id === id);
-    expect(primary.setAttribute).toHaveBeenCalledWith('aria-describedby', `extension-recovery-${choice}`);
-    expect(detail(`extension-recovery-${choice}`).textContent).toContain(consequence);
-    expect(copy.setAttribute).toHaveBeenCalledWith('aria-describedby', 'extension-recovery-fork');
-    expect(detail('extension-recovery-fork').textContent).toBe('starts a separate review and keeps the existing work in place.');
+    // No per-button explanations: the body holds only the reason and the feedback line.
+    expect(nodes.filter(node => node.tagName === 'P').map(node => node.id || node.className)).toEqual(['extension-recovery-description', 'extension-recovery__feedback terminal-recovery__status']);
     expect(nodes.some(node => node.className === 'terminal-recovery__choice')).toBe(false);
     await f.shell.teardown();
 });

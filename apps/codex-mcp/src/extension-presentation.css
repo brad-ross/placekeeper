@@ -57,9 +57,6 @@ dialog.extension-recovery {
 .extension-recovery::backdrop { background: var(--review-backdrop); }
 .extension-recovery__feedback:empty { display: none; }
 .extension-recovery .terminal-recovery__body { gap: 12px; }
-.extension-recovery__choices { display: grid; gap: 4px; }
-.extension-recovery__choice { margin: 0; color: var(--review-ink-muted); font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
-.extension-recovery__choice-label { color: var(--review-ink-primary); font-weight: 500; }
 @media (max-width: 420px) {
   .extension-recovery .terminal-recovery__header { padding: 19px 18px 9px; }
   .extension-recovery .terminal-recovery__body { padding: 0 18px 16px; }
