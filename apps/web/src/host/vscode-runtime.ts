@@ -1,9 +1,9 @@
 import { externalWebUrl } from "../../../../packages/core/src/external-web-url.js";
 import { nativeSyncTexResponse } from "../../../../packages/core/src/native-synctex-protocol.js";
-import { DOCUMENT_COMMAND_IDS } from "../review/review-command-surface.js";
+import { DOCUMENT_COMMAND_IDS } from "../reader/document-command-surface.js";
 import type { SaveDestinationResult } from "./session-contracts.js";
 import type { SaveStatus } from "../../../../packages/core/src/save-status.js";
-import type { DocumentCommand, DocumentStateView } from "../../../../packages/core/src/review-model.js";
+import type { DocumentCommand, DocumentStateView } from "../../../../packages/core/src/document-model.js";
 import type { PlacekeeperLinkLocation } from "../../../../packages/core/src/placekeeper-link.js";
 import {
   DOCUMENT_RUNTIME_PROTOCOL,
@@ -16,13 +16,13 @@ import {
   sanitizeCodexDocumentRuntimeResponse,
   type DocumentRuntimeHost,
   type DocumentRuntimeMethod,
-} from "../../../../packages/core/src/review-runtime-protocol.js";
+} from "../../../../packages/core/src/document-runtime-protocol.js";
 import type {
   ProductionExportResult,
   ProductionScope,
   SaveCopyProposal,
 } from "./session-contracts.js";
-import type { RejectedDocumentCommand } from "../review/review-command-result.js";
+import type { RejectedDocumentCommand } from "../reader/document-command-result.js";
 import {
   type HostRuntime,
   type HostRuntimeBootstrap,
@@ -30,7 +30,7 @@ import {
   type HostRuntimeIdentity,
   type HostRuntimeInvalidation,
 } from "./runtime.js";
-import { MemoryDocumentLocationHistory } from "../review/review-location-history.js";
+import { MemoryDocumentLocationHistory } from "../reader/document-location-history.js";
 
 const ID = /^[A-Za-z0-9_-]{16,128}$/u;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;

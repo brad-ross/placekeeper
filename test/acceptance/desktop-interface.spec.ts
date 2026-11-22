@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 
 test('sibling save dialog blocks native PDF commands and restores them when closed', async ({ page }) => {
-  await page.goto('/test/acceptance/review-harness/index.html?native-commands=1');
+  await page.goto('/test/acceptance/reader-harness/index.html?native-commands=1');
   const snapshot = () => page.locator('#root').evaluate((element) => JSON.parse(
     (element as HTMLElement).dataset.nativeCommandSnapshot!,
   ) as { focusContext: string; commands: { id: string; enabled: boolean }[] });

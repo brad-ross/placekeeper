@@ -43,7 +43,7 @@ it('keeps Codex opening out of service calls and rejects unavailable opening', a
   unavailable.dispose();
 });
 
-import { createDocumentState } from '../../../packages/core/src/review-model.js';
+import { createDocumentState } from '../../../packages/core/src/document-model.js';
 import { VersionedWebviewBridge } from '../../vscode/src/webview-bridge.js';
 const panelId = 'panel_identifier_1234';
 const sessionId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';

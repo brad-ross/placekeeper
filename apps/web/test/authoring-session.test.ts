@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { createDocumentState, type Annotation } from '../../../packages/core/src/review-model.js';
+import { createDocumentState, type Annotation } from '../../../packages/core/src/document-model.js';
 import {
   authoringAuthorityFor,
   authoringAnchorSnapshot,
@@ -13,14 +13,14 @@ import {
   beginDocumentInteraction,
   attachmentOrderedInteractionTransport,
   type AuthoringSessionSeed,
-} from '../src/review/authoring-session.js';
+} from '../src/reader/authoring-session.js';
 import { PdfZoomMode } from '@embedpdf/models';
-import { resolveReattachmentDiscardIntent } from '../src/review/ReconciliationWorkspace.js';
+import { resolveReattachmentDiscardIntent } from '../src/reader/ReconciliationWorkspace.js';
 import {
   authoringSaveDisposition,
   canonicalStateForFinalizedInteraction,
   interactionReceiptRequiresPersistence,
-} from '../src/review/use-authoring-session.js';
+} from '../src/reader/use-authoring-session.js';
 import {
   pendingDestinationAttemptIsCurrent,
   pendingDestinationDisposition,

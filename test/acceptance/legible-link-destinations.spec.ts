@@ -6,7 +6,7 @@ import { expect, test, type Locator, type Page } from "@playwright/test";
 import { PDFArray, PDFDict, PDFDocument, PDFName } from "pdf-lib";
 
 import { PlacekeeperHost } from "../../apps/service/src/host/placekeeper-host.js";
-import { addPageNote } from "../../packages/core/src/review-commands.js";
+import { addPageNote } from "../../packages/core/src/document-commands.js";
 import { readEditableAnnotations } from "../../packages/pdf-backends/src/embedpdf-adapter.js";
 
 /*

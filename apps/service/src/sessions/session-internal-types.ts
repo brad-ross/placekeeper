@@ -1,6 +1,6 @@
 import type { PdfRewriteEligibility } from "../../../../packages/core/src/pdf-writer.js";
 import type { PlacekeeperLinkLocation } from "../../../../packages/core/src/placekeeper-link.js";
-import type { DocumentState } from "../../../../packages/core/src/review-model.js";
+import type { DocumentState } from "../../../../packages/core/src/document-model.js";
 import type { MatchedRestartReconnectTicket } from "../context/restart-reconnect-store.js";
 import type {
   DraftSnapshotStore,
@@ -12,7 +12,7 @@ import type {
   RecoverableSourceOwnership,
 } from "../recovery/draft-snapshot.js";
 import type { OpenDocumentResult, RecoveryDecision, DocumentPresentationSurface } from "./session-contracts.js";
-import type { DocumentInteractionReceipt } from "./review-interactions.js";
+import type { DocumentInteractionReceipt } from "./document-interactions.js";
 
 export interface RecoveryOfferRecord {
   readonly expiresAt: string;

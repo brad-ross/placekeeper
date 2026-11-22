@@ -3,8 +3,8 @@ import { describe, expect, it } from 'vitest';
 import {
   mergeAuthoringPreviewProjections,
   projectAnnotations,
-} from '../src/review/annotation-projection.js';
-import type { Annotation } from '../../../packages/core/src/review-model.js';
+} from '../src/reader/annotation-projection.js';
+import type { Annotation } from '../../../packages/core/src/document-model.js';
 
 const timestamp = '2026-08-07T12:00:00.000Z';
 function item(kind: Annotation['kind'], id: string, pageIndex: number, payload: Annotation['payload']): Annotation {

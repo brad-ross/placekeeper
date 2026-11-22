@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type Dispatch, type SetStateAction, type RefObject } from 'react';
-import { setAnnotationName } from '../../../../packages/core/src/review-commands.js';
-import { authoringAuthorityFor, type AuthoringAuthority } from '../review/authoring-session.js';
-import type { DocumentStateView } from '../../../../packages/core/src/review-model.js';
+import { setAnnotationName } from '../../../../packages/core/src/document-commands.js';
+import { authoringAuthorityFor, type AuthoringAuthority } from '../reader/authoring-session.js';
+import type { DocumentStateView } from '../../../../packages/core/src/document-model.js';
 import type { SaveStatus } from '../../../../packages/core/src/save-status.js';
 import type { SaveCopyProposal, ProductionScope, ProductionSessionApi } from '../host/session-contracts.js';
 import { pendingDestinationDisposition, pendingDestinationIsCurrent, pendingDestinationAttemptIsCurrent,

@@ -24,7 +24,7 @@ import {
   type NativeRuntimeHost,
   sanitizeDocumentRuntimeDisplayString,
   type DocumentRuntimeBrokerMethod,
-} from "../../../../packages/core/src/review-runtime-protocol.js";
+} from "../../../../packages/core/src/document-runtime-protocol.js";
 import type {
   ChromeRuntimeBackend,
   ChromeRuntimeProjection,
@@ -63,7 +63,7 @@ interface StagedRuntimeRecord extends RuntimeRecordBase {
   adoptedResourceGeneration: number;
   taskLaunch?: NativeTaskLaunchAdmission;
   taskLaunchAwaitingActivation?: boolean;
-  interactionAttachment?: import("../sessions/review-interactions.js").DocumentInteractionAttachment;
+  interactionAttachment?: import("../sessions/document-interactions.js").DocumentInteractionAttachment;
 }
 
 interface RecoveryRuntimeRecord extends RuntimeRecordBase {

@@ -1,5 +1,5 @@
 import type { SaveStatus } from "../../../../packages/core/src/save-status.js";
-import type { DocumentCommand, DocumentStateView } from "../../../../packages/core/src/review-model.js";
+import type { DocumentCommand, DocumentStateView } from "../../../../packages/core/src/document-model.js";
 
 export type SaveGatedCommand =
   | { readonly kind: "submit"; readonly command: DocumentCommand }

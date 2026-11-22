@@ -4,7 +4,7 @@ import {
   normalizeDocumentSelectionAnchor,
   type Annotation,
   type DocumentSelectionPageEvidenceV1,
-} from './review-model.js';
+} from './document-model.js';
 import { hasSafePortableAnnotationShape } from './portable-annotation-shape.js';
 
 export const PORTABLE_ANNOTATION_MAX_BYTES = 32 * 1024;

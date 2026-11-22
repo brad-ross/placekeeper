@@ -8,11 +8,11 @@ import { createRequire } from "node:module";
 import { promisify } from "node:util";
 import { describe, expect, it, vi } from "vitest";
 import { PDFDocument } from "pdf-lib";
-import { createDocumentState } from "../../../packages/core/src/review-model.js";
+import { createDocumentState } from "../../../packages/core/src/document-model.js";
 import {
   DOCUMENT_RUNTIME_PROTOCOL,
   DOCUMENT_RUNTIME_VERSION,
-} from "../../../packages/core/src/review-runtime-protocol.js";
+} from "../../../packages/core/src/document-runtime-protocol.js";
 import { startHttpServer } from "../../service/src/server/http-server.js";
 import { SessionBroker } from "../../service/src/sessions/session-broker.js";
 import { subscribeRuntimeDocumentSource } from "../../web/src/host/runtime-document-source.js";
@@ -38,7 +38,7 @@ import {
   parseLaunchResponse,
   recoveryDecisionForLabel,
   documentPanelOptions,
-} from "../src/review-panel.js";
+} from "../src/document-panel.js";
 import {
   createPrivateSnapshotDirectory,
   exchangeVscodeLaunch,

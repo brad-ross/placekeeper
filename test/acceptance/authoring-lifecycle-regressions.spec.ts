@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 
 test('releases a concurrently deleted edited item before closing its editor', async ({ page }) => {
-  await page.goto('/test/acceptance/review-harness/index.html?interaction-lifecycle=1');
+  await page.goto('/test/acceptance/reader-harness/index.html?interaction-lifecycle=1');
   await page.getByRole('button', { name: 'Highlight', exact: true }).click();
   await page.getByRole('button', { name: 'Save', exact: true }).click();
   await page.getByRole('button', { name: 'Show Workspace' }).click();

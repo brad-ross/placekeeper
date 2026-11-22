@@ -1,4 +1,4 @@
-import { addPageNote, editAnnotation, setAnnotationName } from "../../../packages/core/src/review-commands.js";
+import { addPageNote, editAnnotation, setAnnotationName } from "../../../packages/core/src/document-commands.js";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createHash, randomUUID } from "node:crypto";
 import { canonicalJson } from "../src/runtime/canonical-json.js";

@@ -1,4 +1,4 @@
-import { documentEdgeGeometry } from '../../scripts/testing/review-edge-geometry.js';
+import { documentEdgeGeometry } from '../../scripts/testing/document-edge-geometry.js';
 import { expect, test, type Page } from '@playwright/test';
 import { addStaticKeyboardPageNote, waitForStaticPdf } from '../../scripts/static-browser-journey.js';
 
@@ -8,7 +8,7 @@ const fitButton = (page: Page) => page.locator('[data-review-zoom-action="fit-wi
 
 async function openBook(page: Page, scan = false) {
   await page.setViewportSize({ width: 900, height: 1100 });
-  await page.goto(`/test/acceptance/review-harness/?fit-modes=${scan ? 'scan' : 'book'}`);
+  await page.goto(`/test/acceptance/reader-harness/?fit-modes=${scan ? 'scan' : 'book'}`);
   await waitForStaticPdf(page);
   await expect(page.getByRole('textbox', { name: /^Current zoom/u })).toBeEnabled();
 }
@@ -292,7 +292,7 @@ test('fits the whole page after height changes and reports a textless document f
 
 test('switches from text to whole-page fitting in a wide short viewport', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 720 });
-  await page.goto('/test/acceptance/review-harness/?fit-modes=book');
+  await page.goto('/test/acceptance/reader-harness/?fit-modes=book');
   await waitForStaticPdf(page);
   await fit(page, 'text');
   await fit(page, 'page');

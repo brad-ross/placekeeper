@@ -6,7 +6,7 @@ import {
   sanitizeChromeDocumentRuntimeResponse,
   type DocumentRuntimeBrokerMethod,
   type DocumentRuntimeMethod,
-} from "../../../packages/core/src/review-runtime-protocol.js";
+} from "../../../packages/core/src/document-runtime-protocol.js";
 import { sha256Hex } from "../../../packages/core/src/sha256.js";
 import { deadlineWasSubstantiallyDelayed } from "../../../packages/core/src/suspend-aware-deadline.js";
 import type { EmbeddedDocumentLifecycleEvent, PdfStreamInfo } from "./handler-controller.js";

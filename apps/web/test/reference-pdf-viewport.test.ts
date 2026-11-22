@@ -9,7 +9,7 @@ import {
   DestinationBandLayer,
   referenceOwnedMarkTargetIsInteractive,
 } from '../src/pdf/ReferencePdfViewport.js';
-import type { DestinationBand } from '../src/review/navigation-coordinator.js';
+import type { DestinationBand } from '../src/reader/navigation-coordinator.js';
 
 function targetWithAncestor(ancestorSelector: string): EventTarget {
   return {
@@ -126,8 +126,8 @@ describe('Destination Band layer', () => {
 });
 
 describe('Destination Band styling', () => {
-  const tokens = readCssSource(new URL('../src/app/review-design-tokens.css', import.meta.url));
-  const styles = readCssSource(new URL('../src/app/review-search-references.css', import.meta.url));
+  const tokens = readCssSource(new URL('../src/app/reader-design-tokens.css', import.meta.url));
+  const styles = readCssSource(new URL('../src/app/reader-search-references.css', import.meta.url));
 
   it('defines a translucent blue band token with no separate edge', () => {
     expect(DESTINATION_BAND_TOKEN).toBe('--review-destination-band');

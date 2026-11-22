@@ -1,4 +1,4 @@
-import type { UpgradeDocumentParticipants } from "../host/upgrade-review-participants.js";
+import type { UpgradeDocumentParticipants } from "../host/upgrade-document-participants.js";
 import type { EditorNavigation } from "../synctex/editor-navigation.js";
 import {
   parseNativeAppControlMessage,

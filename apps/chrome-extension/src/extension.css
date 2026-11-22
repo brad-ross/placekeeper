@@ -1,6 +1,6 @@
 @import '../../web/src/app/document-loading.css';
-@import '../../web/src/app/review-design-tokens.css';
-@import '../../web/src/app/review-modal-surface.css';
+@import '../../web/src/app/reader-design-tokens.css';
+@import '../../web/src/app/reader-modal-surface.css';
 
 :root {
   color-scheme: only light;

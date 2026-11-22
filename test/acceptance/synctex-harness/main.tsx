@@ -2,10 +2,10 @@ import { createRoot } from 'react-dom/client';
 import { useRef } from 'react';
 import { RuntimeProductionReaderApp } from '../../../apps/web/src/production-entry.js';
 import type { HostRuntime, HostRuntimeBootstrap, HostRuntimeCommand } from '../../../apps/web/src/host/runtime.js';
-import { MemoryDocumentLocationHistory } from '../../../apps/web/src/review/review-location-history.js';
-import '../../../apps/web/src/app/review-layout.css';
+import { MemoryDocumentLocationHistory } from '../../../apps/web/src/reader/document-location-history.js';
+import '../../../apps/web/src/app/reader-layout.css';
 import { useHostSyncTex } from '../../../apps/web/src/host/use-host-synctex.js';
-import { createDocumentState } from '../../../packages/core/src/review-model.js';
+import { createDocumentState } from '../../../packages/core/src/document-model.js';
 import type { HostForwardSyncTexRequest } from '../../../apps/web/src/host/session-contracts.js';
 import type { PdfViewerNavigation } from '../../../apps/web/src/pdf/viewer-navigation-adapter.js';
 

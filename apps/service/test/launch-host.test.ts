@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { addPageNote } from "../../../packages/core/src/review-commands.js";
+import { addPageNote } from "../../../packages/core/src/document-commands.js";
 import { encodePlacekeeperLink } from "../../../packages/core/src/placekeeper-link.js";
 import { TaskBindingRegistry } from "../src/context/task-binding-registry.js";
 import { PlacekeeperHost } from "../src/host/placekeeper-host.js";

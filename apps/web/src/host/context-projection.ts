@@ -1,4 +1,4 @@
-import type { DocumentStateView } from '../../../../packages/core/src/review-model.js';
+import type { DocumentStateView } from '../../../../packages/core/src/document-model.js';
 import type { LiveContextBindingStatus } from '../../../../packages/core/src/live-context.js';
 import type { ProductionScope } from './session-contracts.js';
 function contextMatchesDocumentState(

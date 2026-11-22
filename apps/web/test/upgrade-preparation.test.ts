@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
 import { DocumentUpgradePreparation } from '../src/host/upgrade-preparation.js';
-import type { UpgradeDocumentStatus } from '../../../packages/core/src/upgrade-review-protocol.js';
+import type { UpgradeDocumentStatus } from '../../../packages/core/src/upgrade-document-protocol.js';
 
 it('flushes current input after freezing, keeps the view open until commit, and unfreezes a declined or canceled attempt', async () => {
   const attemptId = 'a'.repeat(43);

@@ -14,7 +14,7 @@ export const suites: Record<string, TestStage[]> = {
   "test:desktop-platform": [{ runner: "vitest", options: ["--testTimeout", "45000", "--hookTimeout", "45000", "--maxWorkers", "2"], files: [
     "test/support/debian-package-identity.test.ts",
     "packaging/desktop/install-layout.test.ts", "packaging/desktop/legacy-release.test.ts", "packaging/desktop/launcher.test.ts",
-    "apps/service/test/desktop-service-switch.test.ts", "apps/service/test/upgrade-preparation.test.ts", "apps/service/test/upgrade-review-participants.test.ts",
+    "apps/service/test/desktop-service-switch.test.ts", "apps/service/test/upgrade-preparation.test.ts", "apps/service/test/upgrade-document-participants.test.ts",
     "apps/web/test/upgrade-preparation.test.ts", "apps/web/test/production-entry.test.ts",
     "apps/service/test/platform-locations.test.ts", "apps/service/test/platform-control.test.ts",
     "apps/service/test/platform-private-storage.test.ts", "apps/service/test/windows-private-creation.test.ts",
@@ -27,7 +27,7 @@ export const suites: Record<string, TestStage[]> = {
     "apps/electron/test/installed-test-root.test.ts", "apps/electron/test/installer-routing.test.ts", "apps/electron/test/installer-ui.test.ts",
     "apps/electron/test/standalone-chooser.test.ts", "apps/electron/test/open-intent.test.ts",
     "apps/electron/test/protocol-install.test.ts", "packaging/desktop/linux-sandbox.test.ts",
-    "apps/electron/test/open-link.test.ts", "apps/electron/test/review-bridge.test.ts", "apps/electron/test/menus.test.ts", "apps/electron/test/integration-setup.test.ts",
+    "apps/electron/test/open-link.test.ts", "apps/electron/test/document-bridge.test.ts", "apps/electron/test/menus.test.ts", "apps/electron/test/integration-setup.test.ts",
     "apps/service/test/native-lifecycle-diagnostic.test.ts",
     "apps/service/test/windows-browser-source-store.test.ts", "apps/service/test/private-file-adoption.test.ts",
     "apps/service/test/chrome-handoff-native.test.ts", "apps/service/test/daemon-startup-diagnostic.test.ts",
@@ -42,7 +42,7 @@ export const suites: Record<string, TestStage[]> = {
     "apps/service/test/electron-navigation-integration.test.ts",
     "apps/service/test/desktop-app-lifecycle.test.ts", "apps/service/test/desktop-runtime.test.ts",
     "apps/service/test/desktop-daemon-runtime.test.ts", "apps/service/test/electron-daemon-runtime.test.ts",
-    "packages/core/test/review-runtime-protocol.test.ts",
+    "packages/core/test/document-runtime-protocol.test.ts",
     "packaging/desktop/setup-codex.test.ts", "packaging/desktop/setup-integrations.test.ts", "packaging/desktop/integration-registration.test.ts",
     "apps/service/test/integration-registration-command.test.ts", "apps/service/test/hook-contract.test.ts",
   ] }, { runner: "playwright", options: ["--config", "scripts/testing/config/playwright.desktop-platform.config.ts"], files: [] }],
@@ -56,7 +56,7 @@ export const suites: Record<string, TestStage[]> = {
   "test:desktop-performance": [{ runner: "playwright", options: ["--config", "scripts/testing/config/playwright.electron-performance.config.ts"], files: [] }],
   "test:desktop-installed": [{ runner: "playwright", options: ["--config", "scripts/testing/config/playwright.electron.config.ts"], files: [] }],
   "test:desktop-installers": [{ runner: "playwright", options: ["--config", "scripts/testing/config/playwright.desktop-installers.config.ts"], files: ["test/acceptance/desktop-installers.spec.ts"] }],
-  "test:codex-native": [{ runner: "vitest", options: [], files: ["scripts/extension-candidate/candidate.test.ts", "apps/service/test/extension-recent-reviews.test.ts", "apps/codex-mcp/test/shell.test.ts", "apps/codex-mcp/test/extension-shell.test.ts", "apps/codex-mcp/test/review-context-attachment.test.ts", "apps/codex-mcp/test/live-reader-tools.test.ts", "apps/web/test/review-agent-bridge.test.ts", "apps/web/test/document-context-button.test.tsx", "apps/web/test/use-pdf-search.test.ts", "apps/web/test/extension-context-coordinator.test.ts", "apps/codex-mcp/test/host-resource-adapter.test.ts", "apps/service/test/extension-host-resource.test.ts","apps/service/test/extension-runtime.test.ts", "apps/codex-mcp/test/extension-server.test.ts", "apps/codex-mcp/test/panel-liveness.test.ts", "apps/service/test/codex-daemon-runtime.test.ts", "apps/web/test/codex-host-actions.test.tsx", "apps/web/test/codex-runtime.test.ts", "apps/web/test/codex-refresh.test.tsx", "apps/service/test/codex-persistence.integration.test.ts", "apps/web/test/codex-bundle.test.ts", "apps/web/test/host-render-layer.test.ts", "apps/codex-mcp/test/service-client.integration.test.ts", "apps/codex-mcp/test/service-client.test.ts", "apps/codex-mcp/test/extension-picker-control.test.ts", "apps/codex-mcp/test/server.test.ts", "apps/codex-mcp/test/server-entrypoint.test.ts", "apps/codex-mcp/test/resources.test.ts", "apps/codex-mcp/test/lifecycle-diagnostics.test.ts", "apps/codex-mcp/test/qualification.test.ts", "apps/service/test/codex-live-context.integration.test.ts", "apps/service/test/hook-contract.test.ts", "packages/core/test/codex-mcp-protocol.test.ts", "apps/service/test/codex-runtime.test.ts", "apps/service/test/native-qualification.test.ts", "apps/service/test/native-qualification-experiments.test.ts", "apps/service/test/codex-backend.test.ts", "apps/service/test/codex-host.test.ts", "apps/service/test/task-binding-registry.test.ts", "apps/service/test/restart-reconnect-store.test.ts"] }, "pnpm fixtures:pdf", "pnpm build:codex", { runner: "playwright", options: ["--config", "scripts/testing/config/playwright.config.ts"], files: ["test/acceptance/chatgpt-extension.spec.ts", "test/acceptance/codex-native-review.spec.ts", "test/acceptance/codex-native-lifecycle.spec.ts", "test/acceptance/codex-native-resources.spec.ts", "test/acceptance/host-raster-rotation.spec.ts"] }],
+  "test:codex-native": [{ runner: "vitest", options: [], files: ["scripts/extension-candidate/candidate.test.ts", "apps/service/test/extension-recent-documents.test.ts", "apps/codex-mcp/test/shell.test.ts", "apps/codex-mcp/test/extension-shell.test.ts", "apps/codex-mcp/test/document-context-attachment.test.ts", "apps/codex-mcp/test/live-reader-tools.test.ts", "apps/web/test/document-agent-bridge.test.ts", "apps/web/test/document-context-button.test.tsx", "apps/web/test/use-pdf-search.test.ts", "apps/web/test/extension-context-coordinator.test.ts", "apps/codex-mcp/test/host-resource-adapter.test.ts", "apps/service/test/extension-host-resource.test.ts","apps/service/test/extension-runtime.test.ts", "apps/codex-mcp/test/extension-server.test.ts", "apps/codex-mcp/test/panel-liveness.test.ts", "apps/service/test/codex-daemon-runtime.test.ts", "apps/web/test/codex-host-actions.test.tsx", "apps/web/test/codex-runtime.test.ts", "apps/web/test/codex-refresh.test.tsx", "apps/service/test/codex-persistence.integration.test.ts", "apps/web/test/codex-bundle.test.ts", "apps/web/test/host-render-layer.test.ts", "apps/codex-mcp/test/service-client.integration.test.ts", "apps/codex-mcp/test/service-client.test.ts", "apps/codex-mcp/test/extension-picker-control.test.ts", "apps/codex-mcp/test/server.test.ts", "apps/codex-mcp/test/server-entrypoint.test.ts", "apps/codex-mcp/test/resources.test.ts", "apps/codex-mcp/test/lifecycle-diagnostics.test.ts", "apps/codex-mcp/test/qualification.test.ts", "apps/service/test/codex-live-context.integration.test.ts", "apps/service/test/hook-contract.test.ts", "packages/core/test/codex-mcp-protocol.test.ts", "apps/service/test/codex-runtime.test.ts", "apps/service/test/native-qualification.test.ts", "apps/service/test/native-qualification-experiments.test.ts", "apps/service/test/codex-backend.test.ts", "apps/service/test/codex-host.test.ts", "apps/service/test/task-binding-registry.test.ts", "apps/service/test/restart-reconnect-store.test.ts"] }, "pnpm fixtures:pdf", "pnpm build:codex", { runner: "playwright", options: ["--config", "scripts/testing/config/playwright.config.ts"], files: ["test/acceptance/chatgpt-extension.spec.ts", "test/acceptance/codex-native-document.spec.ts", "test/acceptance/codex-native-lifecycle.spec.ts", "test/acceptance/codex-native-resources.spec.ts", "test/acceptance/host-raster-rotation.spec.ts"] }],
   "test:source-release": [{ runner: "vitest", options: [], files: ["scripts/source-release.test.ts", "scripts/install-release.test.ts", "scripts/desktop-release.test.ts", "scripts/validate-desktop-qualification.test.ts"] }],
   "test:static:distribution": [
     {
@@ -85,18 +85,18 @@ export const suites: Record<string, TestStage[]> = {
       ]
     }
   ],
-  "test:reviewed-pdf": [
+  "test:annotated-pdf": [
     "pnpm fixtures:pdf",
     {
       "runner": "vitest",
       "options": [],
       "files": [
-        "test/conformance/reviewed-pdf.test.ts"
+        "test/conformance/annotated-pdf.test.ts"
       ]
     }
   ],
   "test:pdf-viewer": [
-    { runner: "vitest", options: [], files: ["apps/codex-mcp/test/review-context-attachment.test.ts", "apps/web/test/review-agent-bridge.test.ts", "apps/web/test/document-context-button.test.tsx", "apps/web/test/use-pdf-search.test.ts", "apps/codex-mcp/test/live-reader-tools.test.ts"] },
+    { runner: "vitest", options: [], files: ["apps/codex-mcp/test/document-context-attachment.test.ts", "apps/web/test/document-agent-bridge.test.ts", "apps/web/test/document-context-button.test.tsx", "apps/web/test/use-pdf-search.test.ts", "apps/codex-mcp/test/live-reader-tools.test.ts"] },
     "pnpm fixtures:pdf",
     {
       "runner": "playwright",
@@ -140,7 +140,7 @@ export const suites: Record<string, TestStage[]> = {
       "options": [],
       "files": [
         "test/conformance/pdf-writer.conformance.test.ts",
-        "test/conformance/reviewed-pdf.test.ts"
+        "test/conformance/annotated-pdf.test.ts"
       ]
     }
   ],
@@ -166,7 +166,7 @@ export const suites: Record<string, TestStage[]> = {
   "test:pdf-conformance": [
     "pnpm fixtures:pdf",
     "pnpm test:pdf-writer",
-    "pnpm test:reviewed-pdf",
+    "pnpm test:annotated-pdf",
     "pnpm test:pdf-viewer"
   ],
   "test:chrome-extension": [
@@ -183,11 +183,11 @@ export const suites: Record<string, TestStage[]> = {
       "runner": "vitest",
       "options": [],
       "files": [
-        "packages/core/test/review-runtime-protocol.test.ts",
+        "packages/core/test/document-runtime-protocol.test.ts",
         "apps/web/test/host-runtime.test.ts",
         "apps/web/test/embedpdf-viewer.test.ts",
         "apps/web/test/pdf-document-title.test.ts",
-        "apps/web/test/review-location-history.test.ts",
+        "apps/web/test/document-location-history.test.ts",
         "apps/web/test/copy-link-control.test.ts",
         "apps/chrome-extension/test/native-protocol.test.ts",
         "apps/service/test/chrome-local-refresh.integration.test.ts",
@@ -209,7 +209,7 @@ export const suites: Record<string, TestStage[]> = {
         "apps/service/test/chrome-local-refresh.integration.test.ts",
         "apps/service/test/browser-source-store.test.ts",
         "apps/service/test/pdf-save-coordinator.test.ts",
-        "apps/web/test/production-review-app.test.tsx",
+        "apps/web/test/production-reader-app.test.tsx",
         "packaging/macos/chrome-integration.test.ts",
         "test/acceptance/installed-chrome.test.ts"
       ]
@@ -236,13 +236,13 @@ export const suites: Record<string, TestStage[]> = {
       "runner": "vitest",
       "options": [],
       "files": [
-        "apps/service/test/extension-recent-reviews.test.ts",
+        "apps/service/test/extension-recent-documents.test.ts",
         "apps/service/test/extension-runtime.test.ts",
         "packages/core/test/live-context.test.ts",
         "packages/core/test/placekeeper-link.test.ts",
         "apps/service/test/placekeeper-link.test.ts",
         "apps/service/test/session-security.test.ts",
-        "apps/service/test/review-interactions.test.ts",
+        "apps/service/test/document-interactions.test.ts",
         "apps/service/test/recovery.test.ts",
         "apps/service/test/local-document-observer.test.ts",
         "apps/service/test/live-document-replacement.test.ts",
@@ -277,14 +277,14 @@ export const suites: Record<string, TestStage[]> = {
       "runner": "vitest",
       "options": [],
       "files": [
-        "apps/service/test/extension-recent-reviews.test.ts",
+        "apps/service/test/extension-recent-documents.test.ts",
         "apps/service/test/extension-runtime.test.ts",
         "apps/service/test/editor-navigation.test.ts",
       "apps/service/test/editor-navigation-handoff.test.ts",
       "apps/service/test/native-synctex.test.ts",
         "packages/core/test/editor-navigation-protocol.test.ts",
         "apps/service/test/session-security.test.ts",
-        "apps/service/test/review-interactions.test.ts",
+        "apps/service/test/document-interactions.test.ts",
         "apps/service/test/recovery.test.ts",
         "apps/service/test/export-transaction.test.ts",
         "apps/service/test/replace-original.test.ts"
@@ -327,33 +327,33 @@ export const suites: Record<string, TestStage[]> = {
       "runner": "vitest",
       "options": [],
       "files": [
-        "packages/core/test/review-commands.test.ts",
+        "packages/core/test/document-commands.test.ts",
         "apps/web/test/save-state-controller.test.ts",
         "apps/web/test/proofread-gestures.test.tsx",
         "apps/web/test/selection-anchor.test.ts",
         "apps/web/test/selection-state.test.ts",
-        "apps/web/test/review-surface-state.test.ts",
+        "apps/web/test/reader-surface-state.test.ts",
         "apps/web/test/viewer-controls.test.ts",
         "apps/web/test/viewer-framing.test.ts",
-        "apps/web/test/review-layout.test.tsx",
+        "apps/web/test/reader-layout.test.tsx",
         "apps/web/test/annotation-projection.test.ts",
-        "apps/web/test/production-review-app.test.tsx",
-        "apps/web/test/review-shell-reference-authoring.test.tsx",
+        "apps/web/test/production-reader-app.test.tsx",
+        "apps/web/test/reader-shell-reference-authoring.test.tsx",
         "apps/web/test/refresh-interaction-lifecycle.test.tsx",
         "apps/web/test/interaction-reconnect-runtime.test.ts",
         "apps/web/test/use-authoring-session-lifecycle.test.ts",
         "apps/web/test/codex-context-status.test.tsx",
         "apps/web/test/document-context-button.test.tsx",
         "apps/web/test/extension-context-coordinator.test.ts",
-        "apps/codex-mcp/test/review-context-attachment.test.ts",
-        "apps/web/test/review-agent-bridge.test.ts",
+        "apps/codex-mcp/test/document-context-attachment.test.ts",
+        "apps/web/test/document-agent-bridge.test.ts",
         "apps/web/test/use-pdf-search.test.ts",
         "apps/web/test/codex-host-actions.test.tsx",
         "apps/web/test/existing-annotations.test.ts",
         "apps/web/test/existing-markup-text.test.ts",
         "apps/web/test/main-location-refresh.test.ts",
         "apps/web/test/navigation-coordinator.test.ts",
-        "apps/web/test/review-location-history.test.ts",
+        "apps/web/test/document-location-history.test.ts",
         "apps/web/test/copy-link-control.test.ts",
         "apps/web/test/session-api.test.ts"
       ]
@@ -362,7 +362,7 @@ export const suites: Record<string, TestStage[]> = {
       "runner": "playwright",
       "options": ["--config", "scripts/testing/config/playwright.config.ts"],
       "files": [
-        "test/acceptance/review-workflow.spec.ts",
+        "test/acceptance/document-workflow.spec.ts",
         "test/acceptance/reattachment-tray.spec.ts"
       ]
     }
@@ -377,7 +377,7 @@ export const suites: Record<string, TestStage[]> = {
         "apps/service/test/extension-host-resource.test.ts",
         "apps/service/test/export-transaction.test.ts",
         "apps/service/test/replace-original.test.ts",
-        "test/conformance/reviewed-pdf.test.ts"
+        "test/conformance/annotated-pdf.test.ts"
       ]
     }
   ],
@@ -392,13 +392,13 @@ export const suites: Record<string, TestStage[]> = {
         "apps/service/test/context-command.test.ts",
         "apps/service/test/live-document-replacement.test.ts",
         "apps/vscode/test/extension.test.ts",
-        "apps/vscode/test/review-panel-controller.test.ts",
+        "apps/vscode/test/document-panel-controller.test.ts",
         "apps/vscode/test/latex-workshop-bridge.test.ts",
         "apps/vscode/test/external-launch-registration.test.ts",
         "apps/vscode/test/rebuild-observer.test.ts",
         "apps/vscode/test/rebuild-navigation.test.ts",
         "apps/service/test/local-document-observer.test.ts",
-        "test/conformance/reviewed-pdf.test.ts"
+        "test/conformance/annotated-pdf.test.ts"
       ]
     }
   ],
@@ -412,7 +412,7 @@ export const suites: Record<string, TestStage[]> = {
         "test/acceptance/electron-chooser.spec.ts",
         "test/acceptance/launch-surfaces.spec.ts",
         "test/acceptance/viewer.spec.ts",
-        "test/acceptance/review-workflow.spec.ts",
+        "test/acceptance/document-workflow.spec.ts",
         "test/acceptance/production-flow.spec.ts",
         "test/acceptance/pdf-fit-modes.spec.ts",
         "test/acceptance/host-raster-rotation.spec.ts",
@@ -425,7 +425,7 @@ export const suites: Record<string, TestStage[]> = {
         "test/acceptance/pdf-mark-design.spec.ts",
         "test/acceptance/codex-native-resources.spec.ts",
         "test/acceptance/chatgpt-extension.spec.ts",
-        "test/acceptance/codex-native-review.spec.ts",
+        "test/acceptance/codex-native-document.spec.ts",
         "test/acceptance/codex-native-lifecycle.spec.ts",
         "test/acceptance/neutral-design-conformance.spec.ts",
         "test/acceptance/host-interface.spec.ts",
@@ -452,7 +452,7 @@ export const suites: Record<string, TestStage[]> = {
       "files": [
         "test/acceptance/launch-surfaces.spec.ts",
         "test/acceptance/viewer.spec.ts",
-        "test/acceptance/review-workflow.spec.ts",
+        "test/acceptance/document-workflow.spec.ts",
         "test/acceptance/production-flow.spec.ts",
         "test/acceptance/pdf-fit-modes.spec.ts",
         "test/acceptance/host-raster-rotation.spec.ts",
@@ -501,12 +501,12 @@ export const suites: Record<string, TestStage[]> = {
         "apps/web/test/codex-context-status.test.tsx",
         "apps/web/test/document-context-button.test.tsx",
         "apps/web/test/extension-context-coordinator.test.ts",
-        "apps/codex-mcp/test/review-context-attachment.test.ts",
-        "apps/web/test/review-agent-bridge.test.ts",
+        "apps/codex-mcp/test/document-context-attachment.test.ts",
+        "apps/web/test/document-agent-bridge.test.ts",
         "apps/web/test/use-pdf-search.test.ts",
         "apps/web/test/codex-host-actions.test.tsx",
         "apps/web/test/host-runtime.test.ts",
-        "apps/web/test/production-review-app.test.tsx",
+        "apps/web/test/production-reader-app.test.tsx",
         "apps/vscode/test/extension.test.ts",
         "packaging/macos/editor-integrations.test.ts",
         "packaging/shared/distribution.test.ts"
@@ -527,7 +527,7 @@ export const suites: Record<string, TestStage[]> = {
       "runner": "vitest",
       "options": [],
       "files": [
-        "apps/service/test/upgrade-preparation.test.ts", "apps/service/test/upgrade-review-participants.test.ts",
+        "apps/service/test/upgrade-preparation.test.ts", "apps/service/test/upgrade-document-participants.test.ts",
         "apps/web/test/upgrade-preparation.test.ts", "apps/service/test/desktop-service-switch.test.ts",
         "apps/service/test/desktop-daemon-runtime.test.ts",
         "apps/service/test/codex-daemon-runtime.test.ts",
@@ -547,10 +547,10 @@ export const suites: Record<string, TestStage[]> = {
       "runner": "vitest",
       "options": [],
       "files": [
-        "apps/web/test/production-review-app.test.tsx",
+        "apps/web/test/production-reader-app.test.tsx",
         "apps/web/test/owned-overlay.test.ts",
         "apps/web/test/annotation-surface.test.ts",
-        "apps/web/test/review-shell-reference-authoring.test.tsx",
+        "apps/web/test/reader-shell-reference-authoring.test.tsx",
         "apps/vscode/test/extension.test.ts",
         "packaging/shared/distribution.test.ts"
       ]
@@ -601,9 +601,9 @@ export const suites: Record<string, TestStage[]> = {
         "test/acceptance/viewer.spec.ts",
         "test/acceptance/codex-native-resources.spec.ts",
         "test/acceptance/chatgpt-extension.spec.ts",
-        "test/acceptance/codex-native-review.spec.ts",
+        "test/acceptance/codex-native-document.spec.ts",
         "test/acceptance/codex-native-lifecycle.spec.ts",
-        "test/acceptance/review-workflow.spec.ts",
+        "test/acceptance/document-workflow.spec.ts",
         "test/acceptance/launch-surfaces.spec.ts",
         "test/acceptance/production-flow.spec.ts",
         "test/acceptance/pdf-fit-modes.spec.ts",
@@ -641,7 +641,7 @@ export const suites: Record<string, TestStage[]> = {
         "test/conformance/pdf-viewer.conformance.spec.ts",
         "test/conformance/pdf-appearance.conformance.spec.ts",
         "test/acceptance/viewer.spec.ts",
-        "test/acceptance/review-workflow.spec.ts",
+        "test/acceptance/document-workflow.spec.ts",
         "test/acceptance/production-flow.spec.ts",
         "test/acceptance/pdf-fit-modes.spec.ts",
         "test/acceptance/host-raster-rotation.spec.ts",
@@ -706,7 +706,7 @@ export const ciUnitFiles = [
   "packaging/desktop/launcher.test.ts",
   "apps/service/test/desktop-service-switch.test.ts",
   "apps/service/test/upgrade-preparation.test.ts",
-  "apps/service/test/upgrade-review-participants.test.ts",
+  "apps/service/test/upgrade-document-participants.test.ts",
   "apps/web/test/upgrade-preparation.test.ts",
   "apps/web/test/production-entry.test.ts",
   "apps/electron/test/startup-receipt.test.ts",
@@ -729,8 +729,8 @@ export const ciUnitFiles = [
   "apps/web/src/landing/downloads.test.ts",
   "apps/electron/test/standalone-chooser.test.ts", "apps/electron/test/open-intent.test.ts",
   "apps/electron/test/protocol-install.test.ts", "packaging/desktop/linux-sandbox.test.ts",
-  "apps/electron/test/open-link.test.ts", "apps/electron/test/review-bridge.test.ts", "apps/electron/test/menus.test.ts", "apps/electron/test/integration-setup.test.ts",
-  "packages/core/test/electron-helper-protocol.test.ts", "packages/core/test/review-runtime-protocol.test.ts",
+  "apps/electron/test/open-link.test.ts", "apps/electron/test/document-bridge.test.ts", "apps/electron/test/menus.test.ts", "apps/electron/test/integration-setup.test.ts",
+  "packages/core/test/electron-helper-protocol.test.ts", "packages/core/test/document-runtime-protocol.test.ts",
   "packaging/desktop/setup-codex.test.ts", "packaging/desktop/setup-integrations.test.ts", "packaging/desktop/integration-registration.test.ts",
   "apps/service/test/integration-registration-command.test.ts",
   "apps/service/test/portable-editor.test.ts", "apps/service/test/electron-navigation-integration.test.ts",
@@ -753,7 +753,7 @@ export const ciUnitFiles = [
       'test/ci-workflow.test.ts',
       'apps/chrome-extension/test/*.test.ts',
       'test/conformance/pdf-writer.conformance.test.ts',
-      'test/conformance/reviewed-pdf.test.ts',
+      'test/conformance/annotated-pdf.test.ts',
       'packages/pdf-backends/test/backend-host.test.ts',
       'apps/service/test/canonical-json.test.ts',
       'apps/service/test/runtime-retention.test.ts',
@@ -761,7 +761,7 @@ export const ciUnitFiles = [
       'apps/service/test/chrome-runtime.test.ts',
       'apps/service/test/desktop-runtime.test.ts',
       'apps/service/test/session-security.test.ts',
-      'apps/service/test/review-interactions.test.ts',
+      'apps/service/test/document-interactions.test.ts',
       'apps/service/test/recovery.test.ts',
       'apps/service/test/pdf-save-coordinator.test.ts',
       'apps/service/test/export-transaction.test.ts',
@@ -783,33 +783,33 @@ export const ciUnitFiles = [
       'packages/core/test/live-context.test.ts',
       'packages/core/test/placekeeper-link.test.ts',
       'apps/service/test/placekeeper-link.test.ts',
-      'packages/core/test/review-commands.test.ts',
+      'packages/core/test/document-commands.test.ts',
       'apps/web/test/save-state-controller.test.ts',
       'apps/web/test/proofread-gestures.test.tsx',
       'apps/web/test/selection-anchor.test.ts',
       'apps/web/test/reading-location.test.ts',
       'apps/web/test/selection-state.test.ts',
-      'apps/web/test/review-surface-state.test.ts',
+      'apps/web/test/reader-surface-state.test.ts',
       'apps/web/test/viewer-controls.test.ts',
       'apps/web/test/viewer-framing.test.ts',
       'apps/web/test/text-fit-layout.test.ts',
       'apps/web/test/viewer-navigation.test.ts',
       'apps/web/test/neutral-chrome-contract.test.tsx',
-      'apps/web/test/review-layout.test.tsx',
+      'apps/web/test/reader-layout.test.tsx',
       'apps/web/test/annotation-projection.test.ts',
-      'apps/web/test/production-review-app.test.tsx',
+      'apps/web/test/production-reader-app.test.tsx',
       'apps/web/test/annotation-surface.test.ts',
       'apps/web/test/reference-pdf-viewport.test.ts',
-      'apps/web/test/review-shell-reference-authoring.test.tsx',
+      'apps/web/test/reader-shell-reference-authoring.test.tsx',
       'apps/web/test/codex-context-status.test.tsx',
       'apps/web/test/document-context-button.test.tsx',
       'apps/web/test/extension-context-coordinator.test.ts',
       'apps/codex-mcp/test/extension-shell.test.ts',
-      'apps/codex-mcp/test/review-context-attachment.test.ts',
+      'apps/codex-mcp/test/document-context-attachment.test.ts',
       'apps/codex-mcp/test/live-reader-tools.test.ts',
-      'apps/web/test/review-agent-bridge.test.ts',
+      'apps/web/test/document-agent-bridge.test.ts',
       'apps/web/test/use-pdf-search.test.ts',
-      'apps/service/test/extension-recent-reviews.test.ts',
+      'apps/service/test/extension-recent-documents.test.ts',
       'apps/service/test/extension-runtime.test.ts',
       'apps/web/test/existing-annotations.test.ts',
       'apps/web/test/refresh-interaction-lifecycle.test.tsx',
@@ -819,7 +819,7 @@ export const ciUnitFiles = [
       'apps/web/test/host-runtime.test.ts',
       'apps/web/test/session-api.test.ts',
       'apps/web/test/navigation-coordinator.test.ts',
-      'apps/web/test/review-location-history.test.ts',
+      'apps/web/test/document-location-history.test.ts',
       'apps/web/test/copy-link-control.test.ts',
       'scripts/pdf-symbol-catalog/compile.test.ts',
       'scripts/pdf-symbol-catalog/generate.test.ts',
@@ -829,7 +829,7 @@ export const ciUnitFiles = [
       'apps/web/test/pdf-symbol-catalog.test.ts',
       'apps/web/test/pdf-search-workspace.test.tsx',
       'apps/vscode/test/extension.test.ts',
-      'apps/vscode/test/review-panel-controller.test.ts',
+      'apps/vscode/test/document-panel-controller.test.ts',
       'apps/vscode/test/latex-workshop-bridge.test.ts',
       'apps/vscode/test/external-launch-registration.test.ts',
       'apps/vscode/test/rebuild-observer.test.ts',
@@ -843,7 +843,7 @@ export const ciUnitFiles = [
 
 export const browserTestFiles = {
   default: '**/*.spec.ts',
-  visual: 'review-visual.spec.ts',
+  visual: 'reader-visual.spec.ts',
   chromeHandoff: 'chrome-pdf-handoff.spec.ts',
   static: ['static-web.spec.ts', 'static-web-url.spec.ts', 'desktop-downloads.spec.ts'],
 };

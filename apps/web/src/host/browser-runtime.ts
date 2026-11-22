@@ -1,7 +1,7 @@
 import { externalWebUrl } from "../../../../packages/core/src/external-web-url.js";
-import type { DocumentExportFence } from "../../../../packages/core/src/review-runtime-protocol.js";
+import type { DocumentExportFence } from "../../../../packages/core/src/document-runtime-protocol.js";
 import type { SaveStatus } from "../../../../packages/core/src/save-status.js";
-import type { DocumentCommand, DocumentStateView, SaveDestinationConfirmation } from "../../../../packages/core/src/review-model.js";
+import type { DocumentCommand, DocumentStateView, SaveDestinationConfirmation } from "../../../../packages/core/src/document-model.js";
 import type {
   ProductionExportResult,
   ProductionScope,
@@ -9,7 +9,7 @@ import type {
   DocumentInteractionAttachment,
   SaveCopyProposal,
 } from "./session-contracts.js";
-import type { RejectedDocumentCommand } from "../review/review-command-result.js";
+import type { RejectedDocumentCommand } from "../reader/document-command-result.js";
 import { loadProductionSession } from "../app/session-api.js";
 import type { HostRuntime, HostRuntimeInvalidation } from "./runtime.js";
 

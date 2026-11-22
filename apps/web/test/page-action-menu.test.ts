@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { clampMenuToViewport } from '../src/review/PageActionMenu.js';
+import { clampMenuToViewport } from '../src/reader/PageActionMenu.js';
 
 describe('page action menu placement', () => {
   const size = { width: 44, height: 44 };

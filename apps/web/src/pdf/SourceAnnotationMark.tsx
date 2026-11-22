@@ -7,7 +7,7 @@ import { subscribeNativeRaster } from './HostRenderLayer.js';
 import type { ViewerResourcePolicy } from './embedpdf-viewer.js';
 import { ANNOTATION_PALETTE } from '../../../../packages/core/src/annotation-appearance.js';
 import { OwnedTextMark } from './OwnedTextMark.js';
-import { ReaderIcon } from '../review/ReviewIcon.js';
+import { ReaderIcon } from '../reader/ReaderIcon.js';
 import type { SourceAnnotationStyle } from './source-annotation-style.js';
 
 export interface SourceReaderMark {

@@ -7,7 +7,7 @@ import type { UpgradeAttemptCredentials, UpgradePreparationRequest, UpgradePrepa
 import type { PackagedRuntimeManifest } from '../../apps/service/src/platform/runtime-layout.js';
 import { inspectProtectedDraft } from '../../apps/service/src/recovery/draft-snapshot.js';
 import { readWindowState } from '../../apps/electron/src/window-state.js';
-import { DOCUMENT_RUNTIME_PROTOCOL, DOCUMENT_RUNTIME_VERSION } from '../../packages/core/src/review-runtime-protocol.js';
+import { DOCUMENT_RUNTIME_PROTOCOL, DOCUMENT_RUNTIME_VERSION } from '../../packages/core/src/document-runtime-protocol.js';
 
 // This begins at the already-consented private controller boundary. It does not
 // qualify an installer's consent dialog, platform approval, or mixed-host closure.

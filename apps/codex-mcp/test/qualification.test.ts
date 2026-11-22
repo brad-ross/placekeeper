@@ -416,7 +416,7 @@ it.each(["renew", "watermark"])("late normal %s success after bridge disconnect 
   expect(f.app.callServerTool).toHaveBeenCalledTimes(calls);
 });
 
-import { createDocumentState } from "../../../packages/core/src/review-model.js";
+import { createDocumentState } from "../../../packages/core/src/document-model.js";
 it("host teardown owns the sole detach when real Codex runtime presence cleans up during unmount", async () => {
   const f = await qualificationShellFixture(false, "bridge-close", false, true);
   await vi.waitFor(() => expect(f.calls).toContain("presence"));

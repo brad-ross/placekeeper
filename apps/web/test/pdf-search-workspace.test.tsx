@@ -5,7 +5,7 @@ import { initialPdfSearchState, type PdfSearchResult } from '../src/pdf/pdf-sear
 import {
   filterPdfSearchSymbolSuggestions,
   PdfSearchWorkspace,
-} from '../src/review/PdfSearchWorkspace.js';
+} from '../src/reader/PdfSearchWorkspace.js';
 
 const result: PdfSearchResult = {
   id: 'result-1',

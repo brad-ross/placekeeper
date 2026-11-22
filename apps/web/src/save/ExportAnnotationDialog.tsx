@@ -1,8 +1,8 @@
 import { useId, useLayoutEffect, useRef, useState } from 'react';
-import { DEFAULT_ANNOTATION_NAME } from '../../../../packages/core/src/review-model.js';
+import { DEFAULT_ANNOTATION_NAME } from '../../../../packages/core/src/document-model.js';
 import { trapDialogFocus } from '../app/dialog-focus.js';
 import { AnnotationNameField } from './AnnotationNameField.js';
-import { ReaderIcon } from '../review/ReviewIcon.js';
+import { ReaderIcon } from '../reader/ReaderIcon.js';
 
 export function ExportAnnotationDialog(props: {
   readonly annotationName?: string | undefined;

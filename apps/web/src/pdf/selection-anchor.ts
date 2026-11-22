@@ -2,8 +2,8 @@ import { Rotation, type Position, type Rect, type Size } from '@embedpdf/models'
 import type {
   DocumentSelectionAnchorV1,
   DocumentSelectionPageEvidenceV1,
-} from '../../../../packages/core/src/review-model.js';
-import { normalizeDocumentSelectionAnchor } from '../../../../packages/core/src/review-model.js';
+} from '../../../../packages/core/src/document-model.js';
+import { normalizeDocumentSelectionAnchor } from '../../../../packages/core/src/document-model.js';
 
 import {
   assessPageTextReliability,

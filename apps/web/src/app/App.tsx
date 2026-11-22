@@ -31,7 +31,7 @@ import {
   type ViewerResourcePolicy,
 } from '../pdf/embedpdf-viewer.js';
 import { PdfWorkspace, type PageContextMenuRequest } from '../pdf/PdfWorkspace.js';
-import type { DestinationBand } from '../review/navigation-coordinator.js';
+import type { DestinationBand } from '../reader/navigation-coordinator.js';
 import {
   PdfOutlineDiscoveryAuthority,
   readPdfOutline,
@@ -96,8 +96,8 @@ import {
   type PdfViewerScope,
 } from '../pdf/viewer-document-ids.js';
 import type { PdfWriterAnnotation } from '../../../../packages/core/src/pdf-writer.js';
-import { READER_OVERLAY_INSET, READER_OVERLAY_FADE_SIZE } from '../review/use-review-overlay-geometry.js';
-import { ReaderIcon } from '../review/ReviewIcon.js';
+import { READER_OVERLAY_INSET, READER_OVERLAY_FADE_SIZE } from '../reader/use-reader-overlay-geometry.js';
+import { ReaderIcon } from '../reader/ReaderIcon.js';
 import type { PdfSearchResult } from '../pdf/pdf-search-model.js';
 import {
   isCurrentPdfAnnotationSurface as isCurrentViewerInputSurface,

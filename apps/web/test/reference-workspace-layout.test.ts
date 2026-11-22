@@ -12,7 +12,7 @@ import {
   createReferenceWorkspaceLayout,
   deriveReferenceWorkspaceLayout,
   reduceReferenceWorkspaceLayout,
-} from '../src/review/reference-workspace-layout.js';
+} from '../src/reader/reference-workspace-layout.js';
 
 describe('reference workspace layout state', () => {
   it('starts with bottom preference, closed wide surfaces, and documented defaults', () => {

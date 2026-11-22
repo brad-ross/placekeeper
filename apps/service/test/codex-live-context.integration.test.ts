@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { addPageNote } from "../../../packages/core/src/review-commands.js";
+import { addPageNote } from "../../../packages/core/src/document-commands.js";
 import { encodePlacekeeperLink } from "../../../packages/core/src/placekeeper-link.js";
 import { runContextCommand } from "../src/cli/context-command.js";
 import {

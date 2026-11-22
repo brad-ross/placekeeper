@@ -76,7 +76,7 @@ test("VS Code manifest is desktop-local and exposes the supported LaTeX review c
 });
 
 test("VS Code review loads the shared client directly without a localhost frame", async () => {
-  const panel = await readFile(resolve("apps/vscode/src/review-panel.ts"), "utf8");
+  const panel = await readFile(resolve("apps/vscode/src/document-panel.ts"), "utf8");
   const extension = await readFile(resolve("apps/vscode/src/extension.ts"), "utf8");
   const productionEntry = await readFile(resolve("apps/web/src/production-entry.tsx"), "utf8");
   expect(panel).toContain("app.startVscode");

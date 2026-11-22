@@ -17,9 +17,9 @@ import {
   decodePlacekeeperLinkFragment,
   encodePlacekeeperLinkFragment,
 } from "../../../packages/core/src/placekeeper-link.js";
-import { createDocumentState } from "../../../packages/core/src/review-model.js";
-import { isDocumentPanelKey } from "../../../packages/core/src/review-runtime-protocol.js";
-import { ProductionReaderApp } from "./app/ProductionReviewApp.js";
+import { createDocumentState } from "../../../packages/core/src/document-model.js";
+import { isDocumentPanelKey } from "../../../packages/core/src/document-runtime-protocol.js";
+import { ProductionReaderApp } from "./app/ProductionReaderApp.js";
 import type { HostForwardSyncTexRequest, ProductionSession } from "./host/session-contracts.js";
 import {
   reopenProductionSession,
@@ -29,8 +29,8 @@ import {
 import {
   createCopyLinkCommand,
   type CopyLinkStatus,
-} from "./review/CopyLinkControl.js";
-import { ReaderIcon, type ReaderIconName } from "./review/ReviewIcon.js";
+} from "./reader/CopyLinkControl.js";
+import { ReaderIcon, type ReaderIconName } from "./reader/ReaderIcon.js";
 import { createBrowserHostRuntime } from "./host/browser-runtime.js";
 import {
   createRpcHostRuntime,
@@ -43,7 +43,7 @@ import { subscribeRuntimeDocumentSource } from "./host/runtime-document-source.j
 import type {
   DocumentCommandInvocation,
   DocumentCommandSurfaceSnapshot,
-} from "./review/review-command-surface.js";
+} from "./reader/document-command-surface.js";
 import {
   AccessibilityTransitionCoordinator,
   type AccessibilityTransitionEffect,
@@ -530,8 +530,8 @@ export function RuntimeLoadingWorkspace(props: {
 }
 
 export function RuntimeProductionReaderApp(props: {
-  readonly onContextSnapshot?: (snapshot: import('./host/review-context-snapshot.js').DocumentContextSnapshot) => void;
-  readonly agentBridge?: import('./host/review-agent-bridge.js').DocumentAgentBridge;
+  readonly onContextSnapshot?: (snapshot: import('./host/document-context-snapshot.js').DocumentContextSnapshot) => void;
+  readonly agentBridge?: import('./host/document-agent-bridge.js').DocumentAgentBridge;
   readonly runtime?: HostRuntime;
   readonly initial?: HostRuntimeBootstrap;
   readonly loadingDocumentTitle?: string;

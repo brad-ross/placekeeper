@@ -11,11 +11,11 @@ describe('Codex viewer resources', () => {
 });
 
 import { vi } from 'vitest';
-import { createDocumentState } from '../../../packages/core/src/review-model.js';
+import { createDocumentState } from '../../../packages/core/src/document-model.js';
 import { NativeOperationError } from '../../../packages/core/src/codex-mcp-protocol.js';
 import { createCodexHostRuntime } from '../src/host/codex-runtime.js';
 import { loadRuntimeDocumentSource } from '../src/host/runtime-document-source.js';
-import { setAnnotationName } from '../../../packages/core/src/review-commands.js';
+import { setAnnotationName } from '../../../packages/core/src/document-commands.js';
 
 const sessionId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const state = createDocumentState({ sessionId, source: { fileId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', digest: 'a'.repeat(64), byteLength: 3 } });

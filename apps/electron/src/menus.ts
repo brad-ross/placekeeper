@@ -1,6 +1,6 @@
-import { DOCUMENT_RUNTIME_PROTOCOL, DOCUMENT_RUNTIME_VERSION } from '../../../packages/core/src/review-runtime-protocol.js';
+import { DOCUMENT_RUNTIME_PROTOCOL, DOCUMENT_RUNTIME_VERSION } from '../../../packages/core/src/document-runtime-protocol.js';
 import { Menu, type BrowserWindow, type MenuItemConstructorOptions } from 'electron';
-import { DOCUMENT_COMMAND_IDS, type DocumentCommandSurfaceSnapshot, type DocumentSemanticCommand } from '../../web/src/review/review-command-surface.js';
+import { DOCUMENT_COMMAND_IDS, type DocumentCommandSurfaceSnapshot, type DocumentSemanticCommand } from '../../web/src/reader/document-command-surface.js';
 import { setInterfaceZoom } from './titlebar.js';
 export interface WindowCommands { readonly revision: number; readonly snapshot: DocumentCommandSurfaceSnapshot }
 export function commandEnabled(state: WindowCommands | undefined, id: DocumentSemanticCommand): boolean {

@@ -8,7 +8,7 @@ import {
   readStaticPdfUrl,
 } from "./host/static-runtime.js";
 import { startRuntime } from "./production-entry.js";
-import { ReaderIcon } from "./review/ReviewIcon.js";
+import { ReaderIcon } from "./reader/ReaderIcon.js";
 import { browserDownloadTarget, loadDownloads, type Downloads } from "./landing/downloads.js";
 import { DownloadButton } from "./landing/DownloadButton.js";
 import { ProductShowcase } from "./landing/ProductShowcase.js";

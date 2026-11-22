@@ -8,7 +8,7 @@ import { App } from '../../../apps/web/src/app/App.js';
 import { inventoryExistingAnnotations } from '../../../apps/web/src/pdf/existing-annotations.js';
 import type { SelectionUpdate } from '../../../apps/web/src/pdf/selection-state.js';
 import type { ViewerInteractionEvent } from '../../../apps/web/src/pdf/viewer-interaction-events.js';
-import { CommentComposer } from '../../../apps/web/src/review/CommentComposer.js';
+import { CommentComposer } from '../../../apps/web/src/reader/CommentComposer.js';
 import {
   readViewerSelectionEvidence,
   type ViewerSelectionEvidence,

@@ -1,7 +1,7 @@
 import type { PdfDocumentObject, PdfEngine, PdfPageObject, Rotation } from '@embedpdf/models';
 import type { PdfWriterAnnotation } from '../../../../packages/core/src/pdf-writer.js';
-import { ReaderIcon } from '../review/ReviewIcon.js';
-import { annotationIdForPdfAnnotation } from '../review/annotation-projection.js';
+import { ReaderIcon } from '../reader/ReaderIcon.js';
+import { annotationIdForPdfAnnotation } from '../reader/annotation-projection.js';
 import type { ExistingAnnotation, SourceNativeAnnotation } from './existing-annotations.js';
 import { existingAnnotationKey } from './existing-annotations.js';
 import { OwnedTextMark } from './OwnedTextMark.js';

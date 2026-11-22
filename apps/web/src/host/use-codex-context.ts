@@ -1,5 +1,5 @@
 import { useEffect, useState, type Dispatch, type SetStateAction, type RefObject } from 'react';
-import type { DocumentStateView } from '../../../../packages/core/src/review-model.js';
+import type { DocumentStateView } from '../../../../packages/core/src/document-model.js';
 import type { LiveContextBindingStatus } from '../../../../packages/core/src/live-context.js';
 import type { ProductionScope, ProductionSessionApi } from './session-contracts.js';
 import { visibleCodexContext, documentStateRequestKey, updateProductionScope, updateCodexContext } from './context-projection.js';

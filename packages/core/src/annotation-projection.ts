@@ -3,12 +3,12 @@ import {
   type NativePdfAnnotationIdentityProvenance,
 } from './native-pdf-annotation.js';
 import type { PdfWriterAnnotation } from "./pdf-writer.js";
-import type { JsonValue, Annotation } from "./review-model.js";
+import type { JsonValue, Annotation } from "./document-model.js";
 import {
   anchorEvidenceFromAnnotation,
   normalizeDocumentSelectionAnchor,
   normalizeAnnotationName,
-} from "./review-model.js";
+} from "./document-model.js";
 import {
   portableAnnotationProjectionId,
   serializePortableAnnotationGroup,

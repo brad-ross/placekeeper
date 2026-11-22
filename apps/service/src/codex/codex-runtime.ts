@@ -1,6 +1,6 @@
 import { reconcileNativeSource } from "./reconcile-native-source.js";
-import type { UpgradeDocumentStatus } from "../../../../packages/core/src/upgrade-review-protocol.js";
-import { DocumentExportConflictError } from "../../../../packages/core/src/review-runtime-protocol.js";
+import type { UpgradeDocumentStatus } from "../../../../packages/core/src/upgrade-document-protocol.js";
+import { DocumentExportConflictError } from "../../../../packages/core/src/document-runtime-protocol.js";
 import type { NativeQualificationExperiments } from "./native-qualification-experiments.js";
 import type { NativeQualificationObserver } from "./native-qualification.js";
 import { randomBytes } from "node:crypto";

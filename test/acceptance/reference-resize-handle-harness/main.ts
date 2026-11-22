@@ -1,7 +1,7 @@
 import { createElement } from 'react';
 import { createRoot } from 'react-dom/client';
 
-import { ReferenceResizeHandle } from '../../../apps/web/src/review/ReferenceResizeHandle.js';
+import { ReferenceResizeHandle } from '../../../apps/web/src/reader/ReferenceResizeHandle.js';
 
 const events = { changes: [] as number[], commits: 0 };
 

@@ -51,7 +51,7 @@ import type { ViewerPagePoint } from './viewer-interaction-events.js';
 import type { AnnotationRenderingState } from './PdfAnnotationLayers.js';
 import { PdfAnnotationLayers } from './PdfAnnotationLayers.js';
 import type { PageContextMenuRequest } from './PdfWorkspace.js';
-import type { DestinationBand } from '../review/navigation-coordinator.js';
+import type { DestinationBand } from '../reader/navigation-coordinator.js';
 
 /** Fill token for the transient Destination Band; the link-menu snippet reuses it. */
 export const DESTINATION_BAND_TOKEN = '--review-destination-band';

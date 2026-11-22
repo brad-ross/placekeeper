@@ -1,5 +1,5 @@
 import { externalWebUrl } from "../../../../packages/core/src/external-web-url.js";
-import { DOCUMENT_RUNTIME_PROTOCOL, DOCUMENT_RUNTIME_VERSION, type DocumentRuntimeMethod } from '../../../../packages/core/src/review-runtime-protocol.js';
+import { DOCUMENT_RUNTIME_PROTOCOL, DOCUMENT_RUNTIME_VERSION, type DocumentRuntimeMethod } from '../../../../packages/core/src/document-runtime-protocol.js';
 import { NativeOperationError, type CodexResourceDescriptor } from '../../../../packages/core/src/codex-mcp-protocol.js';
 import { VerifiedResourceMaterializer, resourceDescriptors } from '../../../codex-mcp/src/resources.js';
 import { createRpcHostRuntime, type MaterializedViewerResource } from './vscode-runtime.js';

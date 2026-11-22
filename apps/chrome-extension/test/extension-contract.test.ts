@@ -107,7 +107,7 @@ describe("Chrome extension static contract", () => {
     expect(handlerUi).toContain('["circle", { cx: "12", cy: "18", r: "3" }]');
     expect(handlerUi).toContain('fill: "currentColor"');
     expect(handlerUi).toContain('stroke: "none"');
-    expect(styles).toContain("@import '../../web/src/app/review-modal-surface.css'");
+    expect(styles).toContain("@import '../../web/src/app/reader-modal-surface.css'");
     expect(styles).toContain("justify-content: flex-end");
     expect(handlerUi).toContain("review-button--");
     expect(styles).toContain("width: 14px");

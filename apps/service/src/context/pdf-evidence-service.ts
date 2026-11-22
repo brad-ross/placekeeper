@@ -7,7 +7,7 @@ import {
   type PdfEvidenceCatalog,
   type AnnotationChanges,
 } from "../../../../packages/core/src/live-context.js";
-import type { StructuredAnnotation } from "../../../../packages/core/src/structured-review-item.js";
+import type { StructuredAnnotation } from "../../../../packages/core/src/structured-annotation.js";
 import type { TaskBindingRegistry } from "./task-binding-registry.js";
 import {
   inspectPdfPageEvidence,

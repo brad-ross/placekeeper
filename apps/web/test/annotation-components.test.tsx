@@ -1,25 +1,25 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 
-import type { Annotation } from '../../../packages/core/src/review-model.js';
+import type { Annotation } from '../../../packages/core/src/document-model.js';
 import {
   AnnotationList,
   AnnotationRowContent,
   annotationListContent,
   combinedDocumentOrderedAnnotations,
-} from '../src/review/AnnotationList.js';
+} from '../src/reader/AnnotationList.js';
 import {
   AnnotationPeek,
   AnnotationRecordPeek,
   annotationPeekBodyRequestsSelection,
-} from '../src/review/AnnotationPeek.js';
-import { ContextActionPalette } from '../src/review/ContextActionPalette.js';
+} from '../src/reader/AnnotationPeek.js';
+import { ContextActionPalette } from '../src/reader/ContextActionPalette.js';
 import {
   FullAnnotationReader,
   shouldRestoreFullAnnotationReaderFocus,
-} from '../src/review/FullAnnotationReader.js';
-import { ReaderIcon } from '../src/review/ReviewIcon.js';
-import { projectExistingAnnotationReader, projectOwnedAnnotationReader } from '../src/review/annotation-reader.js';
+} from '../src/reader/FullAnnotationReader.js';
+import { ReaderIcon } from '../src/reader/ReaderIcon.js';
+import { projectExistingAnnotationReader, projectOwnedAnnotationReader } from '../src/reader/annotation-reader.js';
 
 const replacement: Annotation = {
   id: 'replace-1',

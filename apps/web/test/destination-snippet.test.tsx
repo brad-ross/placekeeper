@@ -25,7 +25,7 @@ import {
 } from '../src/pdf/destination-snippet.js';
 import { PdfLinkControl } from '../src/pdf/PdfLinkControl.js';
 import { DESTINATION_BAND_TOKEN } from '../src/pdf/ReferencePdfViewport.js';
-import { DestinationSnippetFrame } from '../src/review/DestinationSnippet.js';
+import { DestinationSnippetFrame } from '../src/reader/DestinationSnippet.js';
 
 const PAGE = { width: 600, height: 800 };
 

@@ -1,6 +1,6 @@
-import type { DocumentExportFence } from "../../../../packages/core/src/review-runtime-protocol.js";
+import type { DocumentExportFence } from "../../../../packages/core/src/document-runtime-protocol.js";
 import type { SaveStatus } from "../../../../packages/core/src/save-status.js";
-import type { DocumentStateView } from "../../../../packages/core/src/review-model.js";
+import type { DocumentStateView } from "../../../../packages/core/src/document-model.js";
 import type {
   ForwardSyncTexRequest,
   ProductionExportResult,
@@ -9,7 +9,7 @@ import type {
   ProductionSessionApi,
 } from "./session-contracts.js";
 import type { ViewerAssetUrls, ViewerResourcePolicy } from "../pdf/embedpdf-viewer.js";
-import type { DocumentLocationHistoryPort } from "../review/review-location-history.js";
+import type { DocumentLocationHistoryPort } from "../reader/document-location-history.js";
 
 export interface HostRuntimeIdentity {
   readonly sessionId: string;
@@ -37,7 +37,7 @@ export interface HostRuntimeInvalidation extends HostRuntimeIdentity {
 
 export type HostRuntimeCommand =
   | { readonly command: "source-navigation"; readonly state: import("../../../../packages/core/src/native-synctex-protocol.js").NativeForwardState }
-  | { readonly command: "review-command"; readonly id: import("../review/review-command-surface.js").DocumentSemanticCommand }
+  | { readonly command: "review-command"; readonly id: import("../reader/document-command-surface.js").DocumentSemanticCommand }
   | { readonly command: "reattach" }
   | { readonly command: "export-reviewed-pdf" }
   | { readonly command: "reverse-synctex" }
@@ -48,8 +48,8 @@ export interface HostRuntime extends ProductionSessionApi {
   openExternalUrl?(url: string): Promise<void>;
   readonly host: "browser" | "vscode" | "chrome" | "macos" | "electron" | "codex" | "static";
   closeForUpgrade?(): Promise<void>;
-  upgradePoll?(): Promise<import("../../../../packages/core/src/upgrade-review-protocol.js").UpgradeDocumentStatus>;
-  upgradeSettle?(request: import("../../../../packages/core/src/upgrade-review-protocol.js").UpgradeDocumentSettlement): Promise<import("../../../../packages/core/src/upgrade-review-protocol.js").UpgradeDocumentStatus>;
+  upgradePoll?(): Promise<import("../../../../packages/core/src/upgrade-document-protocol.js").UpgradeDocumentStatus>;
+  upgradeSettle?(request: import("../../../../packages/core/src/upgrade-document-protocol.js").UpgradeDocumentSettlement): Promise<import("../../../../packages/core/src/upgrade-document-protocol.js").UpgradeDocumentStatus>;
   bootstrap(signal?: AbortSignal): Promise<HostRuntimeBootstrap>;
   subscribeInvalidations(listener: (event: HostRuntimeInvalidation) => void): () => void;
   subscribeHostCommands?(listener: (command: HostRuntimeCommand) => void): () => void;

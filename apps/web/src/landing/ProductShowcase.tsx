@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState, type CSSProperties } from 'react';
-import { ReaderTooltipButton } from '../review/ReviewTooltipButton.js';
-import { ReaderIcon, type ReaderIconName } from '../review/ReviewIcon.js';
+import { ReaderTooltipButton } from '../reader/ReaderTooltipButton.js';
+import { ReaderIcon, type ReaderIconName } from '../reader/ReaderIcon.js';
 
 const features = [
   {

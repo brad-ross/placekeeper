@@ -18,11 +18,11 @@ import {
   createDocumentState,
   type DocumentCommand,
   type DocumentState,
-} from "../../../packages/core/src/review-model.js";
+} from "../../../packages/core/src/document-model.js";
 import { createImportedDocumentState } from "../../../packages/core/src/portable-annotation.js";
 import { createSelectedPdfWriter } from "../../../packages/pdf-backends/src/selected-writer.js";
 import { projectAnnotations } from "../../../packages/core/src/annotation-projection.js";
-import { setAnnotationName } from "../../../packages/core/src/review-commands.js";
+import { setAnnotationName } from "../../../packages/core/src/document-commands.js";
 import {
   DraftSnapshotStore,
   documentStateDigest,
@@ -37,8 +37,8 @@ import {
   RecoveryOfferUnavailableError,
   SessionBroker as RawSessionBroker,
 } from "../src/sessions/session-broker.js";
-import { reduceDocument } from "../../../packages/core/src/review-reducer.js";
-import { prepareRecoveredDocument } from "../src/sessions/recovered-review-preparation.js";
+import { reduceDocument } from "../../../packages/core/src/document-reducer.js";
+import { prepareRecoveredDocument } from "../src/sessions/recovered-document-preparation.js";
 import { hashFile } from "../src/files/file-capabilities.js";
 
 const temporaryDirectories: string[] = [];

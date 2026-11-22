@@ -1,9 +1,9 @@
 import { externalWebUrl } from '../../../packages/core/src/external-web-url.js';
 import { LiveReaderTools, type DocumentModelContext } from './live-reader-tools.js';
 import { ExtensionContextCoordinator } from '../../web/src/host/extension-context-coordinator.js';
-import type { DocumentContextSnapshot } from '../../web/src/host/review-context-snapshot.js';
-import { prepareDocumentContext } from './review-context-attachment.js';
-import type { DocumentAgentBridge, DocumentAgentContextInput } from '../../web/src/host/review-agent-bridge.js';
+import type { DocumentContextSnapshot } from '../../web/src/host/document-context-snapshot.js';
+import { prepareDocumentContext } from './document-context-attachment.js';
+import type { DocumentAgentBridge, DocumentAgentContextInput } from '../../web/src/host/document-agent-bridge.js';
 import { documentContextSourceKey, INACTIVE_DOCUMENT_CONTEXT, sameDocumentContextVersion, type DocumentContextMember, type DocumentContextPublicationStatus, type DocumentContextSource, type DocumentContextState } from '../../web/src/host/document-in-context.js';
 import type { OpenAIModelContext, OpenAIResources } from '@openai/mcp-extensions/app';
 import { HostResourceAdapter } from './host-resource-adapter.js';

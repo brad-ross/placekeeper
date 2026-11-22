@@ -1,7 +1,7 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 
-const fixtureUrl = '/test/acceptance/review-harness/index.html?reconciliation=1';
-const productionFixtureUrl = '/test/acceptance/review-harness/index.html?visual=tray&reconciliation=1';
+const fixtureUrl = '/test/acceptance/reader-harness/index.html?reconciliation=1';
+const productionFixtureUrl = '/test/acceptance/reader-harness/index.html?visual=tray&reconciliation=1';
 
 const viewports = [
   { name: 'wide', width: 1280, height: 900 },
@@ -625,7 +625,7 @@ test('reattachment suppresses PDF caret and action shortcuts until the reader ex
 test('header Delete settles a failed terminal reattachment before later interactions', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 760 });
   await page.goto(
-    '/test/acceptance/review-harness/index.html?reconciliation=default'
+    '/test/acceptance/reader-harness/index.html?reconciliation=default'
       + '&interaction-lifecycle=1&finalize-fails-twice=1',
   );
   const panel = await openAnnotations(page);

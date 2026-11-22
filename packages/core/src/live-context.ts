@@ -4,7 +4,7 @@ import {
   projectStructuredAnnotation,
   type SourceHint,
   type StructuredAnnotation,
-} from "./structured-review-item.js";
+} from "./structured-annotation.js";
 import type { PdfRect } from "./pdf-writer.js";
 import type {
   JsonValue,
@@ -12,8 +12,8 @@ import type {
   Annotation,
   DocumentSourceIdentity,
   DocumentWorkflowStateV1,
-} from "./review-model.js";
-import { assertAnnotation } from "./review-reducer.js";
+} from "./document-model.js";
+import { assertAnnotation } from "./document-reducer.js";
 import type { SaveFailureReason } from "./save-status.js";
 
 const SHA256_PATTERN = /^[0-9a-f]{64}$/u;

@@ -22,13 +22,13 @@ import { combinePageRotation, positionOwnedRect, selectionLayerStyle } from './o
 import { groupOwnedMarkGeometryByPage, hitTestOwnedMark } from './owned-mark-hit-test.js';
 import {
   mergeAuthoringPreviewProjections,
-} from '../review/annotation-projection.js';
+} from '../reader/annotation-projection.js';
 import {
   pageLinkAnnotationsFromRegistry,
   sourceAnnotationLinkRenderers,
 } from './PdfLinkControl.js';
 import { DestinationBandLayer, ReferencePdfViewport } from './ReferencePdfViewport.js';
-import type { DestinationBand } from '../review/navigation-coordinator.js';
+import type { DestinationBand } from '../reader/navigation-coordinator.js';
 import {
   buildAnnotationRenderingState,
   PdfAnnotationLayers,

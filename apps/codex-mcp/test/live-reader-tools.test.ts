@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
 import { LiveReaderTools } from '../src/live-reader-tools.js';
-import type { DocumentAgentActions } from '../../web/src/host/review-agent-bridge.js';
+import type { DocumentAgentActions } from '../../web/src/host/document-agent-bridge.js';
 import type { DocumentModelContext } from '../src/live-reader-tools.js';
 const snapshot = { documentGeneration: 4, reviewRevision: 2, title: 'PDF', source: { fileId: 'file', digest: 'digest' }, page: 1, pageCount: 3, selection: null, annotations: [] };
 it('registers tools when the host has no unregister method', () => {

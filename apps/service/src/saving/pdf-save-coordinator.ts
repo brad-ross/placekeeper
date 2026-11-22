@@ -1,6 +1,6 @@
-import { InvalidDocumentCommandError, DocumentConflictError, DocumentDraftConflictError } from "../../../../packages/core/src/review-reducer.js";
+import { InvalidDocumentCommandError, DocumentConflictError, DocumentDraftConflictError } from "../../../../packages/core/src/document-reducer.js";
 import { DocumentGenerationConflictError } from "../sessions/session-broker.js";
-import type { DocumentState, SaveDestinationConfirmation } from "../../../../packages/core/src/review-model.js";
+import type { DocumentState, SaveDestinationConfirmation } from "../../../../packages/core/src/document-model.js";
 import { randomUUID } from "node:crypto";
 import { readFile, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";

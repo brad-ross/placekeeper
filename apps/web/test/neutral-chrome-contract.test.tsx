@@ -3,18 +3,18 @@ import { describe, expect, it, vi } from 'vitest';
 import { VIEWER_ZOOM_MAX_PERCENT } from '../src/pdf/viewer-controls.js';
 import type { ReactNode } from 'react';
 
-vi.mock('../src/review/TopBarMenu.js', () => ({
+vi.mock('../src/reader/TopBarMenu.js', () => ({
   TopBarMenu: ({ children }: { children: ReactNode }) => <div>{children}</div>,
 }));
 
-import { documentIdentityLabel } from '../src/review/DocumentActionsMenu.js';
+import { documentIdentityLabel } from '../src/reader/DocumentActionsMenu.js';
 import {
   pageInputWidth,
   ReaderChrome,
   zoomInputWidth,
   validPageNumber,
   validZoomPercent,
-} from '../src/review/ReviewChrome.js';
+} from '../src/reader/ReaderChrome.js';
 
 const readyViewer = {
   ready: true,

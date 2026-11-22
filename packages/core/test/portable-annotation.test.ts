@@ -23,8 +23,8 @@ import {
   createDocumentState,
   normalizeDocumentState,
   type Annotation,
-} from "../src/review-model.js";
-import { reduceDocument, MAX_DOCUMENT_SELECTION_SEGMENTS } from "../src/review-reducer.js";
+} from "../src/document-model.js";
+import { reduceDocument, MAX_DOCUMENT_SELECTION_SEGMENTS } from "../src/document-reducer.js";
 
 const item: Annotation = {
   id: "11111111-1111-4111-8111-111111111111",

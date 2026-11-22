@@ -9,7 +9,7 @@ import {
   type RecoveryDecision,
   type RecoveryLaunch,
   type SuccessfulLaunch,
-} from "./review-panel.js";
+} from "./document-panel.js";
 
 const execFileAsync = promisify(execFile);
 

@@ -1,6 +1,6 @@
 import { it, expect, vi } from 'vitest';
 import { FocusedLaunchNavigation } from '../src/host/electron-focused-navigation.js';
-import { MemoryDocumentLocationHistory } from '../src/review/review-location-history.js';
+import { MemoryDocumentLocationHistory } from '../src/reader/document-location-history.js';
 it('focused activation waits shared navigation and paint rather than acknowledging the old page', async () => {
     const history = new MemoryDocumentLocationHistory();
     let settle!: (value: boolean) => void;

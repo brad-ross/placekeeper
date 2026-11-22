@@ -1,5 +1,5 @@
 import { decodePlacekeeperLinkFragment, encodePlacekeeperLinkFragment, type PlacekeeperLinkLocation } from './placekeeper-link.js';
-import type { DocumentCommandSurfaceSnapshot, DocumentSemanticCommand } from '../../../apps/web/src/review/review-command-surface.js';
+import type { DocumentCommandSurfaceSnapshot, DocumentSemanticCommand } from '../../../apps/web/src/reader/document-command-surface.js';
 /** Renderer-safe capability surface. Native paths and recovery authority stay in main. */
 export interface ElectronShellIdentity { readonly windowId: string; readonly attemptId: string }
 export type ElectronShellEvent =

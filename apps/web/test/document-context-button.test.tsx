@@ -3,9 +3,9 @@ import { describe, expect, it } from 'vitest';
 
 import type { DocumentContextState } from '../src/host/document-in-context.js';
 import { unavailableViewerControls } from '../src/pdf/viewer-controls.js';
-import { DocumentContextButton } from '../src/review/DocumentContextButton.js';
-import { ReaderChrome } from '../src/review/ReviewChrome.js';
-import { READER_CHROME_PRESENTATIONS } from '../src/review/review-chrome-layout.js';
+import { DocumentContextButton } from '../src/reader/DocumentContextButton.js';
+import { ReaderChrome } from '../src/reader/ReaderChrome.js';
+import { READER_CHROME_PRESENTATIONS } from '../src/reader/reader-chrome-layout.js';
 
 describe('document context button', () => {
   it.each([

@@ -1,5 +1,5 @@
-import type { DocumentCommand, DocumentStateView } from '../../../../packages/core/src/review-model.js';
-import { authoringAuthorityMatches, authoringAuthorityFor, type AuthoringAuthority } from '../review/authoring-session.js';
+import type { DocumentCommand, DocumentStateView } from '../../../../packages/core/src/document-model.js';
+import { authoringAuthorityMatches, authoringAuthorityFor, type AuthoringAuthority } from '../reader/authoring-session.js';
 export type PendingDestinationOutcome =
   | 'cancelled'
   | 'accepted'

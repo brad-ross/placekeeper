@@ -1,4 +1,4 @@
-import type { DocumentStateView } from '../../../../packages/core/src/review-model.js';
+import type { DocumentStateView } from '../../../../packages/core/src/document-model.js';
 import type { SaveStatus } from '../../../../packages/core/src/save-status.js';
 
 export function initiallyPortableItemIds(

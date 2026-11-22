@@ -6,8 +6,8 @@ import { FocusedLaunchNavigation } from './host/electron-focused-navigation.js';
 import { ElectronSourceEndpointDialog } from './host/ElectronSourceEndpointDialog.js';
 import { createElectronHostRuntime } from './host/electron-runtime.js';
 import type { ElectronShellBridge, ElectronShellIdentity } from '../../../packages/core/src/electron-shell-protocol.js';
-import type { DocumentCommandInvocation, DocumentCommandSurfaceSnapshot } from './review/review-command-surface.js';
-import './app/review-layout.css';
+import type { DocumentCommandInvocation, DocumentCommandSurfaceSnapshot } from './reader/document-command-surface.js';
+import './app/reader-layout.css';
 declare global { interface Window { placekeeper: ElectronShellBridge } }
 const windowControlsOverlay = (navigator as Navigator & {
     windowControlsOverlay?: EventTarget & { readonly visible: boolean; getTitlebarAreaRect(): DOMRect };

@@ -5,7 +5,7 @@ import { basename, join, resolve } from 'node:path';
 import { expect, test, type Page, type Request } from '@playwright/test';
 
 import { PlacekeeperHost } from '../../apps/service/src/host/placekeeper-host.js';
-import { addPageNote, removeAnnotation } from '../../packages/core/src/review-commands.js';
+import { addPageNote, removeAnnotation } from '../../packages/core/src/document-commands.js';
 
 const READY_TIMEOUT = 15_000;
 

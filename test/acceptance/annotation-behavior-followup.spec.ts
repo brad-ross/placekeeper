@@ -5,7 +5,7 @@ import { basename, join, resolve } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 
 import { PlacekeeperHost } from '../../apps/service/src/host/placekeeper-host.js';
-import { addDelete, addHighlight, addPageNote, addReplace } from '../../packages/core/src/review-commands.js';
+import { addDelete, addHighlight, addPageNote, addReplace } from '../../packages/core/src/document-commands.js';
 import { encodePlacekeeperLink } from '../../packages/core/src/placekeeper-link.js';
 
 let temporaryRoot = '';

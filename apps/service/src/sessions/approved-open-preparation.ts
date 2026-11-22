@@ -1,6 +1,6 @@
 import { readFile, stat } from "node:fs/promises";
 import { createImportedDocumentState } from "../../../../packages/core/src/portable-annotation.js";
-import { createDocumentState, type Annotation } from "../../../../packages/core/src/review-model.js";
+import { createDocumentState, type Annotation } from "../../../../packages/core/src/document-model.js";
 import type { PdfRewriteEligibility } from "../../../../packages/core/src/pdf-writer.js";
 import { documentStateDigest, type DurableSaveDestination, type DurableSaveSync } from "../recovery/draft-snapshot.js";
 import { createSourceSnapshot, snapshotGenerationSyncTexSidecar } from "../recovery/source-snapshot.js";

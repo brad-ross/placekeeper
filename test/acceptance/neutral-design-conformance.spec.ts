@@ -35,7 +35,7 @@ async function canonical(browser: Browser, baseURL: string | undefined, scene: s
 }
 async function product(page: Page, scene: string) {
   await page.setViewportSize({ width: 1280, height: 900 });
-  await page.goto(`/test/acceptance/review-harness/index.html?visual=${scene}`);
+  await page.goto(`/test/acceptance/reader-harness/index.html?visual=${scene}`);
   await expect(page.locator('[data-review-chrome]').first()).toBeVisible();
   await page.mouse.move(0, 0);
 }

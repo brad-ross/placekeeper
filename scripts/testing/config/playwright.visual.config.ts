@@ -20,7 +20,7 @@ export default defineConfig({
   },
   webServer: {
     command: 'pnpm exec vite --host 127.0.0.1 --port 4175',
-    url: `${baseURL}/test/acceptance/review-harness/index.html`,
+    url: `${baseURL}/test/acceptance/reader-harness/index.html`,
     ...serverDefaults,
   },
 });

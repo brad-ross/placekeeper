@@ -1,10 +1,10 @@
-import { createUpgradeDocumentProtection, type UpgradeDocumentParticipants } from "../host/upgrade-review-participants.js";
-import type { UpgradeDocumentSettlement } from "../../../../packages/core/src/upgrade-review-protocol.js";
+import { createUpgradeDocumentProtection, type UpgradeDocumentParticipants } from "../host/upgrade-document-participants.js";
+import type { UpgradeDocumentSettlement } from "../../../../packages/core/src/upgrade-document-protocol.js";
 import { NativeTaskLaunchRegistry } from "../desktop/native-task-launches.js";
-import { LocalDocumentBackend } from "../runtime/local-review-backend.js";
+import { LocalDocumentBackend } from "../runtime/local-document-backend.js";
 import { chromeDownloadFolder } from "./chrome-download-folder.js";
 import { join } from "node:path";
-import type { DocumentRuntimeBrokerMethod } from "../../../../packages/core/src/review-runtime-protocol.js";
+import type { DocumentRuntimeBrokerMethod } from "../../../../packages/core/src/document-runtime-protocol.js";
 import type { ExportCoordinator } from "../export/export-coordinator.js";
 import type { PdfSaveCoordinator } from "../saving/pdf-save-coordinator.js";
 import type { SessionBroker, SessionLaunch } from "../sessions/session-broker.js";
@@ -222,7 +222,7 @@ export class ChromeServiceRuntimeBackend implements ChromeRuntimeBackend {
 
   async interaction(
     canonicalKey: string,
-    attachment: import("../sessions/review-interactions.js").DocumentInteractionAttachment,
+    attachment: import("../sessions/document-interactions.js").DocumentInteractionAttachment,
     action: "begin" | "finalize" | "release" | "acknowledge",
     payload: unknown,
     presentationLease?: string,
@@ -236,7 +236,7 @@ export class ChromeServiceRuntimeBackend implements ChromeRuntimeBackend {
     return this.#broker.replaceInteractionAttachment(this.#record(canonicalKey).sessionId, authenticatedOwnerKey);
   }
 
-  disconnectInteraction(canonicalKey: string, attachment: import("../sessions/review-interactions.js").DocumentInteractionAttachment): void {
+  disconnectInteraction(canonicalKey: string, attachment: import("../sessions/document-interactions.js").DocumentInteractionAttachment): void {
     const record = this.#records.get(canonicalKey);
     if (record !== undefined) this.#broker.interactions.disconnect(attachment.attachmentId, attachment.incarnationId);
   }

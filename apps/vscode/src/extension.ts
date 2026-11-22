@@ -7,7 +7,7 @@ import * as vscode from "vscode";
 import {
   DOCUMENT_RUNTIME_PROTOCOL,
   DOCUMENT_RUNTIME_VERSION,
-} from "../../../packages/core/src/review-runtime-protocol.js";
+} from "../../../packages/core/src/document-runtime-protocol.js";
 
 import {
   ScopedExternalLaunchRegistrations,
@@ -55,7 +55,7 @@ import {
   rebuildNavigationAction,
   type SourceCursorLocation,
 } from "./rebuild-navigation.js";
-import { DocumentPanelController, type DocumentBinding } from "./review-panel-controller.js";
+import { DocumentPanelController, type DocumentBinding } from "./document-panel-controller.js";
 import {
   RECOVERY_CHOICE_LABELS,
   buildDocumentPanelReattachmentHtml,
@@ -63,7 +63,7 @@ import {
   parseSharedAssetManifest,
   recoveryDecisionForLabel,
   documentPanelOptions,
-} from "./review-panel.js";
+} from "./document-panel.js";
 import { openSourceEditor, sourceLineNumber, sourceLineReveal } from "./source-navigation.js";
 import {
   VersionedWebviewBridge,

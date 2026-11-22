@@ -1,7 +1,7 @@
 import type {
   ReadingLocationResolutionV1,
   ReadingLocationResolutionRequestV1,
-} from '../../../../packages/core/src/review-runtime-protocol.js';
+} from '../../../../packages/core/src/document-runtime-protocol.js';
 import type { AnchorPage } from './selection-anchor.js';
 import {
   assessPageTextReliability,

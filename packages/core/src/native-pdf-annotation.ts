@@ -1,4 +1,4 @@
-import type { Annotation } from './review-model.js';
+import type { Annotation } from './document-model.js';
 
 /** Standard reviewer annotations whose comments can be changed without redrawing them. */
 const COMMENT_SUBTYPES = new Set([

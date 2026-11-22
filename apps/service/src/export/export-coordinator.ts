@@ -15,7 +15,7 @@ import type {
   Annotation,
   DocumentSourceIdentity,
   DocumentWorkflowMode,
-} from "../../../../packages/core/src/review-model.js";
+} from "../../../../packages/core/src/document-model.js";
 import type { DocumentStateSummaryV1 } from "../../../../packages/core/src/live-context.js";
 import {
   runPdfBackend,

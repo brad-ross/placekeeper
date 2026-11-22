@@ -10,7 +10,7 @@ import {
   addHighlight,
   addPageNote,
   removeAnnotation,
-} from '../../packages/core/src/review-commands.js';
+} from '../../packages/core/src/document-commands.js';
 import {
   expectFirstVisibleReferenceCard,
   expectFirstVisibleReferencePlacement,

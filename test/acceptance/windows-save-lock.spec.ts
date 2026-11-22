@@ -6,7 +6,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { addPageNote } from "../../packages/core/src/review-commands.js";
+import { addPageNote } from "../../packages/core/src/document-commands.js";
 import type { PdfWriter } from "../../packages/core/src/pdf-writer.js";
 import { DraftSnapshotStore } from "../../apps/service/src/recovery/draft-snapshot.js";
 import { PdfSaveCoordinator } from "../../apps/service/src/saving/pdf-save-coordinator.js";

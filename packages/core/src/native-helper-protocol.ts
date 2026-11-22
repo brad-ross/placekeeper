@@ -10,7 +10,7 @@ import {
   sanitizeNativeDocumentRuntimeResponse,
   type DocumentRuntimeBrokerMethod,
   type NativeRuntimeHost,
-} from "./review-runtime-protocol.js";
+} from "./document-runtime-protocol.js";
 
 export const NATIVE_HELPER_PROTOCOL_VERSION = 1 as const;
 export const NATIVE_HELPER_MAX_FRAME_BYTES = 4 * 1024 * 1024;

@@ -2,47 +2,47 @@ import { PdfZoomMode } from '@embedpdf/models';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 
-import { DestinationSnippetFrame } from '../src/review/DestinationSnippet.js';
+import { DestinationSnippetFrame } from '../src/reader/DestinationSnippet.js';
 import {
   LinkActionMenuContent,
   LinkActionPopover,
   linkActionDismissRestoresFocus,
   placeLinkActionPopover,
   setLinkActionOpenerExpanded,
-} from '../src/review/LinkActionPopover.js';
+} from '../src/reader/LinkActionPopover.js';
 import { PDF_LINK_ACTION_MENU_ID } from '../src/pdf/viewer-interaction-events.js';
-import { OutlineNavigator } from '../src/review/OutlineNavigator.js';
-import { compositeFocusIndex, horizontalTabFocusIndex } from '../src/review/menu-focus.js';
+import { OutlineNavigator } from '../src/reader/OutlineNavigator.js';
+import { compositeFocusIndex, horizontalTabFocusIndex } from '../src/reader/menu-focus.js';
 import {
   createOutlineRowCopyLink,
   createPdfTargetCopyLink,
   createSearchResultRowCopyLink,
-} from '../src/review/row-link-actions.js';
+} from '../src/reader/row-link-actions.js';
 import {
   chooseWorkspaceModeFocusTarget,
   referenceTabFocusIndex,
   ReferenceWorkspace,
   WORKSPACE_MODES,
-} from '../src/review/ReferenceWorkspace.js';
+} from '../src/reader/ReferenceWorkspace.js';
 import {
   ReferenceResizeHandle,
   referenceResizeKeyValue,
   referenceResizePointerValue,
-} from '../src/review/ReferenceResizeHandle.js';
+} from '../src/reader/ReferenceResizeHandle.js';
 import {
   chooseToolModeFocusTarget,
   OutlineAnnotationsWorkspace,
-} from '../src/review/OutlineAnnotationsWorkspace.js';
+} from '../src/reader/OutlineAnnotationsWorkspace.js';
 import type { PdfOutlineItem } from '../src/pdf/pdf-outline.js';
-import { RIGHT_WORKSPACE_MODES } from '../src/review/reference-navigation-state.js';
-import { AnnotationCountBadge } from '../src/review/AnnotationCountBadge.js';
+import { RIGHT_WORKSPACE_MODES } from '../src/reader/reference-navigation-state.js';
+import { AnnotationCountBadge } from '../src/reader/AnnotationCountBadge.js';
 import {
   createOutlineExpansionState,
   setOutlineExpandedItemIds,
   toggleOutlineExpansionState,
-} from '../src/review/outline-expansion-state.js';
-import { OutlineExpansionToggle } from '../src/review/OutlineExpansionToggle.js';
-import { OutlineExpansionProvider } from '../src/review/OutlineExpansionController.js';
+} from '../src/reader/outline-expansion-state.js';
+import { OutlineExpansionToggle } from '../src/reader/OutlineExpansionToggle.js';
+import { OutlineExpansionProvider } from '../src/reader/OutlineExpansionController.js';
 
 const target = (identity: string, pageIndex: number) => ({
   documentGeneration: 3,

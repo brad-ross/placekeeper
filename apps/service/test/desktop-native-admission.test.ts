@@ -10,7 +10,7 @@ import { ChromeTransferStore } from '../src/browser/chrome-handoff.js';
 import { lifecycleDiagnostic } from '../src/desktop/lifecycle-control-command.js';
 import { decodePlacekeeperLink } from '../../../packages/core/src/placekeeper-link.js';
 import { ChromeRuntimeOperationJournal } from '../src/browser/runtime-operation-journal.js';
-import type { DocumentCommand } from '../../../packages/core/src/review-model.js';
+import type { DocumentCommand } from '../../../packages/core/src/document-model.js';
 import { DraftSnapshotStore } from '../src/recovery/draft-snapshot.js';
 
 it('admits, activates, and durably protects native authoring through the private daemon without disclosing paths', async () => {

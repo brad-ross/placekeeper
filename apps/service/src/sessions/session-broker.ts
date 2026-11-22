@@ -4,7 +4,7 @@ import {
   type ReadingLocationResolutionRequestV1,
   type ReadingLocationResolutionV1,
   type DocumentExportFence,
-} from "../../../../packages/core/src/review-runtime-protocol.js";
+} from "../../../../packages/core/src/document-runtime-protocol.js";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { copyFile, chmod, lstat, open, readdir, readFile, realpath, rm, stat } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
@@ -17,9 +17,9 @@ import {
   type PlacekeeperLinkLocation,
 } from "../../../../packages/core/src/placekeeper-link.js";
 import { assertPortableAnnotationWritable, createImportedDocumentState } from "../../../../packages/core/src/portable-annotation.js";
-import type { DocumentCommand, Annotation, DocumentState, SaveDestinationConfirmation } from "../../../../packages/core/src/review-model.js";
-import { createDocumentState } from "../../../../packages/core/src/review-model.js";
-import { reduceDocument } from "../../../../packages/core/src/review-reducer.js";
+import type { DocumentCommand, Annotation, DocumentState, SaveDestinationConfirmation } from "../../../../packages/core/src/document-model.js";
+import { createDocumentState } from "../../../../packages/core/src/document-model.js";
+import { reduceDocument } from "../../../../packages/core/src/document-reducer.js";
 import { digestSecretHex, SessionCredentialStore } from "../../../../packages/core/src/session-security.js";
 import {
   assessPdfRewriteEligibility,
@@ -97,14 +97,14 @@ import type {
   ReconnectBindingMetadata,
 } from "./session-internal-types.js";
 import { prepareApprovedOpen } from "./approved-open-preparation.js";
-import { prepareRecoveredDocument } from "./recovered-review-preparation.js";
+import { prepareRecoveredDocument } from "./recovered-document-preparation.js";
 import { inspectReplacementCandidate, prepareReplacementDocument } from "./document-replacement-preparation.js";
 import { PresentationRecords } from "./presentation-records.js";
 import {
   DocumentInteractions,
   type DocumentInteractionAttachment,
   type DocumentInteractionOutcome,
-} from "./review-interactions.js";
+} from "./document-interactions.js";
 import {
   LocalDocumentObserver,
   type LocalDocumentCandidate,

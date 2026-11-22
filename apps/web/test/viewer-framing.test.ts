@@ -18,7 +18,7 @@ import {
   unionViewerRects,
 } from '../src/pdf/viewer-framing.js';
 import { createViewerFramingControls } from '../src/pdf/viewer-framing-adapter.js';
-import { workspaceRequestRequiresReframe } from '../src/review/use-annotation-tray-framing.js';
+import { workspaceRequestRequiresReframe } from '../src/reader/use-annotation-tray-framing.js';
 
 describe('viewer framing', () => {
   it('composes stage-clamped committed right and bottom surface bounds', () => {

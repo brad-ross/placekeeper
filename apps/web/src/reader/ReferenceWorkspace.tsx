@@ -1,0 +1,655 @@
+import {
+  useLayoutEffect,
+  useRef,
+  type FocusEvent,
+  type KeyboardEvent,
+  type ReactNode,
+  type Ref,
+} from 'react';
+
+import type { AnnotationPresentation } from '../pdf/viewer-framing.js';
+import {
+  referenceTabSuccessorIdentity,
+  WORKSPACE_MODES,
+  type WorkspaceMode,
+} from './reference-navigation-state.js';
+import { compositeFocusIndex, horizontalTabFocusIndex } from './menu-focus.js';
+import { ReaderIcon } from './ReaderIcon.js';
+import { ReaderTooltipButton } from './ReaderTooltipButton.js';
+import { WorkspaceModeStrip, type WorkspaceDockAction } from './WorkspaceModeStrip.js';
+
+export { WORKSPACE_MODES } from './reference-navigation-state.js';
+type ReferenceTabOrientation = 'horizontal' | 'vertical';
+
+function focusMovedToConnectedTarget(event: FocusEvent<HTMLElement>): boolean {
+  const nextTarget = event.relatedTarget;
+  return nextTarget instanceof HTMLElement
+    && nextTarget !== event.currentTarget.ownerDocument.body
+    && nextTarget.isConnected;
+}
+
+export interface ReferenceWorkspaceTab {
+  readonly identity: string;
+  readonly label: string;
+  readonly pageContext: string;
+  readonly pageNumber?: number;
+  readonly failed?: boolean;
+}
+
+export interface ReferenceReturnControlState {
+  readonly tabIdentity: string;
+  readonly available: boolean;
+  readonly pending: boolean;
+}
+
+type ReferenceReturnButtonProps = Pick<
+  ReferenceReturnControlState,
+  'tabIdentity' | 'pending'
+> & {
+  readonly buttonRef: Ref<HTMLButtonElement>;
+  readonly onReturn: (identity: string) => void;
+};
+
+function ReferenceReturnButton({
+  tabIdentity,
+  pending,
+  buttonRef,
+  onReturn,
+}: ReferenceReturnButtonProps) {
+  return (
+    <ReaderTooltipButton
+      label="Return to reference"
+      ref={buttonRef}
+      type="button"
+      className="reference-panel__return"
+      data-reference-return={tabIdentity}
+      aria-label="Return to reference"
+      aria-busy={pending || undefined}
+      aria-disabled={pending || undefined}
+      onClick={(event) => {
+        if (pending) {
+          event.preventDefault();
+          return;
+        }
+        onReturn(tabIdentity);
+      }}
+    >
+      <ReaderIcon name="locate" />
+    </ReaderTooltipButton>
+  );
+}
+
+export interface PendingReferencePanel {
+  readonly status: 'loading';
+  readonly label: string;
+  readonly pageContext: string;
+}
+
+type ReferencePanelStatus = 'loading' | 'error';
+
+export interface ReferenceWorkspaceProps {
+  readonly open: boolean;
+  /** The workspace keeps its live state while the composer temporarily occupies its edge. */
+  readonly authoringTakeover?: boolean;
+  readonly workspaceRef?: Ref<HTMLElement>;
+  readonly mode: WorkspaceMode;
+  readonly presentation: AnnotationPresentation;
+  readonly tabs: readonly ReferenceWorkspaceTab[];
+  readonly activeTabIdentity: string | null;
+  readonly pendingReference?: PendingReferencePanel | null;
+  readonly referenceReturn?: ReferenceReturnControlState | null;
+  readonly announcement?: string;
+  readonly onModeChange: (mode: WorkspaceMode) => void;
+  readonly onReferenceTabActivate: (identity: string) => void;
+  readonly onReferenceTabClose: (identity: string) => void;
+  readonly onSendToMain: (identity: string) => void;
+  readonly onRetryReference: () => void;
+  readonly onReferenceReturn?: (identity: string) => void;
+  readonly modes?: readonly WorkspaceMode[];
+  readonly headerVariant?: 'tabs' | 'references';
+  readonly headerAction?: ReactNode;
+  readonly onHide?: () => void;
+  readonly hideLabel?: string;
+  readonly onMoveReferencesRight?: () => void;
+  readonly onMoveReferencesBottom?: () => void;
+  readonly onReferenceViewportHost: (element: HTMLDivElement | null) => void;
+  readonly onModeFocusTokenChange?: (mode: WorkspaceMode, token: string) => void;
+}
+
+function focusWithoutScroll(element: HTMLElement | null | undefined): void {
+  element?.focus({ preventScroll: true });
+}
+
+export function referenceTabFocusIndex(
+  currentIndex: number,
+  count: number,
+  key: string,
+  orientation: ReferenceTabOrientation,
+): number | null {
+  return orientation === 'horizontal'
+    ? horizontalTabFocusIndex(currentIndex, count, key)
+    : compositeFocusIndex(currentIndex, count, key);
+}
+
+export function chooseWorkspaceModeFocusTarget(input: {
+  readonly mode: WorkspaceMode;
+  readonly pendingStatus: ReferencePanelStatus | null;
+  readonly remembered: HTMLElement | null;
+  readonly panel: HTMLElement | null;
+  readonly retry: HTMLElement | null;
+  readonly activeReference: HTMLElement | null;
+  readonly emptyReference: HTMLElement | null;
+}): HTMLElement | null {
+  if (input.mode === 'references') {
+    if (input.pendingStatus === 'error') return input.retry;
+    if (input.pendingStatus === 'loading') return input.panel;
+    // Once the final tab is gone, a connected panel remembered from an older
+    // transient focus is less specific than the current empty-state target.
+    if (input.emptyReference !== null) return input.emptyReference;
+  }
+  if (input.remembered?.isConnected) return input.remembered;
+  if (input.mode === 'references') return input.activeReference ?? input.emptyReference;
+  return input.panel;
+}
+
+export function ReferenceWorkspace({
+  open,
+  authoringTakeover = false,
+  workspaceRef,
+  mode,
+  presentation,
+  tabs,
+  activeTabIdentity,
+  pendingReference: loadingReference = null,
+  referenceReturn = null,
+  announcement = '',
+  onModeChange,
+  onReferenceTabActivate,
+  onReferenceTabClose,
+  onSendToMain,
+  onRetryReference,
+  onReferenceReturn,
+  modes = WORKSPACE_MODES,
+  headerVariant = 'tabs',
+  headerAction,
+  onHide,
+  hideLabel = 'Hide References',
+  onMoveReferencesRight,
+  onMoveReferencesBottom,
+  onReferenceViewportHost,
+  onModeFocusTokenChange,
+}: ReferenceWorkspaceProps) {
+  const modeTabRefs = useRef(new Map<WorkspaceMode, HTMLButtonElement>());
+  const panelRefs = useRef(new Map<WorkspaceMode, HTMLElement>());
+  const modeFocusMemory = useRef(new Map<WorkspaceMode, HTMLElement>());
+  const referenceTabRefs = useRef(new Map<string, HTMLButtonElement>());
+  const emptyReferenceRef = useRef<HTMLDivElement>(null);
+  const retryReferenceRef = useRef<HTMLButtonElement>(null);
+  const referenceReturnRef = useRef<HTMLButtonElement>(null);
+  const restoreReferenceReturnFocus = useRef(false);
+  const closeFocusIdentity = useRef<string | null>(null);
+  const focusedModeTab = useRef<{
+    mode: WorkspaceMode;
+    element: HTMLButtonElement;
+  } | null>(null);
+  const dockActionFocused = useRef(false);
+  const previous = useRef<{
+    open: boolean;
+    mode: WorkspaceMode;
+    pendingStatus: ReferencePanelStatus | null;
+  }>({ open: false, mode, pendingStatus: null });
+  const previousActiveReference = useRef<string | null>(null);
+  const referenceTabOrientation: ReferenceTabOrientation = presentation === 'bottom'
+    && headerVariant === 'references'
+    ? 'vertical'
+    : 'horizontal';
+  const showReferenceTabs = tabs.length > 0;
+  const activeTab = tabs.find(({ identity }) => identity === activeTabIdentity) ?? null;
+  const pendingReference = loadingReference ?? (activeTab?.failed
+    ? { status: 'error' as const, label: activeTab.label, pageContext: activeTab.pageContext }
+    : null);
+  const reserveReferenceTabRail = referenceTabOrientation === 'vertical'
+    && pendingReference?.status === 'loading';
+  const referenceViewportConcealed = pendingReference?.status === 'error';
+  const referenceViewportEmpty = pendingReference === null
+    && !tabs.some(({ identity }) => identity === activeTabIdentity);
+  const modeListKey = modes.join(':');
+  const onDockActionFocus = () => { dockActionFocused.current = true; };
+  const onDockActionBlur = (event: FocusEvent<HTMLButtonElement>) => {
+    if (focusMovedToConnectedTarget(event)) dockActionFocused.current = false;
+  };
+  const dockAction: WorkspaceDockAction | undefined = mode === 'references'
+    ? presentation === 'right' && onMoveReferencesBottom
+      ? {
+          destination: 'bottom',
+          disabled: pendingReference?.status === 'loading',
+          onClick: onMoveReferencesBottom,
+          onFocus: onDockActionFocus,
+          onBlur: onDockActionBlur,
+        }
+      : presentation === 'bottom' && headerVariant === 'references' && onMoveReferencesRight
+        ? {
+            destination: 'right',
+            disabled: pendingReference?.status === 'loading',
+            onClick: onMoveReferencesRight,
+            onFocus: onDockActionFocus,
+            onBlur: onDockActionBlur,
+          }
+        : undefined
+    : undefined;
+  const dockActionVisible = dockAction !== undefined;
+  const quietSingleMode = presentation === 'bottom'
+    && headerVariant === 'references'
+    && modes.length === 1
+    && modes[0] === 'references';
+  const authoringEditorHasFocus = () => authoringTakeover
+    && document.activeElement instanceof Element
+    && document.activeElement.closest('[data-comment-composer]') !== null;
+
+  const modeFallback = (targetMode: WorkspaceMode): HTMLElement | null => (
+    chooseWorkspaceModeFocusTarget({
+      mode: targetMode,
+      pendingStatus: pendingReference?.status ?? null,
+      remembered: modeFocusMemory.current.get(targetMode) ?? null,
+      panel: panelRefs.current.get(targetMode) ?? null,
+      retry: retryReferenceRef.current,
+      activeReference: activeTabIdentity
+        ? referenceTabRefs.current.get(activeTabIdentity) ?? null
+        : null,
+      emptyReference: emptyReferenceRef.current,
+    })
+  );
+
+  useLayoutEffect(() => {
+    if (dockActionVisible || !dockActionFocused.current) return;
+    dockActionFocused.current = false;
+    if (authoringEditorHasFocus()) return;
+    const timeout = setTimeout(() => {
+      focusWithoutScroll(modeTabRefs.current.get(mode) ?? modeFallback(mode));
+    }, 0);
+    return () => clearTimeout(timeout);
+  }, [authoringTakeover, dockActionVisible, mode]);
+
+  useLayoutEffect(() => {
+    const removedFocus = focusedModeTab.current;
+    if (!open || removedFocus === null || removedFocus.element.isConnected) return;
+    focusedModeTab.current = null;
+    if (authoringEditorHasFocus()) return;
+    const frame = requestAnimationFrame(() => {
+      focusWithoutScroll(modeTabRefs.current.get(mode) ?? modeFallback(mode));
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [authoringTakeover, mode, modeListKey, open]);
+
+  useLayoutEffect(() => {
+    const was = previous.current;
+    const pendingStatus = pendingReference?.status ?? null;
+    previous.current = { open, mode, pendingStatus };
+    const retryBecameAvailable = open
+      && mode === 'references'
+      && pendingStatus === 'error'
+      && was.pendingStatus !== 'error';
+    // Do not briefly focus the header while a reference is still loading.
+    // The arriving reference tab receives focus before its first paint.
+    if (mode === 'references' && pendingStatus === 'loading') return;
+    if (!open || (was.open && was.mode === mode && !retryBecameAvailable)) return;
+    if (authoringEditorHasFocus()) return;
+    focusWithoutScroll(modeFallback(mode));
+  }, [authoringTakeover, open, mode, activeTabIdentity, pendingReference?.status]);
+
+  useLayoutEffect(() => {
+    const changed = previousActiveReference.current !== activeTabIdentity;
+    previousActiveReference.current = activeTabIdentity;
+    if (!changed || !open || mode !== 'references' || activeTabIdentity === null) return;
+    if (pendingReference?.status === 'error' || authoringEditorHasFocus()) return;
+    // Apply focus before the new tab paints so its page/action endcap and
+    // keyboard focus styling do not flash through an unfocused first frame.
+    focusWithoutScroll(referenceTabRefs.current.get(activeTabIdentity));
+  }, [activeTabIdentity, authoringTakeover, mode, open, pendingReference?.status]);
+
+  useLayoutEffect(() => {
+    const identity = closeFocusIdentity.current;
+    if (identity === null) return;
+    if (authoringEditorHasFocus()) {
+      closeFocusIdentity.current = null;
+      return;
+    }
+    const target = referenceTabRefs.current.get(identity);
+    if (!target) return;
+    closeFocusIdentity.current = null;
+    requestAnimationFrame(() => focusWithoutScroll(target));
+  }, [authoringTakeover, tabs]);
+
+  useLayoutEffect(() => {
+    if (referenceReturn?.pending || !restoreReferenceReturnFocus.current) return;
+    restoreReferenceReturnFocus.current = false;
+    const tab = activeTabIdentity ? referenceTabRefs.current.get(activeTabIdentity) : null;
+    const active = (referenceReturnRef.current ?? tab)?.ownerDocument.activeElement;
+    if (
+      active instanceof HTMLElement
+      && active !== active.ownerDocument.body
+      && active.isConnected
+    ) return;
+    focusWithoutScroll(
+      referenceReturnRef.current
+        ?? tab,
+    );
+  }, [activeTabIdentity, referenceReturn?.available, referenceReturn?.pending]);
+
+  const moveModeFocus = (event: KeyboardEvent<HTMLButtonElement>) => {
+    const currentIndex = modes.indexOf(event.currentTarget.dataset.workspaceMode as WorkspaceMode);
+    const nextIndex = horizontalTabFocusIndex(currentIndex, modes.length, event.key);
+    if (nextIndex !== null) {
+      event.preventDefault();
+      focusWithoutScroll(modeTabRefs.current.get(modes[nextIndex]!));
+      return;
+    }
+    if ((event.key === 'Enter' || event.key === ' ') && currentIndex >= 0) {
+      event.preventDefault();
+      onModeChange(modes[currentIndex]!);
+    }
+  };
+
+  const moveReferenceFocus = (event: KeyboardEvent<HTMLButtonElement>) => {
+    const currentIndex = tabs.findIndex(({ identity }) => identity === event.currentTarget.dataset.referenceTab);
+    if (event.key === 'Delete') {
+      event.preventDefault();
+      const identity = tabs[currentIndex]?.identity;
+      if (identity) {
+        closeFocusIdentity.current = referenceTabSuccessorIdentity(tabs, currentIndex);
+        onReferenceTabClose(identity);
+      }
+      return;
+    }
+    const nextIndex = referenceTabFocusIndex(
+      currentIndex,
+      tabs.length,
+      event.key,
+      referenceTabOrientation,
+    );
+    if (nextIndex !== null) {
+      event.preventDefault();
+      focusWithoutScroll(referenceTabRefs.current.get(tabs[nextIndex]!.identity));
+      return;
+    }
+    if ((event.key === 'Enter' || event.key === ' ') && currentIndex >= 0) {
+      event.preventDefault();
+      onReferenceTabActivate(tabs[currentIndex]!.identity);
+    }
+  };
+
+  const showReferenceReturn = open
+    && mode === 'references'
+    && pendingReference === null
+    && activeTab !== null
+    && referenceReturn?.available === true
+    && referenceReturn.tabIdentity === activeTab.identity
+    && onReferenceReturn !== undefined;
+  const rememberPanelFocus = (targetMode: WorkspaceMode, target: EventTarget) => {
+    if (!(target instanceof HTMLElement)) return;
+    modeFocusMemory.current.set(targetMode, target);
+    const token = target.dataset.workspaceFocusToken
+      ?? target.dataset.ownedFocusId
+      ?? target.dataset.referenceTab;
+    if (token) onModeFocusTokenChange?.(targetMode, token);
+  };
+
+  return (
+    <>
+    <aside
+      ref={workspaceRef}
+      id="review-workspace"
+      className="review-workspace"
+      data-review-workspace
+      data-annotation-drawer
+      data-workspace-presentation={presentation}
+      data-workspace-header-variant={headerVariant}
+      data-annotation-presentation={presentation}
+      data-workspace-open={open ? 'true' : 'false'}
+      data-list-open={open ? 'true' : 'false'}
+      data-authoring-takeover={authoringTakeover ? 'true' : undefined}
+      aria-label={headerVariant === 'references' ? 'References' : 'Document Workspace'}
+      aria-hidden={!open}
+      inert={!open}
+    >
+      {modes.length > 0 ? <header className="review-workspace__header">
+        {onHide ? <ReaderTooltipButton
+          label={hideLabel}
+          type="button"
+          className="review-workspace__close"
+          aria-expanded="true"
+          aria-controls="review-workspace"
+          onClick={onHide}
+        ><ReaderIcon name={presentation === 'bottom' ? 'chevron-down' : 'chevron-right'} /></ReaderTooltipButton> : null}
+        <WorkspaceModeStrip
+          modes={modes}
+          selectedMode={mode}
+          onModeChange={onModeChange}
+          onModeKeyDown={moveModeFocus}
+          onModeRef={(workspaceMode, element) => {
+            if (element) modeTabRefs.current.set(workspaceMode, element);
+            else modeTabRefs.current.delete(workspaceMode);
+          }}
+          onModeFocus={(workspaceMode, event) => {
+            focusedModeTab.current = { mode: workspaceMode, element: event.currentTarget };
+          }}
+          onModeBlur={(_workspaceMode, event) => {
+            if (focusMovedToConnectedTarget(event)) focusedModeTab.current = null;
+          }}
+          quietSingleMode={quietSingleMode}
+          {...(dockAction ? { dockAction } : {})}
+        />
+        {headerAction}
+      </header> : null}
+
+      {modes.includes('references') ? <section
+        ref={(element) => {
+          if (element) panelRefs.current.set('references', element);
+          else panelRefs.current.delete('references');
+        }}
+        id="workspace-panel-references"
+        className="review-workspace__panel review-workspace__panel--references"
+        data-reference-tabs-orientation={referenceTabOrientation}
+        data-reference-panel-layout={showReferenceTabs || reserveReferenceTabRail ? 'split' : 'full'}
+        role="tabpanel"
+        aria-labelledby="workspace-mode-references"
+        tabIndex={-1}
+        hidden={mode !== 'references'}
+        inert={mode !== 'references'}
+        onFocusCapture={(event) => rememberPanelFocus('references', event.target)}
+      >
+        {showReferenceTabs || pendingReference?.status === 'loading' ? (
+          <div
+            className="reference-tabs"
+            role="tablist"
+            aria-label="Open references"
+            aria-orientation={referenceTabOrientation}
+            data-reference-tabs-orientation={referenceTabOrientation}
+          >
+            {!showReferenceTabs && pendingReference?.status === 'loading' ? (
+              <span className="reference-tab-segment reference-tab-segment--compound" role="presentation">
+                <button className="reference-tab-segment__selector" type="button" role="tab"
+                  title={`Opening ${pendingReference.label}`}
+                  aria-selected="true" aria-disabled="true" aria-busy="true" tabIndex={-1}>
+                  <span>{pendingReference.label}</span>
+                  <small>{pendingReference.pageContext.replace(/^Page\s+/u, '')}</small>
+                </button>
+              </span>
+            ) : null}
+            {tabs.map((tab, index) => {
+              const selected = tab.identity === activeTabIdentity;
+              const showActions = selected;
+              const pageLabel = tab.pageNumber ?? tab.pageContext.replace(/^Page\s+/u, '');
+              const pageOnlyLabel = tab.label === tab.pageContext;
+              const pageTextClass = showActions
+                ? 'reference-tab-segment__page-placeholder'
+                : 'reference-tab-segment__page-label';
+              const destinationLabel = tab.label === tab.pageContext
+                ? tab.label
+                : `${tab.label}, ${tab.pageContext}`;
+              return (
+                <span
+                  key={tab.identity}
+                  className={`reference-tab-segment${
+                    showActions ? ' reference-tab-segment--compound' : ''
+                  }`}
+                  data-reference-tab-segment={tab.identity}
+                  data-reference-tab-failed={tab.failed || undefined}
+                  data-reference-page-swap={showActions ? 'true' : undefined}
+                  role="presentation"
+                >
+                  {showActions ? <small className="reference-tab-segment__page" aria-hidden="true">
+                    {pageLabel}
+                  </small> : null}
+                  <ReaderTooltipButton
+                    label={destinationLabel}
+                    tooltip={`Show ${destinationLabel}`}
+                    tooltipOnFocus={false}
+                    ref={(element) => {
+                      if (element) referenceTabRefs.current.set(tab.identity, element);
+                      else referenceTabRefs.current.delete(tab.identity);
+                    }}
+                    id={`reference-tab-${index}`}
+                    className="reference-tab-segment__selector"
+                    type="button"
+                    role="tab"
+                    data-reference-tab={tab.identity}
+                    data-workspace-focus-token={`reference:${tab.identity}`}
+                    aria-label={destinationLabel}
+                    aria-selected={selected}
+                    aria-controls="active-reference-panel"
+                    tabIndex={selected ? 0 : -1}
+                    onKeyDown={moveReferenceFocus}
+                    onClick={() => onReferenceTabActivate(tab.identity)}
+                  >
+                    <span
+                      className={pageOnlyLabel ? pageTextClass : undefined}
+                      aria-hidden={pageOnlyLabel && showActions ? true : undefined}
+                    >{pageOnlyLabel ? pageLabel : tab.label}</span>
+                    {pageOnlyLabel ? null : <small
+                      className={pageTextClass}
+                      aria-hidden={showActions ? true : undefined}
+                    >{pageLabel}</small>}
+                  </ReaderTooltipButton>
+                  {showActions && showReferenceReturn ? (
+                    <ReferenceReturnButton
+                      tabIdentity={tab.identity}
+                      pending={referenceReturn.pending}
+                      buttonRef={referenceReturnRef}
+                      onReturn={(identity) => {
+                        restoreReferenceReturnFocus.current = referenceReturnRef.current?.matches(':focus')
+                          ?? false;
+                        onReferenceReturn(identity);
+                      }}
+                    />
+                  ) : null}
+                  {showActions && !tab.failed ? (
+                    <ReaderTooltipButton
+                      label="Open in main document"
+                      type="button"
+                      className="reference-tab-segment__action"
+                      data-reference-tab-action="send"
+                      data-workspace-focus-token={`reference-send:${tab.identity}`}
+                      aria-label="Open in main document"
+                      aria-disabled={pendingReference !== null || undefined}
+                      onClick={() => { if (pendingReference === null) onSendToMain(tab.identity); }}
+                    >
+                      <ReaderIcon name="open-main" />
+                    </ReaderTooltipButton>
+                  ) : null}
+                  {showActions ? (
+                    <ReaderTooltipButton
+                      label="Close active reference"
+                      type="button"
+                      className="reference-tab-segment__action"
+                      data-reference-tab-action="close"
+                      data-workspace-focus-token={`reference-close:${tab.identity}`}
+                      aria-label="Close active reference"
+                      aria-disabled={loadingReference !== null || undefined}
+                      onClick={() => { if (loadingReference === null) onReferenceTabClose(tab.identity); }}
+                    >
+                      <ReaderIcon name="close" />
+                    </ReaderTooltipButton>
+                  ) : null}
+                </span>
+              );
+            })}
+          </div>
+        ) : null}
+
+        <div
+          id="active-reference-panel"
+          className="reference-panel"
+          role="tabpanel"
+          aria-label={activeTab === null ? 'Reference destination' : undefined}
+          aria-labelledby={activeTab ? `reference-tab-${tabs.indexOf(activeTab)}` : undefined}
+          aria-busy={pendingReference?.status === 'loading' ? true : undefined}
+        >
+          {pendingReference ? (
+            <div className="reference-panel__pending" data-reference-pending={pendingReference.status}>
+              {pendingReference.status === 'loading' ? (
+                <>
+                  <p><strong>{pendingReference.label}</strong><span>{pendingReference.pageContext}</span></p>
+                  <p className="workspace-state"><ReaderIcon name="loading" />Opening reference…</p>
+                </>
+              ) : (
+                <div className="workspace-error reference-panel__error" data-reference-state="error">
+                  <div className="reference-panel__error-content">
+                    <div className="reference-panel__error-heading">
+                      <ReaderIcon name="alert" />
+                      <strong>Reference unavailable.</strong>
+                    </div>
+                    <span className="reference-panel__error-body">
+                      {pendingReference.label}
+                      {pendingReference.pageContext && pendingReference.pageContext !== pendingReference.label
+                        ? ` · ${pendingReference.pageContext}`
+                        : null}
+                    </span>
+                  </div>
+                  <button
+                    ref={retryReferenceRef}
+                    type="button"
+                    data-workspace-focus-token="references:retry"
+                    aria-label="Retry reference"
+                    title="Retry opening reference"
+                    onClick={onRetryReference}
+                  >
+                    Retry
+                  </button>
+                </div>
+              )}
+            </div>
+          ) : null}
+
+          {!activeTab && pendingReference === null ? (
+            <div
+              ref={emptyReferenceRef}
+              className="workspace-state reference-panel__empty"
+              data-reference-empty
+              data-workspace-focus-token="references:empty"
+              tabIndex={-1}
+            >
+              <strong>No references open.</strong>
+              <span>An internal PDF link can open a reference here.</span>
+            </div>
+          ) : null}
+
+          <div
+            ref={onReferenceViewportHost}
+            className="reference-panel__viewport"
+            data-reference-viewport-host
+            data-reference-viewport-concealed={referenceViewportConcealed ? 'true' : undefined}
+            aria-hidden={referenceViewportConcealed || referenceViewportEmpty || undefined}
+            hidden={referenceViewportEmpty}
+            inert={referenceViewportConcealed || referenceViewportEmpty}
+          />
+        </div>
+      </section> : null}
+
+    </aside>
+    <p className="sr-only review-workspace__status" role="status" aria-live="polite" aria-atomic="true">
+      {announcement}
+    </p>
+    </>
+  );
+}

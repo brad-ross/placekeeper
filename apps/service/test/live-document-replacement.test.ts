@@ -11,18 +11,18 @@ import type { SessionBrokerOptions } from "../src/sessions/session-broker.js";
 import {
   DOCUMENT_RUNTIME_PROTOCOL,
   DOCUMENT_RUNTIME_VERSION,
-} from "../../../packages/core/src/review-runtime-protocol.js";
-import type { DocumentCommand, Annotation } from "../../../packages/core/src/review-model.js";
+} from "../../../packages/core/src/document-runtime-protocol.js";
+import type { DocumentCommand, Annotation } from "../../../packages/core/src/document-model.js";
 import { documentSemanticDigest } from "../../../packages/core/src/live-context.js";
 import {
   anchorEvidenceFromAnnotation,
   createDocumentState,
   documentSelectionPayload,
-} from "../../../packages/core/src/review-model.js";
+} from "../../../packages/core/src/document-model.js";
 import {
   assertAnnotation,
   reduceDocument,
-} from "../../../packages/core/src/review-reducer.js";
+} from "../../../packages/core/src/document-reducer.js";
 import {
   projectAnnotation,
   projectAnnotationProjections,
@@ -40,7 +40,7 @@ import { prepareReplacementDocument } from "../src/sessions/document-replacement
 import {
   attachmentOrderedInteractionTransport,
   beginDocumentInteraction,
-} from "../../web/src/review/authoring-session.js";
+} from "../../web/src/reader/authoring-session.js";
 import { createRpcHostRuntime } from "../../web/src/host/vscode-runtime.js";
 
 const temporaryDirectories: string[] = [];

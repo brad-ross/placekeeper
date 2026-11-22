@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
-import { startDocumentGeneration, type Annotation, type DocumentState } from "../../../../packages/core/src/review-model.js";
+import { startDocumentGeneration, type Annotation, type DocumentState } from "../../../../packages/core/src/document-model.js";
 import { reconcilePdfAnchorState, type PdfAnchorPage } from "../reconciliation/pdf-anchor-reconciler.js";
 import type { StagedGenerationSnapshot } from "../recovery/source-snapshot.js";
 import type { SessionBrokerOptions } from "./session-contracts.js";

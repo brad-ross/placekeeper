@@ -1,4 +1,4 @@
-import { documentEdgeGeometry } from '../../scripts/testing/review-edge-geometry.js';
+import { documentEdgeGeometry } from '../../scripts/testing/document-edge-geometry.js';
 import { randomUUID } from 'node:crypto';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -6,9 +6,9 @@ import { join, resolve } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { PDFDocument, StandardFonts, degrees } from 'pdf-lib';
 import { PlacekeeperHost } from '../../apps/service/src/host/placekeeper-host.js';
-import { addDelete, addHighlight, addInsert, addPageNote, addReplace, editAnnotation } from '../../packages/core/src/review-commands.js';
-import type { DocumentSelectionAnchor } from '../../packages/core/src/review-commands.js';
-import type { DocumentState } from '../../packages/core/src/review-model.js';
+import { addDelete, addHighlight, addInsert, addPageNote, addReplace, editAnnotation } from '../../packages/core/src/document-commands.js';
+import type { DocumentSelectionAnchor } from '../../packages/core/src/document-commands.js';
+import type { DocumentState } from '../../packages/core/src/document-model.js';
 
 let root: string;
 let host: PlacekeeperHost;

@@ -1,4 +1,4 @@
-import { documentEdgeGeometry } from '../../scripts/testing/review-edge-geometry.js';
+import { documentEdgeGeometry } from '../../scripts/testing/document-edge-geometry.js';
 import { createHash, randomUUID } from "node:crypto";
 import { access, copyFile, mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -9,8 +9,8 @@ import { PDFDocument, StandardFonts } from "pdf-lib";
 import { PlacekeeperHost } from "../../apps/service/src/host/placekeeper-host.js";
 import { TaskBindingRegistry } from "../../apps/service/src/context/task-binding-registry.js";
 import { readEditableAnnotations } from "../../packages/pdf-backends/src/embedpdf-adapter.js";
-import { addPageNote, setAnnotationName } from "../../packages/core/src/review-commands.js";
-import { DocumentConflictError } from '../../packages/core/src/review-reducer.js';
+import { addPageNote, setAnnotationName } from "../../packages/core/src/document-commands.js";
+import { DocumentConflictError } from '../../packages/core/src/document-reducer.js';
 
 let root = "";
 let host: PlacekeeperHost;

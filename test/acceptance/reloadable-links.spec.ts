@@ -5,7 +5,7 @@ import { join, resolve } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 
 import { placekeeperLinkBase } from "../../packages/core/src/placekeeper-link.js";
-import { addPageNote } from "../../packages/core/src/review-commands.js";
+import { addPageNote } from "../../packages/core/src/document-commands.js";
 import { PlacekeeperHost } from "../../apps/service/src/host/placekeeper-host.js";
 
 let root = "";

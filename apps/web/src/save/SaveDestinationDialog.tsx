@@ -1,11 +1,11 @@
 import { useId, useLayoutEffect, useRef, useState } from "react";
 
 import { AnnotationNameField } from "./AnnotationNameField.js";
-import { DEFAULT_ANNOTATION_NAME } from "../../../../packages/core/src/review-model.js";
+import { DEFAULT_ANNOTATION_NAME } from "../../../../packages/core/src/document-model.js";
 
 import { trapDialogFocus } from "../app/dialog-focus.js";
 import type { SaveCopyProposal } from "../host/session-contracts.js";
-import { ReaderIcon } from "../review/ReviewIcon.js";
+import { ReaderIcon } from "../reader/ReaderIcon.js";
 import type { PdfRewriteEligibility } from "../../../../packages/core/src/pdf-writer.js";
 import type { SaveFailureReason } from "../../../../packages/core/src/save-status.js";
 

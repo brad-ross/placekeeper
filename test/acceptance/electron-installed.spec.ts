@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { InstalledCandidate } from './electron-installed-harness.js';
-import { DOCUMENT_RUNTIME_PROTOCOL, DOCUMENT_RUNTIME_VERSION } from '../../packages/core/src/review-runtime-protocol.js';
+import { DOCUMENT_RUNTIME_PROTOCOL, DOCUMENT_RUNTIME_VERSION } from '../../packages/core/src/document-runtime-protocol.js';
 
 test('packaged candidate renders and activates a real PDF without system Node', async ({}, testInfo) => {
   const candidate = await InstalledCandidate.create();

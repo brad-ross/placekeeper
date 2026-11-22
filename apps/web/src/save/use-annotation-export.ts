@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState, type Dispatch, type RefObject, type SetStateAction } from 'react';
-import { setAnnotationName } from '../../../../packages/core/src/review-commands.js';
-import type { DocumentStateView } from '../../../../packages/core/src/review-model.js';
+import { setAnnotationName } from '../../../../packages/core/src/document-commands.js';
+import type { DocumentStateView } from '../../../../packages/core/src/document-model.js';
 import { createDocumentStateSummary } from '../../../../packages/core/src/live-context.js';
 import type { ProductionSessionApi } from '../host/session-contracts.js';
 import type { GenerationRefreshStatus } from '../generation-status.js';
-import { authoringAuthorityFor, authoringAuthorityMatches, type AuthoringAuthority } from '../review/authoring-session.js';
-import { documentExportPresentation, type DocumentExportResult } from '../review/DocumentActionsMenu.js';
+import { authoringAuthorityFor, authoringAuthorityMatches, type AuthoringAuthority } from '../reader/authoring-session.js';
+import { documentExportPresentation, type DocumentExportResult } from '../reader/DocumentActionsMenu.js';
 
 interface ExportRequest {
   readonly authority: AuthoringAuthority;

@@ -1,6 +1,6 @@
 import { ensurePrivateDirectory, establishPrivateDirectory } from "../src/platform/private-storage.js";
 import { createHash, randomUUID } from "node:crypto";
-import { createDocumentState } from "../../../packages/core/src/review-model.js";
+import { createDocumentState } from "../../../packages/core/src/document-model.js";
 import { DraftSnapshotStore, documentStateDigest, type RecoverableDraftV3 } from "../src/recovery/draft-snapshot.js";
 import { createServer } from "node:net";
 import { lstat, mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";

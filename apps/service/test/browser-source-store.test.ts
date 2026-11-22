@@ -12,7 +12,7 @@ import {
 } from "../src/browser/browser-source-store.js";
 import { DraftSnapshotStore } from "../src/recovery/draft-snapshot.js";
 import { SessionBroker } from "../src/sessions/session-broker.js";
-import { addPageNote } from "../../../packages/core/src/review-commands.js";
+import { addPageNote } from "../../../packages/core/src/document-commands.js";
 import { encodePlacekeeperLink } from "../../../packages/core/src/placekeeper-link.js";
 import { openPlacekeeperLink } from "../src/links/placekeeper-link.js";
 

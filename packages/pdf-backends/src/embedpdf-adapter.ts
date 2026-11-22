@@ -25,7 +25,7 @@ import {
   inspectPortableAnnotation,
   inspectProjectedPortableAnnotations,
 } from '../../core/src/portable-annotation.js';
-import type { JsonValue, Annotation, DocumentState } from '../../core/src/review-model.js';
+import type { JsonValue, Annotation, DocumentState } from '../../core/src/document-model.js';
 import {
   PdfWriterError,
   SEMANTIC_MARKUP_KINDS,

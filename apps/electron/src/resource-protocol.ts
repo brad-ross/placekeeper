@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { readFile, realpath } from 'node:fs/promises';
 import { resolve, sep } from 'node:path';
-import type { DocumentBridge } from './review-bridge.js';
+import type { DocumentBridge } from './document-bridge.js';
 /** Streams bounded service chunks; adoption happens only after digest and length verification. */
 export function documentResponse(bridge: DocumentBridge, generation: number): Response {
     const p = bridge.projection;

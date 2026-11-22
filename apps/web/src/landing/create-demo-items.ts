@@ -1,4 +1,4 @@
-import type { Annotation } from '../../../../packages/core/src/review-model.js';
+import type { Annotation } from '../../../../packages/core/src/document-model.js';
 
 /** User-authored examples on original page 14 of arXiv:2312.07520v3.
  * Top-origin anchors preserve the selections and caret from the live demo.

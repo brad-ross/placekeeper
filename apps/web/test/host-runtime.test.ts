@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { setAnnotationName } from "../../../packages/core/src/review-commands.js";
-import { createDocumentState } from "../../../packages/core/src/review-model.js";
+import { setAnnotationName } from "../../../packages/core/src/document-commands.js";
+import { createDocumentState } from "../../../packages/core/src/document-model.js";
 import {
   DOCUMENT_RUNTIME_PROTOCOL,
   DOCUMENT_RUNTIME_VERSION,
-} from "../../../packages/core/src/review-runtime-protocol.js";
+} from "../../../packages/core/src/document-runtime-protocol.js";
 import { createBrowserHostRuntime } from "../src/host/browser-runtime.js";
 import {
   subscribeRuntimeDocumentSource,
