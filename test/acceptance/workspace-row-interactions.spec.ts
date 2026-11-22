@@ -216,47 +216,56 @@ for (const width of [1280, 620]) {
 }
 
 for (const { width, surface } of [{ width: 1280, surface: 'right' }, { width: 620, surface: 'bottom' }]) {
-  test(`closed ${surface} workspace gives the PDF its full reading width`, async ({ page }) => {
-    await page.setViewportSize({ width, height: 900 });
-    await page.goto('/test/acceptance/review-harness/?fit-modes=book');
-    await waitForStaticPdf(page);
-    const stage = page.locator('[data-review-stage]');
-    const document = stage.locator('.review-document');
-    const scrollport = document.locator('[data-viewer-framing-viewport]');
-    const toggle = page.getByRole('group', { name: 'Workspace trays' })
-      .locator(`[data-workspace-tray-toggle="${surface}"]`);
-    if (await toggle.getAttribute('aria-expanded') === 'true') await toggle.click();
+  test(`closed ${surface} workspace gives the PDF its full reading width`, async ({ playwright, browserName, baseURL }) => {
+    // Headless Chromium hides scrollbars yet still reserves their stable
+    // gutter, which shortens the reachable horizontal scroll range by that
+    // gutter. Readers always have painted scrollbars, so frame with them.
+    const browser = await playwright[browserName].launch({ ignoreDefaultArgs: ['--hide-scrollbars'] });
+    const page = await browser.newPage(baseURL === undefined ? {} : { baseURL });
+    try {
+      await page.setViewportSize({ width, height: 900 });
+      await page.goto('/test/acceptance/review-harness/?fit-modes=book');
+      await waitForStaticPdf(page);
+      const stage = page.locator('[data-review-stage]');
+      const document = stage.locator('.review-document');
+      const scrollport = document.locator('[data-viewer-framing-viewport]');
+      const toggle = page.getByRole('group', { name: 'Workspace trays' })
+        .locator(`[data-workspace-tray-toggle="${surface}"]`);
+      if (await toggle.getAttribute('aria-expanded') === 'true') await toggle.click();
 
-    const expectClosedFraming = async () => {
-      await expect(toggle).toHaveAttribute('aria-expanded', 'false');
-      await expect(stage).toHaveAttribute(`data-${surface}-overlay`, 'false');
-      await expect(scrollport).toHaveCSS('padding-left', '10px');
-      await expect(scrollport).toHaveCSS('padding-right', '10px');
-      await expect.poll(async () => (await document.boundingBox())!.width).toBe((await stage.boundingBox())!.width);
-      // Settle at the right edge so horizontal overflow can't show its scroll cue.
-      await scrollport.evaluate(element => { element.scrollLeft = element.scrollWidth; });
+      const expectClosedFraming = async () => {
+        await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+        await expect(stage).toHaveAttribute(`data-${surface}-overlay`, 'false');
+        await expect(scrollport).toHaveCSS('padding-left', '10px');
+        await expect(scrollport).toHaveCSS('padding-right', '10px');
+        await expect.poll(async () => (await document.boundingBox())!.width).toBe((await stage.boundingBox())!.width);
+        // Settle at the right edge so horizontal overflow can't show its scroll cue.
+        await scrollport.evaluate(element => { element.scrollLeft = element.scrollWidth; });
+        await expect.poll(() => scrollport.locator('.pdf-workspace__scrollbar-backing')
+          .evaluate(element => getComputedStyle(element, '::after').display)).toBe('none');
+      };
+      await expectClosedFraming();
+      await toggle.click();
+      await expect(stage).toHaveAttribute(`data-${surface}-overlay`, 'true');
       await expect.poll(() => scrollport.locator('.pdf-workspace__scrollbar-backing')
-        .evaluate(element => getComputedStyle(element, '::after').display)).toBe('none');
-    };
-    await expectClosedFraming();
-    await toggle.click();
-    await expect(stage).toHaveAttribute(`data-${surface}-overlay`, 'true');
-    await expect.poll(() => scrollport.locator('.pdf-workspace__scrollbar-backing')
-      .evaluate(element => getComputedStyle(element, '::after').display)).toBe('block');
-    if (surface === 'right') {
-      await expect(scrollport).toHaveCSS('padding-left', '24px');
-      await expect.poll(async () => (await document.boundingBox())!.width).toBeLessThan((await stage.boundingBox())!.width);
-    }
-    await toggle.click();
-    await expectClosedFraming();
+        .evaluate(element => getComputedStyle(element, '::after').display)).toBe('block');
+      if (surface === 'right') {
+        await expect(scrollport).toHaveCSS('padding-left', '24px');
+        await expect.poll(async () => (await document.boundingBox())!.width).toBeLessThan((await stage.boundingBox())!.width);
+      }
+      await toggle.click();
+      await expectClosedFraming();
 
-    await expect(scrollport).toHaveCSS('overflow-y', 'auto');
-    await expect(scrollport).toHaveCSS('scrollbar-width', 'auto');
-    await expect.poll(() => scrollport.evaluate(element => {
-      element.scrollTop = element.scrollHeight;
-      return element.scrollHeight - element.clientHeight - element.scrollTop;
-    })).toBeLessThan(1);
-    expect(await scrollport.evaluate(element => element.scrollTop)).toBeGreaterThan(0);
+      await expect(scrollport).toHaveCSS('overflow-y', 'auto');
+      await expect(scrollport).toHaveCSS('scrollbar-width', 'auto');
+      await expect.poll(() => scrollport.evaluate(element => {
+        element.scrollTop = element.scrollHeight;
+        return element.scrollHeight - element.clientHeight - element.scrollTop;
+      })).toBeLessThan(1);
+      expect(await scrollport.evaluate(element => element.scrollTop)).toBeGreaterThan(0);
+    } finally {
+      await browser.close();
+    }
   });
 }
 
