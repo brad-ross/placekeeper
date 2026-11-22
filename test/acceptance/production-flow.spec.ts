@@ -7188,7 +7188,7 @@ test("shows command conflicts until a retry succeeds", async ({ page }) => {
 
   await selectionActions.getByRole("button", { name: "Delete", exact: true }).click();
   await expect(page.locator("[data-viewer-status]")).toContainText(
-    "Another review window changed this draft",
+    "Another window changed this draft",
   );
   await expect(selectionActions).toBeVisible();
 
@@ -7263,7 +7263,7 @@ test('returns a concurrent draft revision conflict to the preserved composer for
   expect((await rejectedUpdate).status()).toBe(409);
 
   await expect(page.locator('[data-viewer-status]'))
-    .toContainText('Another review window changed this draft');
+    .toContainText('Another window changed this draft');
   await expect(composer).toBeVisible();
   await expect(editor).toHaveValue('retry from authoritative state');
   expect(host.broker.state(launched.sessionId)?.pendingDrafts
