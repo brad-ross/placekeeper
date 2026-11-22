@@ -11,7 +11,7 @@ export async function prepareDocumentContext(input: DocumentAgentContextInput): 
     const requestedIds = input.kind === 'annotations' ? new Set(input.annotationIds) : null;
     const selected = requestedIds === null ? [] : snapshot.annotations.filter(annotation => requestedIds.has(annotation.id));
     if (requestedIds === null ? !selection?.text : selected.length === 0 || selected.length !== requestedIds.size) {
-        throw Error('Choose current review evidence first.');
+        throw Error('Choose current document evidence first.');
     }
 
     const subject = selection ?? selected.map(annotation => annotation.id).sort();

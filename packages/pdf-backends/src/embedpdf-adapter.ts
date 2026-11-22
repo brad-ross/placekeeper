@@ -290,7 +290,7 @@ export async function migrateLegacyDocumentStateGeometry(
     }
   } catch (error) {
     if (error instanceof PdfWriterError) throw error;
-    throw new PdfWriterError('invalid-pdf', 'EmbedPDF could not migrate legacy review geometry.', {
+    throw new PdfWriterError('invalid-pdf', 'EmbedPDF could not migrate legacy annotation geometry.', {
       cause: error,
     });
   } finally {

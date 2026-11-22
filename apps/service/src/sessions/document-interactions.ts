@@ -306,7 +306,7 @@ export class DocumentInteractions {
     const annotationRevision = typeof committed === "object" && committed !== null
       ? committed.annotationRevision : committed;
     if (!Number.isSafeInteger(annotationRevision) || (annotationRevision as number) < 0) {
-      throw new Error("A terminal interaction receipt requires an authoritative review revision");
+      throw new Error("A terminal interaction receipt requires an authoritative annotation revision");
     }
     const receipt: DocumentInteractionReceipt = {
       status: "finalized",

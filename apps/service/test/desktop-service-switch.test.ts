@@ -153,7 +153,7 @@ it("keeps the installed service when the user refuses preparation", async () => 
 it("explains the actual manual legacy save, close and end-task actions", async () => {
   const { upgradePreparationVersion: _version, ...legacy } = status(1);
   mocks.inspect.mockResolvedValue({ kind: "incompatible", status: legacy });
-  await expect(switchDesktopService(await fixture())).rejects.toThrow(/discard unfinished drafts.*save the PDFs.*close review.*end bound Codex tasks.*Quit the current app manually/u);
+  await expect(switchDesktopService(await fixture())).rejects.toThrow(/discard unfinished drafts.*save the PDFs.*close document.*end bound Codex tasks.*Quit the current app manually/u);
   expect(mocks.request).not.toHaveBeenCalled();
 });
 it("refuses replacement if drain finishes a recovery format the candidate cannot read", async () => {

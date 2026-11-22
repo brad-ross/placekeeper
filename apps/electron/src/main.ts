@@ -163,8 +163,8 @@ async function start() {
         if (retirementFailureShown) return;
         retirementFailureShown = true;
         quitState.active = false;
-        if (startupRequest) { console.error('Startup review detach failed', error); app.exit(2); return; }
-        dialog.showErrorBox('Review detach failed', String(error));
+        if (startupRequest) { console.error('Startup document detach failed', error); app.exit(2); return; }
+        dialog.showErrorBox('Document detach failed', String(error));
     };
     const finishQuit = () => {
         if (!quitState.active || entries.size > 0 || quitCompletion) return;
@@ -212,7 +212,7 @@ async function start() {
     const verify = (event: Electron.IpcMainInvokeEvent, identity?: unknown, identityRequest = false) => {
         const entry = entries.get(event.sender.id);
         const id = identity as { windowId?: unknown; attemptId?: unknown } | undefined;
-        if (!entry || event.senderFrame !== event.sender.mainFrame || entry.bridge.retired || (!identityRequest && !id) || (id && !acceptsRenderer({ frame: event.sender.mainFrame, windowId: entry.bridge.windowId, attemptId: entry.bridge.attemptId, retired: entry.bridge.retired }, event.senderFrame, id.windowId, id.attemptId))) throw new Error('Unauthorized review sender');
+        if (!entry || event.senderFrame !== event.sender.mainFrame || entry.bridge.retired || (!identityRequest && !id) || (id && !acceptsRenderer({ frame: event.sender.mainFrame, windowId: entry.bridge.windowId, attemptId: entry.bridge.attemptId, retired: entry.bridge.retired }, event.senderFrame, id.windowId, id.attemptId))) throw new Error('Unauthorized document sender');
         return entry;
     };
     ipcMain.handle('document:identity', event => { const e = verify(event, undefined, true); return { windowId: e.bridge.windowId, attemptId: e.bridge.attemptId, presentation: e.intent.presentation }; });
@@ -273,7 +273,7 @@ async function start() {
         timing(error === undefined ? 'close-settled' : 'close-settlement-failed', e.bridge);
         if (typeof token !== 'string' || e.closeToken !== token) throw new Error('Stale close');
         delete e.closeToken;
-        try { if (error !== undefined) throw new Error(typeof error === 'string' ? error : 'Review input could not be protected'); await e.bridge.settle(); if (e.bridge.retired || entries.get(event.sender.id) !== e) throw new Error('Retired close attempt'); e.permitClose = true; timing('close-protected', e.bridge); e.window.destroy(); }
+        try { if (error !== undefined) throw new Error(typeof error === 'string' ? error : 'Document input could not be protected'); await e.bridge.settle(); if (e.bridge.retired || entries.get(event.sender.id) !== e) throw new Error('Retired close attempt'); e.permitClose = true; timing('close-protected', e.bridge); e.window.destroy(); }
         catch (failure) { quitState.active = false; dialog.showErrorBox('Document remains open', String(failure)); throw failure; }
     });
     const assetRoot = join(root, 'electron-web');
@@ -319,7 +319,7 @@ async function start() {
         if (entry.timer) clearInterval(entry.timer);
         ownedWindows.retiring(bridge.helperId); activity();
         retirementPromise = electronAppControlThroughDaemon({ protocolVersion: 1, type: 'detach-helper', appInstanceId, helperId: bridge.helperId }, undefined, paths).then(response => {
-            if (response.type !== 'ack') throw new Error(`Review detach refused: ${response.type}`);
+            if (response.type !== 'ack') throw new Error(`Document detach refused: ${response.type}`);
             ownedWindows.detached(bridge.helperId); return activity();
         });
         return retirementPromise;
@@ -428,13 +428,13 @@ async function start() {
         const window = await registry.open(path, canonical => { created = true; return createWindow(canonical, restored, launchId, navigationHandle); }, window => { if (window.isMinimized()) window.restore(); window.show(); window.focus(); });
         if (navigationHandle) {
             const entry = entries.get(window.webContents.id);
-            if (!entry || entry.bridge.retired) throw new Error('Source navigation review is unavailable');
+            if (!entry || entry.bridge.retired) throw new Error('Source navigation document is unavailable');
             const response = await electronAppControlThroughDaemon({ protocolVersion: 1, type: 'bind-navigation', appInstanceId, helperId: entry.bridge.helperId, navigationHandle }, undefined, paths);
             if (response.type !== 'ack' || entry.bridge.retired) throw new Error('Source navigation is no longer available');
         }
         if (launchId && !created) {
             const entry = entries.get(window.webContents.id);
-            if (!entry || entry.bridge.retired) throw new Error('Task review is unavailable');
+            if (!entry || entry.bridge.retired) throw new Error('Task document is unavailable');
             const token = randomUUID();
             const previous = entry.focusedVisibility.begin(token);
             let attached = false;

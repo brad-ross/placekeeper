@@ -38,7 +38,7 @@ export function projectAnnotation(
   const anchor = anchorEvidenceFromAnnotation(item);
   const projectedRect = anchor.rect;
   if (!projectedRect) {
-    throw new Error(`Review item ${item.id} has no valid PDF geometry`);
+    throw new Error(`Annotation ${item.id} has no valid PDF geometry`);
   }
   const segmentRects = anchor.kind === "selection" ? anchor.segmentRects : undefined;
   const annotation: PdfWriterAnnotation = {

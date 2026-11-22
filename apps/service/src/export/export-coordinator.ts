@@ -251,7 +251,7 @@ export class ExportCoordinator {
     if (delivery.annotations.length === 0) {
       throw new ExportCoordinatorError(
         "EMPTY_REVIEW",
-        "There is no review feedback to deliver. Add an annotation first.",
+        "There are no annotations to deliver. Add an annotation first.",
       );
     }
   }
@@ -269,7 +269,7 @@ export class ExportCoordinator {
     if (!await this.#validateFrozenDelivery(delivery)) {
       throw new ExportCoordinatorError(
         "EXPORT_FENCE_STALE",
-        "The PDF generation or review state changed during export. Refresh and export again.",
+        "The PDF generation or annotation state changed during export. Refresh and export again.",
       );
     }
   }
@@ -279,7 +279,7 @@ export class ExportCoordinator {
     if (path === undefined) {
       throw new ExportCoordinatorError(
         "SESSION_CAPABILITY_REVOKED",
-        "The review session no longer has access to its original PDF.",
+        "This document no longer has access to its original PDF.",
       );
     }
     return path;
@@ -443,7 +443,7 @@ export class ExportCoordinator {
       if (validatedPath !== originalPath) {
         throw new ExportCoordinatorError(
           "SOURCE_SNAPSHOT_INVALID",
-          "The original PDF target changed after the review opened.",
+          "The original PDF target changed after the document opened.",
         );
       }
       const originalInfo = await stat(validatedPath);

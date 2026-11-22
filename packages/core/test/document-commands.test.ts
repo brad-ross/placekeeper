@@ -448,7 +448,7 @@ describe('canonical review commands', () => {
     state = startDocumentGeneration(state, { documentGeneration: 2 });
     expect(state.workflow).toMatchObject({ documentGeneration: 2, historyBoundary: 0 });
     expect(() => reduceDocument(state, { type: 'undo', expectedRevision: state.revision }))
-      .toThrow(/no review command to undo/iu);
+      .toThrow(/no document command to undo/iu);
   });
 
   it('applies an acknowledged protected draft in an ordinary review', () => {
@@ -528,7 +528,7 @@ describe('canonical review commands', () => {
     state = reduceDocument(state, { type: 'undo', expectedRevision: state.revision });
     expect(state.items[0]?.reconciliation?.disposition.kind).toBe('missing');
     expect(() => reduceDocument(state, { type: 'undo', expectedRevision: state.revision }))
-      .toThrow(/no review command to undo/iu);
+      .toThrow(/no document command to undo/iu);
   });
 
   it('reattaches a complete cross-page anchor and synchronizes its payload in one history entry', () => {
@@ -631,7 +631,7 @@ describe('canonical review commands', () => {
     expect(state.historyCursor).toBe(0);
     expect(state.workflow.historyBoundary).toBe(0);
     expect(() => reduceDocument(state, { type: 'redo', expectedRevision: state.revision }))
-      .toThrow(/no review command to redo/iu);
+      .toThrow(/no document command to redo/iu);
   });
 
   it('creates all five v1 tools as stable semantic items and advances one revision each', () => {

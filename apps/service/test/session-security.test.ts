@@ -1144,7 +1144,7 @@ describe("loopback HTTP boundary", () => {
         ok: false,
         error: {
           kind: "invalid-review-command",
-          message: "Review command is malformed",
+          message: "Document command is malformed",
         },
       });
     }

@@ -37,7 +37,7 @@ export class DocumentConflictError extends Error {
   readonly code = "REVISION_CONFLICT";
 
   constructor(expected: number, actual: number) {
-    super(`Expected review revision ${expected}, but current revision is ${actual}`);
+    super(`Expected annotation revision ${expected}, but current revision is ${actual}`);
     this.name = "DocumentConflictError";
   }
 }
@@ -53,7 +53,7 @@ export class DocumentDraftConflictError extends Error {
 
 function assertMutable(state: DocumentState, command: DocumentCommand): void {
   if (state.lifecycle !== "active") {
-    throw new InvalidDocumentCommandError("A completed review cannot be mutated");
+    throw new InvalidDocumentCommandError("A completed document cannot be mutated");
   }
   if (command.expectedRevision !== state.revision) {
     throw new DocumentConflictError(command.expectedRevision, state.revision);
@@ -67,7 +67,7 @@ function assertAnchorMatchesAnnotation(item: Annotation, anchor: DocumentAnchorE
       ? "page"
       : "selection";
   if (anchor.kind !== expectedKind) {
-    throw new InvalidDocumentCommandError(`Review item ${item.kind} requires a ${expectedKind} anchor`);
+    throw new InvalidDocumentCommandError(`Annotation ${item.kind} requires a ${expectedKind} anchor`);
   }
 }
 
@@ -79,7 +79,7 @@ function assertDraft(draft: PendingDocumentDraftV1): void {
     !Number.isSafeInteger(draft.revision) || draft.revision < 0 ||
     !Number.isFinite(Date.parse(draft.createdAt)) || !Number.isFinite(Date.parse(draft.updatedAt)) ||
     (draft.targetItemId !== undefined && draft.targetItemId.length === 0)
-  ) throw new InvalidDocumentCommandError("Pending review draft is malformed");
+  ) throw new InvalidDocumentCommandError("Pending annotation draft is malformed");
   assertDocumentAnchorEvidence(draft.anchor);
   assertDisposition(draft.disposition);
 }
@@ -90,7 +90,7 @@ export function assertDocumentCommand(command: unknown): asserts command is Docu
     !Number.isSafeInteger(command.expectedRevision) ||
     (command.expectedRevision as number) < 0
   ) {
-    throw new InvalidDocumentCommandError("Review command is malformed");
+    throw new InvalidDocumentCommandError("Document command is malformed");
   }
   switch (command.type) {
     case "set-annotation-name":
@@ -98,11 +98,11 @@ export function assertDocumentCommand(command: unknown): asserts command is Docu
       return;
     case "add":
       if (!isRecord(command.item) || !isRecord(command.item.payload)) {
-        throw new InvalidDocumentCommandError("Review command is malformed");
+        throw new InvalidDocumentCommandError("Document command is malformed");
       }
       return;
     case "put-draft":
-      if (!isRecord(command.draft)) throw new InvalidDocumentCommandError("Review command is malformed");
+      if (!isRecord(command.draft)) throw new InvalidDocumentCommandError("Document command is malformed");
       return;
     case "apply-draft":
       if (
@@ -110,7 +110,7 @@ export function assertDocumentCommand(command: unknown): asserts command is Docu
         !Number.isSafeInteger(command.expectedDraftRevision) ||
         typeof command.ownerViewId !== "string" ||
         typeof command.updatedAt !== "string"
-      ) throw new InvalidDocumentCommandError("Review command is malformed");
+      ) throw new InvalidDocumentCommandError("Document command is malformed");
       return;
     case "reattach":
       if (
@@ -119,7 +119,7 @@ export function assertDocumentCommand(command: unknown): asserts command is Docu
         typeof command.ownerViewId !== "string" ||
         typeof command.updatedAt !== "string" ||
         !isRecord(command.anchor)
-      ) throw new InvalidDocumentCommandError("Review command is malformed");
+      ) throw new InvalidDocumentCommandError("Document command is malformed");
       return;
     case "discard-reconciliation":
       if (
@@ -129,7 +129,7 @@ export function assertDocumentCommand(command: unknown): asserts command is Docu
         typeof command.ownerViewId !== "string" ||
         typeof command.reason !== "string" ||
         typeof command.discardedAt !== "string"
-      ) throw new InvalidDocumentCommandError("Review command is malformed");
+      ) throw new InvalidDocumentCommandError("Document command is malformed");
       return;
     case "edit":
       if (
@@ -137,19 +137,19 @@ export function assertDocumentCommand(command: unknown): asserts command is Docu
         typeof command.updatedAt !== "string" ||
         !isRecord(command.payload)
       ) {
-        throw new InvalidDocumentCommandError("Review command is malformed");
+        throw new InvalidDocumentCommandError("Document command is malformed");
       }
       return;
     case "remove":
       if (typeof command.id !== "string") {
-        throw new InvalidDocumentCommandError("Review command is malformed");
+        throw new InvalidDocumentCommandError("Document command is malformed");
       }
       return;
     case "undo":
     case "redo":
       return;
     default:
-      throw new InvalidDocumentCommandError("Review command type is not supported");
+      throw new InvalidDocumentCommandError("Document command type is not supported");
   }
 }
 
@@ -179,7 +179,7 @@ export function reduceDocument(
 
   if (command.type === "undo") {
     if (historyCursor <= normalized!.historyBoundary) {
-      throw new InvalidDocumentCommandError("There is no review command to undo");
+      throw new InvalidDocumentCommandError("There is no document command to undo");
     }
     const entry = history[historyCursor - 1]!;
     return {
@@ -192,7 +192,7 @@ export function reduceDocument(
   }
   if (command.type === "redo") {
     if (historyCursor >= history.length) {
-      throw new InvalidDocumentCommandError("There is no review command to redo");
+      throw new InvalidDocumentCommandError("There is no document command to redo");
     }
     return {
       ...replayDocumentHistoryEntry(state, history[historyCursor]!, 'redo'),
@@ -210,14 +210,14 @@ export function reduceDocument(
     case "add": {
       assertAnnotation(command.item);
       if (state.items.some((item) => item.id === command.item.id)) {
-        throw new InvalidDocumentCommandError("Review item ID already exists");
+        throw new InvalidDocumentCommandError("Annotation ID already exists");
       }
       const authoring = command.authoring ?? {
         ownerViewId: "legacy-view",
         baseGeneration: state.workflow.documentGeneration,
       };
       if (authoring.baseGeneration !== state.workflow.documentGeneration) {
-        throw new InvalidDocumentCommandError("Review item authoring belongs to a stale document generation");
+        throw new InvalidDocumentCommandError("Annotation authoring belongs to a stale document generation");
       }
       items = [
         ...state.items,
@@ -245,7 +245,7 @@ export function reduceDocument(
     }
     case "apply-draft": {
       const draft = state.pendingDrafts.find(({ id }) => id === command.id);
-      if (draft === undefined) throw new InvalidDocumentCommandError("Pending review draft does not exist");
+      if (draft === undefined) throw new InvalidDocumentCommandError("Pending annotation draft does not exist");
       if (
         draft.revision !== command.expectedDraftRevision ||
         draft.ownerViewId !== command.ownerViewId
@@ -258,7 +258,7 @@ export function reduceDocument(
         draft.disposition.kind !== "resolved" ||
         draft.disposition.generation !== state.workflow.documentGeneration
       ) {
-        throw new InvalidDocumentCommandError("Pending review draft must be reattached before Apply");
+        throw new InvalidDocumentCommandError("Pending annotation draft must be reattached before Apply");
       }
       const anchorPayload: Readonly<Record<string, JsonValue>> = draft.anchor.kind === "selection"
         ? documentSelectionPayload(draft.anchor, { canonical: true })
@@ -299,16 +299,16 @@ export function reduceDocument(
         };
         assertAnnotation(item);
         if (state.items.some(({ id }) => id === item.id)) {
-          throw new InvalidDocumentCommandError("Review item ID already exists");
+          throw new InvalidDocumentCommandError("Annotation ID already exists");
         }
         items = [...state.items, item];
       } else {
         const itemIndex = state.items.findIndex(({ id }) => id === draft.targetItemId);
-        if (itemIndex < 0) throw new InvalidDocumentCommandError("Edited Review Item no longer exists");
+        if (itemIndex < 0) throw new InvalidDocumentCommandError("Edited annotation no longer exists");
         const existing = state.items[itemIndex]!;
         if (!canEditPdfAnnotationComment(existing)) throw new InvalidDocumentCommandError("This PDF annotation comment is locked");
         if (existing.kind !== draft.kind || existing.kind === "delete") {
-          throw new InvalidDocumentCommandError("Pending review draft kind does not match its Review Item");
+          throw new InvalidDocumentCommandError("Pending annotation draft kind does not match its annotation");
         }
         const anchored = synchronizeAnnotationAnchor(existing, draft.anchor);
         const edited: Annotation = {
@@ -336,7 +336,7 @@ export function reduceDocument(
     }
     case "reattach": {
       const index = state.items.findIndex(({ id }) => id === command.id);
-      if (index < 0) throw new InvalidDocumentCommandError("Review item does not exist");
+      if (index < 0) throw new InvalidDocumentCommandError("Annotation does not exist");
       const existing = canonicalizeAnnotation(state.items[index]!, {
         ownerViewId: command.ownerViewId,
         baseGeneration: state.workflow.documentGeneration,
@@ -369,7 +369,7 @@ export function reduceDocument(
       }
       const collection = command.target === "item" ? state.items : state.pendingDrafts;
       const target = collection.find(({ id }) => id === command.id);
-      if (target === undefined) throw new InvalidDocumentCommandError("Review reconciliation target does not exist");
+      if (target === undefined) throw new InvalidDocumentCommandError("Annotation reconciliation target does not exist");
       const targetRevision = command.target === "item"
         ? canonicalizeAnnotation(target as Annotation, {
             ownerViewId: command.ownerViewId,
@@ -395,7 +395,7 @@ export function reduceDocument(
     case "edit": {
       const index = state.items.findIndex((item) => item.id === command.id);
       if (index < 0) {
-        throw new InvalidDocumentCommandError("Review item does not exist");
+        throw new InvalidDocumentCommandError("Annotation does not exist");
       }
       const existing = state.items[index]!;
       if (!canEditPdfAnnotationComment(existing)) throw new InvalidDocumentCommandError('This PDF annotation comment is locked');
@@ -418,7 +418,7 @@ export function reduceDocument(
     }
     case "remove": {
       if (!state.items.some((item) => item.id === command.id)) {
-        throw new InvalidDocumentCommandError("Review item does not exist");
+        throw new InvalidDocumentCommandError("Annotation does not exist");
       }
       const existing = state.items.find((item) => item.id === command.id)!;
       if (!canDeletePdfAnnotation(existing)) throw new InvalidDocumentCommandError('This PDF annotation is locked against deletion');
@@ -426,7 +426,7 @@ export function reduceDocument(
       break;
     }
     default:
-      throw new InvalidDocumentCommandError("Review command type is not supported");
+      throw new InvalidDocumentCommandError("Document command type is not supported");
   }
 
   const next = { ...state, revision: state.revision + 1, items, pendingDrafts, discardAudit };

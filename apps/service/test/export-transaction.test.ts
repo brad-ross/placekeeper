@@ -359,7 +359,7 @@ describe("reviewed PDF export transaction", () => {
     });
 
     expect(() => coordinator.exportAnnotatedCopy(fixture.delivery(0, []))).toThrow(
-      "There is no review feedback to deliver",
+      "There are no annotations to deliver",
     );
     expect(writes).toBe(0);
   });
@@ -462,7 +462,7 @@ describe("reviewed PDF export transaction", () => {
     });
 
     await expect(coordinator.exportAnnotatedCopy(fixture.delivery())).rejects.toThrow(
-      "Review session ended",
+      "Document session ended",
     );
     expect((await readdir(fixture.directory)).filter((name) => /reviewed.*\.pdf$/u.test(name))).toEqual([]);
     expect(await readFile(fixture.originalPath)).toEqual(fixture.original);

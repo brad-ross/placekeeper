@@ -4,7 +4,7 @@
   "private": true,
   "productName": "Placekeeper",
   "author": "Brad Ross",
-  "description": "Placekeeper PDF review",
+  "description": "Placekeeper PDF reader",
   "main": "dist/main.cjs",
   "config": { "forge": "./forge.config.ts" },
   "scripts": { "package": "electron-forge package", "make": "electron-forge make" },

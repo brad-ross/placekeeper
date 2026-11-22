@@ -58,7 +58,7 @@ it("requires recovery compatibility before retiring the incumbent", async () => 
 });
 it("rechecks idleness at shutdown when activity arrives after inspection", async () => {
   const events: string[] = []; const options = fixture(events);
-  await expect(coordinateServiceSwitch({ ...options, shutdown: async () => ({ status: "refused", activity: { documentPresence: 1, codexTasks: 0, transientWork: 0 } }) })).rejects.toThrow("active reviews");
+  await expect(coordinateServiceSwitch({ ...options, shutdown: async () => ({ status: "refused", activity: { documentPresence: 1, codexTasks: 0, transientWork: 0 } }) })).rejects.toThrow("open documents");
   expect(events).toEqual(["compatible"]);
 });
 it("does not start the candidate without proven incumbent retirement", async () => {

@@ -14,7 +14,7 @@ export function createUpgradeDocumentProtection(broker: SessionBroker, saving: P
     generation: () => broker.state(sessionId)?.workflow.documentGeneration ?? -1,
     revision: () => {
       const state = broker.state(sessionId);
-      if (!state) throw new Error('Review ended');
+      if (!state) throw new Error('Document session ended');
       return `${state.workflow.documentGeneration}:${state.revision}`;
     },
     protect: async () => {
@@ -37,7 +37,7 @@ export class UpgradeDocumentParticipants {
   }
   assertAuthoring(id: string): void {
     const status = this.poll(id);
-    if (status.phase === 'ready' || status.phase === 'committed' || (status.phase === 'preparing' && !status.settlementRequired)) throw new Error('Review authoring is frozen for upgrade');
+    if (status.phase === 'ready' || status.phase === 'committed' || (status.phase === 'preparing' && !status.settlementRequired)) throw new Error('Document authoring is frozen for upgrade');
   }
   refresh(): void { for (const id of this.#views.keys()) this.changed(id); }
   has(id: string): boolean { return this.#views.has(id); }
@@ -63,7 +63,7 @@ export class UpgradeDocumentParticipants {
   }
   poll(id: string): UpgradeDocumentStatus {
     const view = this.#views.get(id);
-    if (!view) throw new Error('Upgrade review is detached');
+    if (!view) throw new Error('Upgrade document is detached');
     this.changed(id);
     const status = this.coordinator.poll(view.credentials);
     return status === undefined ? { phase: 'none' } : { phase: status.phase, attemptId: status.attemptId,
@@ -72,7 +72,7 @@ export class UpgradeDocumentParticipants {
   }
   async settle(id: string, request: UpgradeDocumentSettlement): Promise<UpgradeDocumentStatus> {
     const view = this.#views.get(id);
-    if (!view) throw new Error('Upgrade review is detached');
+    if (!view) throw new Error('Upgrade document is detached');
     const status = this.coordinator.poll(view.credentials);
     if (!status || status.attemptId !== request.attemptId || !['preparing', 'ready'].includes(status.phase)) throw new Error('Stale upgrade preparation');
     let durable = false;
@@ -80,7 +80,7 @@ export class UpgradeDocumentParticipants {
       if (request.error !== undefined) throw new Error(request.error);
       await view.protection.protect();
       const current = this.coordinator.poll(view.credentials);
-      if (this.#views.get(id) !== view || current?.attemptId !== request.attemptId || !['preparing', 'ready'].includes(current.phase)) throw new Error('Preparation changed while protecting review');
+      if (this.#views.get(id) !== view || current?.attemptId !== request.attemptId || !['preparing', 'ready'].includes(current.phase)) throw new Error('Preparation changed while protecting the document');
       for (const peer of this.#views.values()) {
         const generation = peer.protection.generation?.();
         this.coordinator.updateParticipant(peer.credentials, peer.protection.revision(), { settlement: generation === peer.generation });

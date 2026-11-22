@@ -190,7 +190,7 @@ export class NativeAppLifecycleManager {
     });
     if (message.upgradePreparationVersion === 1) this.upgradeParticipants?.attach(`app:${message.appInstanceId}`, {
       revision: () => { const app = this.#apps.get(message.appInstanceId); if (!app) throw new Error('App detached'); return `${app.activeWindows}:${app.bootstrappingWindows}:${[...app.helpers].sort().join(',')}`; },
-      protect: async () => { const app = this.#apps.get(message.appInstanceId); if (!app || app.bootstrappingWindows !== 0) throw new Error('A review is still opening'); },
+      protect: async () => { const app = this.#apps.get(message.appInstanceId); if (!app || app.bootstrappingWindows !== 0) throw new Error('A document is still opening'); },
     });
     return this.#ack(message.appInstanceId);
   }

@@ -1048,7 +1048,7 @@ describe("atomic live document replacement", () => {
     });
     await expect(restarted.acceptMutation(resumed.launch.sessionId, {
       type: "undo", expectedRevision: resumedState.revision,
-    })).rejects.toThrow(/There is no review command to undo/iu);
+    })).rejects.toThrow(/There is no document command to undo/iu);
   });
 
   it("keeps every shared view on the predecessor until the last interaction owner releases", async () => {

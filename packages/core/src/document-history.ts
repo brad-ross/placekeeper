@@ -80,7 +80,7 @@ export function replayDocumentHistoryEntry<T extends DocumentHistoryContent>(cur
 
 const object = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value);
 const index = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) >= 0;
-function malformed(): never { throw new Error('Malformed compact review history'); }
+function malformed(): never { throw new Error('Malformed compact document history'); }
 function jsonValue(value: unknown): boolean {
   if (value === null || typeof value === 'string' || typeof value === 'boolean') return true;
   if (typeof value === 'number') return Number.isFinite(value);

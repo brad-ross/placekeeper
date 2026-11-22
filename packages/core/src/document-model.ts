@@ -164,7 +164,7 @@ export function synchronizeAnnotationAnchor(
   let payload: Readonly<Record<string, JsonValue>>;
   if (anchor.kind === "selection") {
     if (item.kind !== "replace" && item.kind !== "delete" && item.kind !== "highlight") {
-      throw new Error(`Review item ${item.kind} cannot use a selection anchor`);
+      throw new Error(`Annotation ${item.kind} cannot use a selection anchor`);
     }
     const selection = documentSelectionPayload(anchor, { canonical: true });
     if (item.kind === "replace") {
@@ -181,7 +181,7 @@ export function synchronizeAnnotationAnchor(
       payload = selection;
     }
   } else if (anchor.kind === "caret") {
-    if (item.kind !== "insert") throw new Error(`Review item ${item.kind} cannot use a caret anchor`);
+    if (item.kind !== "insert") throw new Error(`Annotation ${item.kind} cannot use a caret anchor`);
     const proposedText = item.payload.proposedText;
     if (typeof proposedText !== "string") throw new Error("Insert item is missing proposed text");
     payload = {
@@ -192,7 +192,7 @@ export function synchronizeAnnotationAnchor(
       proposedText,
     };
   } else {
-    if (item.kind !== "pageNote" && item.kind !== "pdfAnnotation") throw new Error(`Review item ${item.kind} cannot use a page anchor`);
+    if (item.kind !== "pageNote" && item.kind !== "pdfAnnotation") throw new Error(`Annotation ${item.kind} cannot use a page anchor`);
     const comment = item.payload.comment;
     if (typeof comment !== "string") throw new Error("Page note is missing its comment");
     payload = {
@@ -386,7 +386,7 @@ export type DocumentCommand =
 
 function record(value: JsonValue | undefined): Readonly<Record<string, JsonValue>> {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error("Review anchor geometry is missing");
+    throw new Error("Annotation anchor geometry is missing");
   }
   return value;
 }
@@ -395,14 +395,14 @@ function rectEvidence(value: JsonValue | undefined): DocumentRectEvidence {
   const valueRecord = record(value);
   const { x, y, width, height } = valueRecord;
   if (![x, y, width, height].every((part) => typeof part === "number" && Number.isFinite(part))) {
-    throw new Error("Review anchor geometry is malformed");
+    throw new Error("Annotation anchor geometry is malformed");
   }
   return { x: x as number, y: y as number, width: width as number, height: height as number };
 }
 
 function selectionPages(value: JsonValue | undefined): readonly DocumentSelectionPageEvidenceV1[] | undefined {
   if (value === undefined) return undefined;
-  if (!Array.isArray(value)) throw new Error("Review selection pages are malformed");
+  if (!Array.isArray(value)) throw new Error("Annotation selection pages are malformed");
   return value.map((entry) => {
     const page = record(entry);
     if (
@@ -411,7 +411,7 @@ function selectionPages(value: JsonValue | undefined): readonly DocumentSelectio
       typeof page.prefix !== "string" ||
       typeof page.suffix !== "string" ||
       !Array.isArray(page.segmentRects)
-    ) throw new Error("Review selection page evidence is malformed");
+    ) throw new Error("Annotation selection page evidence is malformed");
     return {
       pageIndex: page.pageIndex as number,
       quote: page.quote,
@@ -425,11 +425,11 @@ function selectionPages(value: JsonValue | undefined): readonly DocumentSelectio
 
 function selectionBoundaries(value: JsonValue | undefined): readonly DocumentSelectionPageBoundaryV1[] | undefined {
   if (value === undefined) return undefined;
-  if (!Array.isArray(value)) throw new Error("Review selection boundaries are malformed");
+  if (!Array.isArray(value)) throw new Error("Annotation selection boundaries are malformed");
   return value.map((entry) => {
     const boundary = record(entry);
     if (!Number.isSafeInteger(boundary.afterPageIndex) || typeof boundary.separator !== "string") {
-      throw new Error("Review selection boundary is malformed");
+      throw new Error("Annotation selection boundary is malformed");
     }
     return {
       afterPageIndex: boundary.afterPageIndex as number,
@@ -440,7 +440,7 @@ function selectionBoundaries(value: JsonValue | undefined): readonly DocumentSel
 
 function payloadText(item: Annotation, key: string): string {
   const value = item.payload[key];
-  if (typeof value !== "string") throw new Error(`Review item ${item.id} is missing ${key}`);
+  if (typeof value !== "string") throw new Error(`Annotation ${item.id} is missing ${key}`);
   return value;
 }
 
@@ -568,7 +568,7 @@ export function startDocumentGeneration(
   },
 ): DocumentState {
   if (!Number.isSafeInteger(input.documentGeneration) || input.documentGeneration <= state.workflow.documentGeneration) {
-    throw new Error("Review document generation must advance monotonically");
+    throw new Error("Document generation must advance monotonically");
   }
   const items = state.items.map((item) => {
     const canonical = canonicalizeAnnotation(item, {

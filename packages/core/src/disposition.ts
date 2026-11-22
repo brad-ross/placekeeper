@@ -79,9 +79,9 @@ export function createCompleteDisposition(input: {
   });
 
   const laterIds = input.laterItems.map(({ item }) => item.id);
-  if (duplicate(laterIds)) throw new Error("Later Review Items must have unique stable IDs");
+  if (duplicate(laterIds)) throw new Error("Later annotations must have unique stable IDs");
   if (laterIds.some((id) => baselineIds.includes(id))) {
-    throw new Error("A baseline Review Item cannot also be reported as a later item");
+    throw new Error("A baseline annotation cannot also be reported as a later item");
   }
   for (const later of input.laterItems) {
     assertAnnotation(later.item);

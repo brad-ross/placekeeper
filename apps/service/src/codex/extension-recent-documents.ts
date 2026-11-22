@@ -55,7 +55,7 @@ export class ExtensionRecentDocuments {
       if (!object(state) || !keys(state, ['schemaVersion', 'entries']) || state.schemaVersion !== 1 ||
           !Array.isArray(state.entries) || state.entries.length > maxEntries || !state.entries.every(entry) ||
           new Set(state.entries.map(item => item.id)).size !== state.entries.length ||
-          new Set(state.entries.map(item => item.sessionId)).size !== state.entries.length) throw Error('Invalid recent review store');
+          new Set(state.entries.map(item => item.sessionId)).size !== state.entries.length) throw Error('Invalid recent document store');
       return this.#state = { schemaVersion: 1, entries: state.entries };
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
@@ -65,7 +65,7 @@ export class ExtensionRecentDocuments {
   async #save(entries: RecentDocumentEntry[]): Promise<void> {
     const next: State = { schemaVersion: 1, entries };
     const bytes = Buffer.from(JSON.stringify(next));
-    if (bytes.byteLength > maxBytes) throw Error('Recent review storage is full');
+    if (bytes.byteLength > maxBytes) throw Error('Recent document storage is full');
     const path = join(this.root, RECENT_DOCUMENTS_FILENAME);
     const temporary = await stagePublication(path, bytes);
     try {
@@ -77,7 +77,7 @@ export class ExtensionRecentDocuments {
     // Snapshot inputs before queuing so a caller cannot change a pending write.
     const value = structuredClone(input);
     return this.#serial(async () => {
-      if (!object(value) || !keys(value, ['sessionId', 'title', 'source']) || !session(value.sessionId) || typeof value.title !== 'string' || !source(value.source)) throw Error('Invalid recent review');
+      if (!object(value) || !keys(value, ['sessionId', 'title', 'source']) || !session(value.sessionId) || typeof value.title !== 'string' || !source(value.source)) throw Error('Invalid recent document');
       const state = await this.#load(), previous = state.entries.find(item => item.sessionId === value.sessionId);
       const next: RecentDocumentEntry = {
         id: previous?.id ?? randomBytes(24).toString('base64url'), sessionId: value.sessionId,
@@ -90,7 +90,7 @@ export class ExtensionRecentDocuments {
   }
   position(sessionId: string, nextPage: number): Promise<void> {
     return this.#serial(async () => {
-      if (!session(sessionId) || !page(nextPage)) throw Error('Invalid recent review position');
+      if (!session(sessionId) || !page(nextPage)) throw Error('Invalid recent document position');
       const state = await this.#load(), previous = state.entries.find(item => item.sessionId === sessionId);
       if (!previous || previous.page === nextPage) return;
       const next = { ...previous, page: nextPage, updatedAt: new Date(this.now()).toISOString() };

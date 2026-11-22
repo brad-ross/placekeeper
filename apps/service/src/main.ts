@@ -29,7 +29,7 @@ export async function startLocalService(
   await broker.initialize();
   const opened = await broker.openDocument(request);
   if (opened.kind === "recovery-offered") {
-    throw new Error("A recovery decision is required before launching the review");
+    throw new Error("A recovery decision is required before opening the document");
   }
   const server = await startHttpServer(broker);
   const launchUrl = `${server.origin}${opened.launch.launchPath}${opened.launch.fragment}`;

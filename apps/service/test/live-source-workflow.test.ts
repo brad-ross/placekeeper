@@ -341,7 +341,7 @@ describe("same-task live source workflow", () => {
       handle: plan.freshness.evidenceHandle,
       executionId: begun.result.executionId,
       planId: plan.result.planId,
-    })).rejects.toThrow(/review annotations/u);
+    })).rejects.toThrow(/Placekeeper annotations/u);
 
     const current = await dirty.context.refresh({ taskSessionId });
     if (current.status !== "current") throw new Error("Expected current context");
@@ -387,7 +387,7 @@ describe("same-task live source workflow", () => {
         handle: plan.freshness.evidenceHandle,
         executionId: begun.result.executionId,
         planId: plan.result.planId,
-      })).rejects.toThrow(/review annotations/u);
+      })).rejects.toThrow(/Placekeeper annotations/u);
 
       const external = await fixture({
         inspectRebuild: async () => ({
