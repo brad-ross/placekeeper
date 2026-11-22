@@ -9,7 +9,7 @@ import {
   inspectPortableAnnotationsForImport,
   inspectProjectedPortableAnnotations,
 } from "../../../../packages/core/src/portable-annotation.js";
-import type { Annotation } from "../../../../packages/core/src/review-model.js";
+import type { Annotation } from "../../../../packages/core/src/document-model.js";
 import {
   inspectPdfWithEmbedPdf,
   type InspectedPdf,

@@ -3,12 +3,12 @@ import { describe, expect, it } from 'vitest';
 
 import type { PdfNavigationTarget } from '../src/pdf/pdf-navigation-target.js';
 import type { PdfViewerLocation } from '../src/pdf/viewer-navigation.js';
-import type { AnnotationReaderIdentity } from '../src/review/annotation-reader.js';
+import type { AnnotationReaderIdentity } from '../src/reader/annotation-reader.js';
 import {
   createReferenceNavigationState,
   reduceReferenceNavigation,
   type ReferenceNavigationState,
-} from '../src/review/reference-navigation-state.js';
+} from '../src/reader/reference-navigation-state.js';
 
 function target(identity: string, pageIndex: number): PdfNavigationTarget {
   return {

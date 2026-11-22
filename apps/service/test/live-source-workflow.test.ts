@@ -4,7 +4,7 @@ import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import type { LiveDispositionItemV1 } from "../../../packages/core/src/disposition.js";
-import type { Annotation } from "../../../packages/core/src/review-model.js";
+import type { Annotation } from "../../../packages/core/src/document-model.js";
 import { LiveContextService } from "../src/context/live-context-service.js";
 import { LiveSourceWorkflowService } from "../src/context/live-source-workflow-service.js";
 import { DraftSnapshotStore } from "../src/recovery/draft-snapshot.js";

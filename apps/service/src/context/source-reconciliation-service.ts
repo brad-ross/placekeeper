@@ -14,8 +14,8 @@ import {
   projectStructuredAnnotation,
   type SourceHint,
   type StructuredAnnotation,
-} from "../../../../packages/core/src/structured-review-item.js";
-import type { Annotation } from "../../../../packages/core/src/review-model.js";
+} from "../../../../packages/core/src/structured-annotation.js";
+import type { Annotation } from "../../../../packages/core/src/document-model.js";
 import type { AtomicSessionProjection, SessionBroker } from "../sessions/session-broker.js";
 import { querySyncTexHintsForItems } from "../synctex/query.js";
 import {

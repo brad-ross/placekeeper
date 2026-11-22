@@ -1,0 +1,57 @@
+:is(#root[data-production-root="true"], .terminal-recovery, .top-bar-menu__surface, .static-launcher, .handler, .extension-controls, #status[data-extension-mode]) {
+  --reader-font-ui: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --reader-ink-primary: #333;
+  --reader-ink-muted: #707070;
+  --reader-ink-quiet: #8a8a8a;
+  --reader-surface-canvas: #f7f7f7;
+  --reader-surface-panel: #fff;
+  --reader-surface-subtle: #f0f0f0;
+  --reader-surface-interactive: #e7e7e7;
+  --reader-surface-tray: #f0f0f0;
+  --reader-border: #dedede;
+  --reader-border-subtle: #e5e5e5;
+  --reader-border-strong: #c7c7c7;
+  --reader-selection-bg: #fff;
+  --reader-pdf-selection-bg: #cfdeea;
+  --reader-selection-ink: #333;
+  /* Keyboard focus uses the app's one accent blue (insertions, link destinations). */
+  --reader-focus: #2f6fc4;
+  --reader-success: #2d684d;
+  --reader-danger: #9a3d34;
+  --reader-warning: #d9ad2b;
+  --reader-backdrop: rgb(24 26 23 / 42%);
+  --reader-radius-control: 9px;
+  --reader-radius-row: 11px;
+  --reader-radius-float: 13px;
+  --reader-radius-dialog: 16px;
+  --reader-radius-round: 999px;
+  --reader-control-compact: 31px;
+  --reader-control-default: 34px;
+  --reader-control-touch: 44px;
+  --reader-control-group-gap: 2px;
+  --reader-action-group-gap: 6px;
+  --reader-chrome-height: 54px;
+  --reader-chrome-center-y: 27px;
+  --reader-document-title-cap: 9rem;
+  --reader-workspace-header-height: 44px;
+  --reader-metadata-separator-gap: .3rem;
+  --reader-workspace-card-surface: var(--reader-surface-panel);
+  --reader-workspace-card-hover: var(--reader-surface-subtle);
+  --reader-shadow-float: 0 12px 48px rgb(0 0 0 / 9%), 0 2px 8px rgb(0 0 0 / 5%);
+  --reader-shadow-page: 0 2px 4px rgb(0 0 0 / 6%), 0 18px 44px rgb(0 0 0 / 8%);
+  --reader-shadow-side: 0 4px 18px rgb(0 0 0 / 5%);
+  --reader-shadow-bottom: 0 4px 18px rgb(0 0 0 / 5%);
+  --reader-motion-fast: 120ms;
+  --reader-motion-surface: 160ms;
+  color-scheme: only light;
+  font-family: var(--reader-font-ui);
+}
+
+/*
+ * Destination Band: translucent blue, painted like a text highlight and
+ * distinct from highlight gold and selection blue-gray. The link menu is
+ * portaled outside the review root, and its snippet highlight uses the same token.
+ */
+:is(#root[data-production-root="true"], .terminal-recovery, .top-bar-menu__surface, .static-launcher, .handler, .link-action-popover) {
+  --reader-destination-band: rgb(56 132 230 / 24%);
+}

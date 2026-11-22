@@ -23,7 +23,7 @@ import { MAX_PDF_NAVIGATION_LABEL_LENGTH } from '../src/pdf/pdf-navigation-metad
 import type { PdfNavigationTarget } from '../src/pdf/pdf-navigation-target.js';
 import type { PdfOutlineDiscovery, PdfOutlineItem } from '../src/pdf/pdf-outline.js';
 import { createPdfOutlineTargetOrderLocation } from '../src/pdf/document-order-location.js';
-import { createOutlineContainmentResolver } from '../src/review/navigation-coordinator.js';
+import { createOutlineContainmentResolver } from '../src/reader/navigation-coordinator.js';
 
 // ---------------------------------------------------------------------------
 // Fixture helpers: synthetic page text in device space (top-left origin).

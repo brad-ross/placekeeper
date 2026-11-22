@@ -1,0 +1,8 @@
+/* Stable layout entrypoint. Recovery and portaled document actions follow responsive rules. */
+@import './reader-layout-foundation.css';
+@import './reader-layout-annotations.css';
+@import './reader-layout-dialogs.css';
+@import './reader-layout-responsive.css';
+@import './reader-recovery.css';
+@import './reader-document-actions.css';
+@import './document-loading.css';

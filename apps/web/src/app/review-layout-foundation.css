@@ -1,4 +1,0 @@
-/* Foundation order: shared scoped tokens, shell controls, then viewer framing. */
-@import './review-design-tokens.css';
-@import './review-shell-chrome.css';
-@import './review-viewer-framing.css';

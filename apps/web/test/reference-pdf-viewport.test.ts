@@ -9,7 +9,7 @@ import {
   DestinationBandLayer,
   referenceOwnedMarkTargetIsInteractive,
 } from '../src/pdf/ReferencePdfViewport.js';
-import type { DestinationBand } from '../src/review/navigation-coordinator.js';
+import type { DestinationBand } from '../src/reader/navigation-coordinator.js';
 
 function targetWithAncestor(ancestorSelector: string): EventTarget {
   return {
@@ -20,8 +20,8 @@ function targetWithAncestor(ancestorSelector: string): EventTarget {
 describe('Reference owned-mark pointer ownership', () => {
   it.each([
     '[data-pdf-link-control]',
-    '[data-review-contextual-ui]',
-    '[data-review-editor]',
+    '[data-reader-contextual-ui]',
+    '[data-reader-editor]',
     'input',
     'textarea',
     '[contenteditable="true"]',
@@ -88,7 +88,7 @@ describe('Destination Band layer', () => {
     expect(html).toContain('pointer-events:none');
     expect(html.replace(/<[^>]*>/gu, '')).toBe('');
     for (const attribute of [
-      'data-owned-mark', 'data-review-id', 'data-owned-focus-id', 'data-source-annotation',
+      'data-owned-mark', 'data-annotation-id', 'data-owned-focus-id', 'data-source-annotation',
       'data-annotation-key', 'data-pdf-link-control', 'data-pdf-search-highlight',
     ]) expect(html).not.toContain(attribute);
   });
@@ -126,22 +126,22 @@ describe('Destination Band layer', () => {
 });
 
 describe('Destination Band styling', () => {
-  const tokens = readCssSource(new URL('../src/app/review-design-tokens.css', import.meta.url));
-  const styles = readCssSource(new URL('../src/app/review-search-references.css', import.meta.url));
+  const tokens = readCssSource(new URL('../src/app/reader-design-tokens.css', import.meta.url));
+  const styles = readCssSource(new URL('../src/app/reader-search-references.css', import.meta.url));
 
   it('defines a translucent blue band token with no separate edge', () => {
-    expect(DESTINATION_BAND_TOKEN).toBe('--review-destination-band');
-    expect(tokens).toMatch(/--review-destination-band:\s*rgb\(\d+ \d+ \d+ \/ \d+%\);/u);
-    expect(tokens).not.toContain('--review-destination-band-edge');
+    expect(DESTINATION_BAND_TOKEN).toBe('--reader-destination-band');
+    expect(tokens).toMatch(/--reader-destination-band:\s*rgb\(\d+ \d+ \d+ \/ \d+%\);/u);
+    expect(tokens).not.toContain('--reader-destination-band-edge');
   });
 
   it('paints the band from its own token like a text highlight, never selectable', () => {
     const bandRule = /\[data-pdf-destination-band\]\s*\{([^}]*)\}/u.exec(styles)?.[1] ?? '';
-    expect(bandRule).toContain('var(--review-destination-band)');
+    expect(bandRule).toContain('var(--reader-destination-band)');
     expect(bandRule).toContain('pointer-events: none');
     expect(bandRule).toContain('user-select: none');
-    expect(bandRule).not.toContain('--review-pdf-selection-bg');
-    expect(bandRule).not.toContain('--review-warning');
+    expect(bandRule).not.toContain('--reader-pdf-selection-bg');
+    expect(bandRule).not.toContain('--reader-warning');
     // Same shape and blending as highlight marks.
     expect(bandRule).toContain('border-radius: var(--pdf-mark-radius, 3px)');
     expect(bandRule).toContain('mix-blend-mode: multiply');

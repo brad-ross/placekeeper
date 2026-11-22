@@ -1,7 +1,7 @@
 import { documentOrderedItems } from "./annotation-projection.js";
 import type { LiveExecutionBaselineV1 } from "./live-context.js";
-import type { Annotation } from "./review-model.js";
-import { assertAnnotation } from "./review-reducer.js";
+import type { Annotation } from "./document-model.js";
+import { assertAnnotation } from "./document-reducer.js";
 
 export const LIVE_DISPOSITION_STATUSES = [
   "applied",

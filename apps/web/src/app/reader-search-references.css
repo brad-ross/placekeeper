@@ -1,0 +1,552 @@
+.pdf-search {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+  flex-direction: column;
+  color: var(--reader-ink-primary);
+}
+
+.pdf-search__query {
+  position: relative;
+  margin: 12px 12px 8px;
+}
+
+.pdf-search__input.reader-chrome__page-input {
+  width: 100%;
+  min-width: 0;
+  height: var(--reader-control-compact);
+  padding: 0 32px;
+  background: var(--reader-surface-panel);
+  text-align: left;
+  transition: background-color var(--reader-motion-fast) ease;
+}
+
+.pdf-search__query:focus-within .pdf-search__input.reader-chrome__page-input {
+  background: var(--reader-surface-interactive);
+}
+
+.pdf-search__input::-webkit-search-cancel-button {
+  appearance: none;
+}
+
+.pdf-search__search-icon {
+  position: absolute;
+  z-index: 1;
+  top: calc(50% - 8px);
+  left: 9px;
+  color: var(--reader-ink-muted);
+  pointer-events: none;
+}
+
+.pdf-search__clear {
+  position: absolute;
+  z-index: 2;
+  top: 50%;
+  right: 5px;
+  transform: translateY(-50%);
+}
+
+.pdf-search__clear > .reader-icon {
+  transform: translate(.5px, .5px);
+}
+
+.pdf-search__spinner {
+  position: absolute;
+  top: calc(50% - 8px);
+  right: 9px;
+  animation: reader-spin 900ms linear infinite;
+}
+
+.pdf-search__query[data-has-query="true"] .pdf-search__spinner {
+  right: 32px;
+}
+
+.pdf-search__summary {
+  margin: 0;
+  padding: 2px 13px 8px;
+  color: var(--reader-ink-muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.pdf-search__alternatives {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--reader-border-subtle);
+}
+
+.pdf-search__group > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--reader-ink-muted);
+  font-size: 11px;
+}
+
+.pdf-search__chips {
+  display: flex;
+  gap: 5px;
+  margin-top: 7px;
+  flex-wrap: wrap;
+}
+
+.pdf-search__chips button {
+  min-height: 26px;
+  padding: 3px 8px;
+  border: 1px solid var(--reader-border);
+  border-radius: 999px;
+  color: var(--reader-ink-primary);
+  background: var(--reader-surface-subtle);
+}
+
+.pdf-search__symbol-suggestions {
+  position: absolute;
+  z-index: 8;
+  top: calc(100% + 4px);
+  right: 0;
+  left: 0;
+  max-height: 12rem;
+  padding: 4px;
+  overflow-y: auto;
+  border: 1px solid var(--reader-border-strong);
+  border-radius: var(--reader-radius-control);
+  background: var(--reader-surface-panel);
+  box-shadow: 0 8px 20px rgb(24 26 23 / 16%);
+}
+
+.pdf-search__symbol-suggestions button {
+  display: grid;
+  width: 100%;
+  min-height: var(--reader-control-compact);
+  align-items: center;
+  grid-template-columns: 1.8rem minmax(0, 1fr);
+  gap: 8px;
+  padding: 5px 7px;
+  border: 0;
+  border-radius: 5px;
+  color: var(--reader-ink-primary);
+  background: transparent;
+  text-align: left;
+}
+
+.pdf-search__symbol-suggestions button:hover,
+.pdf-search__symbol-suggestions button:focus-visible {
+  outline: 0;
+  background: var(--reader-surface-interactive);
+}
+
+.pdf-search__symbol-suggestions button > span:first-child {
+  color: var(--reader-selection-ink);
+  font-size: 15px;
+  text-align: center;
+}
+
+.pdf-search__symbol-suggestions button > span:last-child {
+  color: var(--reader-ink-muted);
+  font-size: 11px;
+}
+
+.pdf-search__message {
+  display: flex;
+  gap: 7px;
+  margin: 8px 12px;
+  padding: 9px 10px;
+  align-items: flex-start;
+  border-radius: var(--reader-radius-control);
+  color: var(--reader-ink-muted);
+  font-size: 12px;
+  line-height: 1.4;
+  background: var(--reader-surface-subtle);
+}
+
+.pdf-search__results {
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+}
+
+.pdf-search__group {
+  padding: 9px 10px 0;
+}
+
+.pdf-search__group ol {
+  display: grid;
+  gap: 8px;
+  margin: 7px 0 12px;
+  padding: 0;
+  list-style: none;
+}
+
+/* Search hits are painted like text highlight marks, in the search blue the
+   result list also uses. */
+[data-pdf-search-highlight] {
+  border-radius: var(--pdf-mark-radius, 3px);
+  background: var(--pdf-search-fill, rgb(47 111 196 / 30%));
+  mix-blend-mode: multiply;
+}
+
+[data-pdf-search-highlight][data-pdf-search-match-kind="related"] {
+  background: var(--pdf-search-related-fill, rgb(217 173 43 / 42%));
+}
+
+/* Transient, inert Destination Band (KTD8); never an annotation. It is
+   painted like a text highlight mark, in its own color. */
+[data-pdf-destination-band] {
+  border-radius: var(--pdf-mark-radius, 3px);
+  background: var(--reader-destination-band);
+  mix-blend-mode: multiply;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+@keyframes reader-spin {
+  to { transform: rotate(1turn); }
+}
+
+.pdf-search__result {
+  cursor: pointer;
+}
+
+.annotation-item__excerpt.pdf-search__excerpt {
+  display: grid;
+  grid-template-columns: max-content max-content minmax(0, 1fr);
+  align-items: baseline;
+  column-gap: var(--reader-metadata-separator-gap);
+  row-gap: 0;
+}
+
+.pdf-search__result-page,
+.pdf-search__result-separator {
+  color: var(--reader-ink-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.pdf-search__result-separator {
+  color: var(--reader-ink-quiet);
+}
+
+.pdf-search__result-context {
+  display: -webkit-box;
+  min-width: 0;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.pdf-search__result-match {
+  font-weight: 760;
+}
+
+.reference-tabs {
+  display: flex;
+  min-width: 0;
+  flex: none;
+  gap: 4px;
+  padding: 8px 10px;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--reader-border-subtle);
+}
+
+.reference-tab-segment {
+  box-sizing: border-box;
+  display: flex;
+  min-width: 0;
+  max-width: 13rem;
+  flex: none;
+  align-items: center;
+  padding: 4px;
+  border: 1px solid var(--reader-border-subtle);
+  border-radius: var(--reader-radius-row);
+  background: var(--reader-workspace-card-surface);
+  transition: border-color var(--reader-motion-fast) ease, background-color var(--reader-motion-fast) ease, box-shadow var(--reader-motion-fast) ease;
+}
+
+.reference-tab-segment--compound {
+  width: min(17rem, 100%);
+  max-width: calc(13rem + (2 * var(--reader-control-compact)));
+  gap: var(--reader-control-group-gap);
+  overflow: hidden;
+  border-color: var(--reader-border-strong);
+  background: var(--reader-selection-bg);
+  box-shadow: inset 0 0 0 1px var(--reader-selection-ink);
+}
+
+.reference-tab-segment:hover,
+.reference-tab-segment:focus-within {
+  border-color: var(--reader-border-strong);
+  background: var(--reader-workspace-card-hover);
+}
+
+.reference-tab-segment--compound:hover,
+.reference-tab-segment--compound:focus-within {
+  background: var(--reader-selection-bg);
+}
+
+.reader-workspace[data-workspace-presentation="right"] .reference-tab-segment {
+  width: 11.5rem;
+  max-width: 11.5rem;
+  flex-basis: 11.5rem;
+}
+
+.reference-tab-segment__selector {
+  display: grid;
+  min-width: 8rem;
+  min-height: 44px;
+  max-width: 13rem;
+  flex: 1 1 auto;
+  padding: 7px 8px;
+  text-align: left;
+}
+
+.reference-tab-segment__selector span,
+.reference-tab-segment__selector small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reference-tab-segment__selector span { color: var(--reader-ink-primary); font-size: 11px; font-weight: 720; }
+.reference-tab-segment__selector small { color: var(--reader-ink-muted); font-size: 10px; }
+
+.reference-tabs .reference-tab-segment--compound > .reference-tab-segment__selector {
+  min-width: 0;
+  border-color: transparent;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.reference-tabs .reference-tab-segment__action,
+.reference-tabs .reference-panel__return,
+.annotation-item__action,
+.pdf-search__clear {
+  display: grid;
+  align-self: center;
+  width: var(--reader-control-compact);
+  min-width: var(--reader-control-compact);
+  min-height: var(--reader-control-compact);
+  flex: 0 0 var(--reader-control-compact);
+  padding: 0;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: var(--reader-radius-control);
+  color: var(--reader-ink-muted);
+  background: transparent;
+}
+
+.reference-tabs .reference-tab-segment__action:hover,
+.reference-tabs .reference-panel__return:hover:not([aria-disabled="true"]),
+.annotation-item__action:hover,
+.pdf-search__clear:hover {
+  border-color: var(--reader-border-strong);
+  color: var(--reader-ink-primary);
+  background: var(--reader-surface-interactive);
+}
+
+.reference-tabs .reference-tab-segment__action:active,
+.reference-tabs .reference-panel__return:active,
+.annotation-item__action:active,
+.pdf-search__clear:active {
+  box-shadow: inset 0 1px 2px rgb(24 26 23 / 16%);
+}
+
+.reference-tabs [data-reference-tab-action="close"] {
+  color: var(--reader-danger);
+}
+
+.reference-tabs [data-reference-tab-action="close"]:hover {
+  color: var(--reader-danger);
+}
+
+.reader-workspace__mode-segment--compound > button:focus-visible,
+.reader-workspace__move--header-action:focus-visible,
+.reader-shell .reference-tab-segment--compound > button:focus-visible {
+  position: relative;
+  z-index: 1;
+  outline-offset: -3px;
+}
+
+.reader-workspace__panel--references[data-reference-tabs-orientation="vertical"] {
+  display: grid;
+  grid-template-columns: clamp(10rem, 18vw, 15rem) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.reader-workspace[data-workspace-presentation="right"]
+  .reader-workspace__panel--references[data-reference-tabs-orientation="vertical"] {
+  grid-template-columns: 12.5rem minmax(0, 1fr);
+}
+
+.reader-workspace__panel--references[data-reference-tabs-orientation="vertical"][data-reference-panel-layout="full"]
+  > .reference-panel {
+  grid-column: 1 / -1;
+}
+
+.reader-workspace__panel--references[data-reference-tabs-orientation="vertical"][data-reference-panel-layout="split"]
+  > .reference-panel {
+  grid-column: 2;
+}
+
+.reference-tabs[data-reference-tabs-orientation="vertical"] {
+  min-height: 0;
+  padding: 10px 8px;
+  flex-direction: column;
+  overflow-x: hidden;
+  overflow-y: auto;
+  border-bottom: 0;
+}
+
+.reader-workspace__panel--references[data-reference-tabs-orientation="vertical"][data-reference-panel-layout="split"]
+  > .reference-panel {
+  border-top: 1px solid var(--reader-border-subtle);
+  border-left: 1px solid var(--reader-border-subtle);
+  border-radius: var(--reader-radius-row) 0 0;
+  box-shadow: inset 6px 6px 14px rgb(24 26 23 / 5%);
+}
+
+.reference-tabs[data-reference-tabs-orientation="vertical"] .reference-tab-segment {
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+  flex: none;
+}
+
+.reference-tabs[data-reference-tabs-orientation="vertical"] .reference-tab-segment__selector {
+  width: auto;
+  min-width: 0;
+  max-width: none;
+}
+
+.reference-panel {
+  position: relative;
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  grid-template-rows: minmax(0, 1fr);
+  overflow: hidden;
+  isolation: isolate;
+}
+
+.reference-panel__return {
+  display: grid;
+  align-self: center;
+  width: var(--reader-control-compact);
+  min-width: var(--reader-control-compact);
+  min-height: var(--reader-control-compact);
+  flex: 0 0 var(--reader-control-compact);
+  padding: 0;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: var(--reader-radius-control);
+  color: var(--reader-ink-muted);
+  background: transparent;
+  box-shadow: none;
+  cursor: pointer;
+}
+
+.reference-panel__return:hover:not([aria-disabled="true"]) {
+  border-color: var(--reader-border-strong);
+  color: var(--reader-ink-primary);
+  background: var(--reader-surface-interactive);
+}
+
+.reference-panel__return[aria-disabled="true"] {
+  opacity: 0.68;
+  cursor: wait;
+}
+
+.reference-panel__return:focus-visible {
+  outline: 3px solid var(--reader-focus);
+  outline-offset: 2px;
+}
+
+.reference-panel__viewport {
+  position: relative;
+  z-index: 0;
+  grid-area: 1 / 1;
+  min-width: 0;
+  min-height: 0;
+  margin: 12px;
+  overflow: hidden;
+  border-radius: calc(var(--reader-radius-row) - 2px);
+}
+
+.reference-panel__viewport[data-reference-viewport-concealed="true"] {
+  visibility: hidden;
+}
+
+.reference-panel__viewport > .pdf-workspace {
+  width: 100%;
+  height: 100%;
+}
+
+.reference-panel__pending,
+.reference-panel__empty {
+  grid-area: 1 / 1;
+  align-self: start;
+  margin: 14px;
+}
+
+.reference-panel__pending[data-reference-pending="error"] {
+  align-self: stretch;
+  overflow: auto;
+}
+
+.reference-panel__error {
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: 16px;
+}
+
+.reference-panel__error-content {
+  display: grid;
+  gap: 5px;
+}
+
+.reference-panel__error-heading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.reference-panel__error-body {
+  color: var(--reader-ink-muted);
+}
+
+.reference-panel__pending > p {
+  display: grid;
+  margin: 0 0 9px;
+}
+
+.reference-panel__pending > p span,
+.reference-panel__empty span {
+  color: var(--reader-ink-muted);
+  font-size: 11px;
+}
+
+.workspace-state {
+  display: grid;
+  gap: 6px;
+  margin: 14px;
+  padding: 13px;
+  border: 1px dashed var(--reader-border);
+  border-radius: var(--reader-radius-row);
+  color: var(--reader-ink-muted);
+  background: var(--reader-surface-subtle);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.workspace-state .reader-icon {
+  animation: annotation-status-spin 900ms linear infinite;
+}
+
+.workspace-state button {
+  justify-self: start;
+  padding: 4px 9px;
+  border-color: var(--reader-border);
+  color: var(--reader-ink-primary);
+  background: var(--reader-surface-panel);
+}

@@ -5,7 +5,7 @@ import { join, resolve } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 
 import { placekeeperLinkBase } from "../../packages/core/src/placekeeper-link.js";
-import { addPageNote } from "../../packages/core/src/review-commands.js";
+import { addPageNote } from "../../packages/core/src/document-commands.js";
 import { PlacekeeperHost } from "../../apps/service/src/host/placekeeper-host.js";
 
 let root = "";
@@ -15,9 +15,9 @@ let host: PlacekeeperHost;
 async function expectCurrentPage(page: Page, value: string): Promise<void> {
   const [currentPage, totalPages] = value.split(" / ");
   const position = page.locator(
-    '[data-review-chrome] > .review-chrome__left-controls [data-review-page-position]',
+    '[data-reader-chrome] > .reader-chrome__left-controls [data-reader-page-position]',
   );
-  await expect(position.locator('.review-chrome__page-input')).toHaveValue(currentPage!, {
+  await expect(position.locator('.reader-chrome__page-input')).toHaveValue(currentPage!, {
     timeout: 15_000,
   });
   await expect(position.locator('span[aria-hidden="true"]')).toHaveText(`/ ${totalPages}`);
@@ -88,7 +88,7 @@ test("a live Codex review has no copy-link button, survives refresh, and reopens
     { name: "Open PDF link to Footnote return to body TOC, Page 1" },
   );
   await expect(page.locator("[data-production-review]")).toHaveAttribute("data-initial-view-ready", "true");
-  await page.locator("[data-review-stage]").evaluate(async element => {
+  await page.locator("[data-reader-stage]").evaluate(async element => {
     await Promise.all(element.getAnimations({ subtree: true }).filter(animation => animation.effect?.getTiming().iterations !== Infinity).map(animation => animation.finished.catch(() => undefined)));
   });
   await returnLink.scrollIntoViewIfNeeded();
@@ -126,12 +126,12 @@ test("a live Codex review has no copy-link button, survives refresh, and reopens
   const back = page.getByRole("button", { name: "Back in document history" });
   const forward = page.getByRole("button", { name: "Forward in document history" });
   await expect(back).toBeEnabled();
-  await page.locator("[data-review-chrome]").hover({ position: { x: 2, y: 2 } });
+  await page.locator("[data-reader-chrome]").hover({ position: { x: 2, y: 2 } });
   await back.click();
   await expectCurrentPage(page, "3 / 4");
   await expect(page).toHaveURL(/#v=1&page=3$/u);
   await expect(forward).toBeEnabled();
-  await page.locator("[data-review-chrome]").hover({ position: { x: 2, y: 2 } });
+  await page.locator("[data-reader-chrome]").hover({ position: { x: 2, y: 2 } });
   await forward.click();
   await expectCurrentPage(page, "1 / 4");
   await expect(page).toHaveURL(/#v=1&page=1$/u);
@@ -287,7 +287,7 @@ test("omits destination copy controls and reopens canonical links without source
   await expect(result.locator('.copy-link-control')).toHaveCount(0);
 
   await page.getByRole("group", { name: "Workspace trays", exact: true }).getByRole("button", { name: "Hide Workspace", exact: true }).click();
-  await page.locator("[data-review-stage]").evaluate(async element => {
+  await page.locator("[data-reader-stage]").evaluate(async element => {
     await Promise.all(element.getAnimations({ subtree: true }).map(animation => animation.finished.catch(() => undefined)));
   });
   const primaryLink = page.locator(".pdf-workspace:not(.pdf-workspace--reference)").getByRole(
@@ -313,18 +313,18 @@ test("omits destination copy controls and reopens canonical links without source
   }
   await page.goto(reopened.url);
   await expect(page.locator("[data-production-review]")).toHaveAttribute("data-initial-view-ready", "true");
-  await page.locator("[data-review-stage]").evaluate(async element => {
+  await page.locator("[data-reader-stage]").evaluate(async element => {
     await Promise.all(element.getAnimations({ subtree: true }).filter(animation => animation.effect?.getComputedTiming().iterations !== Infinity).map(animation => animation.finished.catch(() => undefined)));
   });
   await expect(page).toHaveURL(/#v=2&page=2&mode=xyz&params=72,640,0$/u);
   await expectCurrentPage(page, "2 / 4");
-  await expect(page.locator("#review-tools-workspace")).toHaveAttribute(
+  await expect(page.locator("#reader-tools-workspace")).toHaveAttribute(
     "data-tools-workspace-open",
     "false",
   );
-  await expect(page.locator("[data-review-workspace]")).toHaveAttribute("data-workspace-open", "false");
+  await expect(page.locator("[data-reader-workspace]")).toHaveAttribute("data-workspace-open", "false");
   await expect(page.locator("[data-link-action-popover]")).toHaveCount(0);
-  await expect(page.locator(".review-workspace__status")).toHaveText("");
+  await expect(page.locator(".reader-workspace__status")).toHaveText("");
 
   await page.evaluate(() => history.pushState(history.state, "", "#v=1&page=3"));
   await page.goBack();
@@ -341,7 +341,7 @@ test("omits destination copy controls and reopens canonical links without source
   await expect(page.locator("[data-production-review]")).toHaveAttribute("data-initial-view-ready", "true", { timeout: 15_000 });
   await expect(page).toHaveURL(/#v=1&page=3$/u);
   await expectCurrentPage(page, "3 / 4");
-  await expect(page.locator(".review-workspace__status")).toHaveText(
+  await expect(page.locator(".reader-workspace__status")).toHaveText(
     "The exact destination is unavailable. Opened page 3 instead.",
   );
 
@@ -349,7 +349,7 @@ test("omits destination copy controls and reopens canonical links without source
   await expect(page.locator("[data-production-review]")).toHaveAttribute("data-initial-view-ready", "true", { timeout: 15_000 });
   await expect(page).toHaveURL(/#v=1&page=1$/u);
   await expectCurrentPage(page, "1 / 4");
-  await expect(page.locator(".review-workspace__status")).toHaveText(
+  await expect(page.locator(".reader-workspace__status")).toHaveText(
     "The exact destination is unavailable. Opened page 1 instead.",
   );
 
@@ -404,10 +404,10 @@ test("a successor daemon keeps the old origin but serves a stale view as inert c
     const copyButton = page.getByRole("button", { name: "Copy Link" });
     await expect(reopenButton).toBeVisible();
     await expect(reopenButton).toHaveAttribute("data-icon", "redo");
-    await expect(reopenButton.locator(".review-icon")).toHaveCount(1);
+    await expect(reopenButton.locator(".reader-icon")).toHaveCount(1);
     await expect(copyButton).toBeVisible();
     await expect(copyButton).toHaveAttribute("data-icon", "link");
-    await expect(copyButton.locator(".review-icon")).toHaveCount(1);
+    await expect(copyButton.locator(".reader-icon")).toHaveCount(1);
     const footerGeometry = await page.evaluate(() => {
       const footer = document.querySelector<HTMLElement>(".terminal-recovery__footer")!;
       const button = document.querySelector<HTMLElement>(".terminal-recovery__footer button")!;
@@ -568,9 +568,9 @@ test("a successor offers a real protected draft and preserves exact choices acro
     await expect(resume).toHaveAttribute("data-icon", "redo");
     await expect(discard).toHaveAttribute("data-icon", "delete");
     await expect(fork).toHaveAttribute("data-icon", "plus");
-    await expect(resume.locator(".review-icon")).toHaveCount(1);
-    await expect(discard.locator(".review-icon")).toHaveCount(1);
-    await expect(fork.locator(".review-icon")).toHaveCount(1);
+    await expect(resume.locator(".reader-icon")).toHaveCount(1);
+    await expect(discard.locator(".reader-icon")).toHaveCount(1);
+    await expect(fork.locator(".reader-icon")).toHaveCount(1);
     await expect(resume).toBeFocused();
     await expect(page.locator(".terminal-recovery__choice")).toHaveCount(3);
     const offeredHeight = await page.locator("[data-terminal-recovery]")

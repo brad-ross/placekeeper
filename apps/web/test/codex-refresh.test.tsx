@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createDocumentState } from '../../../packages/core/src/review-model.js';
+import { createDocumentState } from '../../../packages/core/src/document-model.js';
 import { createCodexHostRuntime } from '../src/host/codex-runtime.js';
 import { loadRuntimeDocumentSource, subscribeRuntimeDocumentSource } from '../src/host/runtime-document-source.js';
 import type { HostRuntimeInvalidation } from '../src/host/runtime.js';

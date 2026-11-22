@@ -7,10 +7,10 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { inventoryDocumentAnnotations } from '../src/pdf/existing-annotations.js';
 import { markedTextFromGlyphs } from '../src/pdf/markup-text.js';
-import { annotationContent, existingAnnotationContent, withImportedMarkedText } from '../src/review/annotation-content.js';
+import { annotationContent, existingAnnotationContent, withImportedMarkedText } from '../src/reader/annotation-content.js';
 import { importedMarkedTextBySourceObject } from '../src/pdf/existing-annotations.js';
-import type { Annotation } from '../../../packages/core/src/review-model.js';
-import { projectExistingAnnotationReader } from '../src/review/annotation-reader.js';
+import type { Annotation } from '../../../packages/core/src/document-model.js';
+import { projectExistingAnnotationReader } from '../src/reader/annotation-reader.js';
 
 const LINE_ONE = 'The design compares outcomes within narrowly defined markets.';
 const LINE_TWO = 'Aggregate shocks are absorbed before the coefficient is estimated.';

@@ -1,0 +1,436 @@
+.reader-layout {
+  --reader-document-right-space: 0px;
+  --reader-document-left-gap: 10px;
+  --reader-document-right-gap: 10px;
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.reader-document {
+  position: absolute;
+  z-index: 0;
+  inset: 0 var(--reader-document-right-space) 0 0;
+  min-width: 0;
+  min-height: 0;
+  overflow: visible;
+}
+
+.reader-layout[data-right-surface-open="true"] {
+  --reader-document-right-space: calc(var(--reference-right-width) + var(--reader-overlay-inset, 12px));
+  --reader-document-left-gap: 24px;
+  --reader-document-right-gap: 24px;
+}
+
+/* One native scrollport reaches the window edge. Its content reserves the
+   workspace area, while .reader-document remains the reading geometry. The
+   scrollbar's width is already included in that reserved area. */
+.reader-document .pdf-workspace__viewport {
+  width: calc(100% + var(--reader-document-right-space)) !important;
+  /* WebKit requires physical properties to animate the logical padding below. */
+  transition: padding-left var(--reader-motion-surface) ease-out, padding-right var(--reader-motion-surface) ease-out;
+  --reader-scrollport-trailing-space: calc(var(--reader-document-right-gap) + max(0px, var(--reader-document-right-space) - var(--reader-main-scrollbar-width, 0px)));
+  padding-inline: var(--reader-document-left-gap) var(--reader-scrollport-trailing-space) !important;
+}
+
+/* The zoom wrapper's synthetic margin assumes uniform library padding.
+   Native content padding owns centering beside the workspace instead. */
+.reader-document [data-viewer-framing-content] {
+  margin-left: 0 !important;
+}
+
+.reader-overlay-frame {
+  /* Decorative backing must never paint over the native PDF scrollbar. */
+  /* Overlay scrollbars report zero layout width on macOS. Leave their
+     painted edge exposed too, without styling or disabling native auto-hide. */
+  clip-path: inset(0 max(16px, var(--reader-main-scrollbar-width, 0px)) max(16px, var(--reader-main-scrollbar-height, 0px)) 0);
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.reader-overlay-frame > span {
+  position: absolute;
+  display: none;
+  pointer-events: none;
+}
+
+.reader-layout[data-right-overlay="true"] .reader-overlay-frame__right-backing {
+  display: block;
+  inset: 0 0 0 var(--reader-overlay-right-start);
+  background: var(--reader-surface-canvas);
+}
+
+.reader-layout[data-right-overlay="true"] .reader-overlay-frame__right-fade {
+  display: block;
+  top: 0;
+  bottom: 0;
+  left: calc(var(--reader-overlay-right-start) - var(--reader-overlay-fade-size));
+  width: var(--reader-overlay-fade-size);
+  background: linear-gradient(to right, transparent, var(--reader-surface-canvas));
+}
+
+.reader-layout[data-bottom-overlay="true"] .reader-overlay-frame__bottom-backing {
+  display: block;
+  inset: var(--reader-overlay-bottom-start) 0 0;
+  background: var(--reader-surface-canvas);
+}
+
+.reader-layout[data-bottom-overlay="true"] .reader-overlay-frame__bottom-fade {
+  display: block;
+  right: 0;
+  left: 0;
+  top: calc(var(--reader-overlay-bottom-start) - var(--reader-overlay-fade-size));
+  height: var(--reader-overlay-fade-size);
+  background: linear-gradient(transparent, var(--reader-surface-canvas));
+}
+
+.reader-layout[data-scroll-top-fade="true"] .reader-overlay-frame__top-fade {
+  display: block;
+  z-index: 1;
+  top: 0;
+  right: var(--reader-main-scrollbar-width);
+  left: 0;
+  height: var(--reader-overlay-fade-size);
+  background: linear-gradient(var(--reader-surface-canvas), transparent);
+}
+
+.reader-layout[data-scroll-right-fade="true"][data-right-overlay="false"]
+  .reader-overlay-frame__outer-right-fade {
+  display: block;
+  top: 0;
+  right: var(--reader-main-scrollbar-width);
+  bottom: var(--reader-main-scrollbar-height);
+  width: var(--reader-overlay-fade-size);
+  background: linear-gradient(to right, transparent, var(--reader-surface-canvas));
+}
+
+.reader-layout[data-scroll-bottom-fade="true"][data-bottom-overlay="false"]
+  .reader-overlay-frame__outer-bottom-fade {
+  display: block;
+  right: var(--reader-main-scrollbar-width);
+  bottom: var(--reader-main-scrollbar-height);
+  left: 0;
+  height: var(--reader-overlay-fade-size);
+  background: linear-gradient(transparent, var(--reader-surface-canvas));
+}
+
+.reader-document > *,
+[data-viewer-shell],
+.pdf-workspace {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+
+[data-viewer-shell] {
+  position: relative;
+}
+
+.pdf-workspace__viewport {
+  height: 100%;
+  overflow: auto;
+  scrollbar-gutter: stable;
+  background: var(--reader-surface-canvas);
+}
+
+/* Leave room for the page shadow (18px offset, 44px blur) to fade above
+   the 16px native scrollbar backing, including after bottom-tray runway. */
+.reader-document .pdf-workspace__viewport {
+  padding-top: 12px !important;
+  --reader-page-bottom-clearance: 64px;
+  padding-bottom: var(--reader-page-bottom-clearance) !important;
+}
+
+.pdf-workspace__page {
+  background: #fff;
+  outline: none;
+  box-shadow: inset 0 0 0 1px var(--reader-border-subtle), var(--reader-shadow-page);
+}
+
+.pdf-workspace__loading {
+  display: flex;
+  height: 100%;
+  align-items: center;
+  justify-content: center;
+  gap: .5rem;
+  color: var(--reader-ink-muted);
+  font-size: 12px;
+}
+
+.pdf-workspace__loading .reader-icon {
+  animation: reader-loader-spin 900ms linear infinite;
+}
+
+.pdf-workspace__status,
+.reader-toast {
+  display: flex;
+  align-items: center;
+  gap: .4rem;
+  margin: 0;
+  padding: .45rem .65rem;
+  border-radius: var(--reader-radius-control);
+  background: var(--reader-surface-panel);
+  box-shadow: 0 2px 7px rgb(24 27 23 / 8%);
+  font-size: 12px;
+  font-weight: 400;
+  pointer-events: none;
+}
+
+.pdf-workspace__status {
+  position: absolute;
+  z-index: 2;
+  top: .75rem;
+  left: .75rem;
+  max-width: min(24rem, calc(100% - 1.5rem));
+  border: 1px solid color-mix(in srgb, var(--reader-danger) 48%, var(--reader-border));
+  color: var(--reader-danger);
+}
+
+.reader-toast-stack {
+  position: absolute;
+  z-index: 8;
+  top: .75rem;
+  left: .75rem;
+  display: grid;
+  width: max-content;
+  max-width: min(24rem, calc(100% - 1.5rem));
+  gap: .4rem;
+  pointer-events: none;
+}
+
+.reader-toast {
+  border: 1px solid color-mix(in srgb, var(--reader-warning) 55%, var(--reader-border));
+  color: var(--reader-ink-primary);
+}
+
+.reader-toast--error {
+  border-color: color-mix(in srgb, var(--reader-danger) 48%, var(--reader-border));
+  color: var(--reader-danger);
+}
+
+.pdf-copy-owner {
+  position: absolute;
+  z-index: 8;
+  top: .5rem;
+  right: .5rem;
+  margin: 0;
+  padding: .3rem .55rem;
+  border: 1px solid var(--reader-border);
+  border-radius: var(--reader-radius-control);
+  background: color-mix(in srgb, var(--reader-surface-panel) 94%, transparent);
+  box-shadow: 0 2px 7px rgb(24 27 23 / 8%);
+  color: var(--reader-ink-muted);
+  font-size: 11px;
+  font-weight: 400;
+  pointer-events: none;
+}
+
+.reader-toast[data-generation-busy="true"] .reader-icon {
+  animation: reader-loader-spin 900ms linear infinite;
+}
+
+@keyframes reader-loader-spin {
+  to { transform: rotate(1turn); }
+}
+
+.reader-contextual-host,
+.reader-drawer-host {
+  position: absolute;
+  z-index: 2;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.reader-contextual-host {
+  z-index: 3;
+}
+
+.reader-drawer-host {
+  display: grid;
+  grid-template: minmax(0, 1fr) / minmax(0, 1fr);
+  overflow: clip;
+}
+
+/* The outer review layout already clips these surfaces. A second clip can
+   leave native WebKit workspace layers unpainted until the window resizes. */
+[data-launch-surface="macos"] .reader-drawer-host {
+  overflow: visible;
+}
+
+.reader-context-palette,
+.reader-page-menu {
+  position: fixed;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: var(--reader-control-group-gap);
+  padding: 5px;
+  border: 1px solid var(--reader-border);
+  border-radius: var(--reader-radius-float);
+  background: var(--reader-surface-panel);
+  box-shadow: var(--reader-shadow-float);
+  pointer-events: auto;
+}
+
+.reader-context-palette[hidden],
+.reader-page-menu[hidden] {
+  display: none;
+}
+
+/* A plain text cursor: thin, dark grey, blinking on and off at the system rate. */
+.reader-insertion-caret {
+  position: fixed;
+  z-index: 3;
+  width: 1px;
+  height: 1.15rem;
+  background: #333;
+  border-radius: 0;
+  box-shadow: none;
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+  animation: reader-insertion-caret-blink 1.06s step-end infinite;
+}
+
+@keyframes reader-insertion-caret-blink {
+  0% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+.reader-insertion-caret[hidden] { display: none; }
+
+.reader-context-palette button,
+.reader-page-menu button {
+  display: inline-flex;
+  min-height: var(--reader-control-default);
+  align-items: center;
+  gap: 7px;
+  padding: 0 11px;
+  border: 1px solid transparent;
+  border-radius: var(--reader-radius-control);
+  color: var(--reader-ink-primary);
+  background: transparent;
+  font-size: 13px;
+  font-weight: 400;
+  transition: color var(--reader-motion-fast) ease, border-color var(--reader-motion-fast) ease, background-color var(--reader-motion-fast) ease, box-shadow var(--reader-motion-fast) ease;
+}
+
+.reader-context-palette button:hover:not(:disabled),
+.reader-page-menu button:hover:not(:disabled) {
+  border-color: var(--reader-border-strong);
+  background: var(--reader-surface-interactive);
+}
+
+.reader-context-palette button:active:not(:disabled),
+.reader-page-menu button:active:not(:disabled) {
+  border-color: var(--reader-border-strong);
+  background: var(--reader-surface-interactive);
+  box-shadow: inset 0 1px 2px rgb(24 26 23 / 16%);
+}
+
+.reader-context-palette button .reader-icon,
+.reader-page-menu button .reader-icon {
+  color: var(--reader-ink-muted);
+}
+
+.reader-context-palette .reader-action-button--icon,
+.reader-page-menu .reader-action-button--icon {
+  width: var(--reader-control-default);
+  min-width: var(--reader-control-default);
+  justify-content: center;
+  padding: 0;
+}
+
+.reader-page-menu {
+  transform: translate(.35rem, .35rem);
+}
+
+/* Inside the native scrollport: above PDF content, below native scrollbars.
+   A zero-height sticky anchor does not add to the document's scroll extent. */
+.pdf-workspace__scrollbar-backing {
+  /* Keep sticky pseudo-element overflow from extending the native scroll range. */
+  contain: layout;
+  position: sticky;
+  top: 0;
+  left: 0;
+  transform: translate(calc(-1 * var(--scrollbar-backing-padding-left, 0px)), calc(-1 * var(--scrollbar-backing-padding-top, 0px)));
+  z-index: 20;
+  height: 0;
+  width: 0;
+  pointer-events: none;
+}
+
+.pdf-workspace__scrollbar-backing::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: var(--scrollbar-backing-width, 0px);
+  height: var(--scrollbar-backing-height, 0px);
+  display: none;
+}
+
+.reader-layout[data-references-available="false"][data-bottom-overlay="false"] .reader-overlay-frame__outer-bottom-fade {
+  display: none;
+}
+
+.reader-layout[data-workspace-presentation="bottom"][data-right-overlay="false"]
+  .reader-overlay-frame__outer-right-fade {
+  display: none;
+}
+
+.reader-layout[data-workspace-presentation="right"][data-right-overlay] .reader-overlay-frame__right-backing,
+.reader-layout[data-workspace-presentation="right"][data-right-overlay] .reader-overlay-frame__right-fade,
+.reader-layout[data-workspace-presentation="right"][data-right-overlay] .reader-overlay-frame__outer-right-fade {
+  display: none;
+}
+
+/* The top fade shares the scrollport layer so it reaches both corners without
+   being cut off to make room for native scrollbars. */
+.reader-layout[data-scroll-top-fade="true"] .pdf-workspace__scrollbar-backing::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: var(--scrollbar-backing-width, 0px);
+  height: var(--reader-overlay-fade-size, 12px);
+  background: linear-gradient(var(--reader-surface-canvas), transparent);
+}
+
+.reader-layout[data-scroll-top-fade="true"] .reader-overlay-frame__top-fade {
+  display: none;
+}
+
+/* Paint open trays and scroll cues inside the scrollport so native
+   scrollbars stay above the full edge, including the corners. */
+.reader-layout[data-workspace-presentation="right"][data-right-overlay="true"] .pdf-workspace__scrollbar-backing,
+.reader-layout[data-workspace-presentation="right"][data-right-overlay="false"][data-scroll-right-fade="true"] .pdf-workspace__scrollbar-backing {
+  --reader-right-edge-paint: linear-gradient(to left, var(--reader-surface-canvas) var(--reader-right-backing-size, 0px), transparent calc(var(--reader-right-backing-size, 0px) + var(--reader-overlay-fade-size, 12px)));
+}
+
+.reader-layout[data-workspace-presentation="right"][data-right-overlay="true"] .pdf-workspace__scrollbar-backing {
+  --reader-right-backing-size: calc(100% - var(--reader-overlay-right-start));
+}
+
+.reader-layout[data-workspace-presentation="right"][data-right-overlay="true"] .pdf-workspace__scrollbar-backing::after,
+.reader-layout[data-workspace-presentation="right"][data-right-overlay="false"]:where([data-scroll-right-fade="true"]) .pdf-workspace__scrollbar-backing::after {
+  display: block;
+  background: var(--reader-right-edge-paint);
+}
+
+.reader-layout[data-bottom-overlay="true"][data-workspace-presentation] .pdf-workspace__scrollbar-backing::after {
+  display: block;
+  background:
+    var(--reader-right-edge-paint, linear-gradient(transparent, transparent)),
+    linear-gradient(to top, var(--reader-surface-canvas) calc(100% - var(--reader-overlay-bottom-start)), transparent calc(100% - var(--reader-overlay-bottom-start) + var(--reader-overlay-fade-size, 12px)));
+}
+
+.reader-layout[data-bottom-overlay="true"] .reader-overlay-frame__bottom-backing,
+.reader-layout[data-bottom-overlay="true"] .reader-overlay-frame__bottom-fade {
+  display: none;
+}

@@ -1,4 +1,4 @@
-import type { DocumentAgentActions, DocumentAgentBridge, DocumentAgentTarget } from '../../web/src/host/review-agent-bridge.js';
+import type { DocumentAgentActions, DocumentAgentBridge, DocumentAgentTarget } from '../../web/src/host/document-agent-bridge.js';
 
 /** The document-scoped WebMCP surface exercised by the installed host probe. */
 export interface DocumentModelContext {

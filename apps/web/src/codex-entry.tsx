@@ -3,10 +3,10 @@ import { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { HostRuntime, HostRuntimeBootstrap } from './host/runtime.js';
 import { RuntimeProductionReaderApp, RuntimeFailureBoundary } from './production-entry.js';
-import './app/review-layout.css';
+import './app/reader-layout.css';
 import { loadRuntimeDocumentSource } from './host/runtime-document-source.js';
-import type { DocumentAgentBridge } from './host/review-agent-bridge.js';
-import type { DocumentContextSnapshot } from './host/review-context-snapshot.js';
+import type { DocumentAgentBridge } from './host/document-agent-bridge.js';
+import type { DocumentContextSnapshot } from './host/document-context-snapshot.js';
 
 function CodexProductionDocument({ runtime, onError, onReady, agentBridge, onContextSnapshot, onDocumentTitleChange }: { runtime: HostRuntime; onError: (error: Error) => void; onReady: (generation: number) => void; agentBridge?: DocumentAgentBridge; onContextSnapshot?: (snapshot: DocumentContextSnapshot) => void; onDocumentTitleChange?: (title: string, generation: number) => void }) {
   const [initial, setInitial] = useState<HostRuntimeBootstrap>();

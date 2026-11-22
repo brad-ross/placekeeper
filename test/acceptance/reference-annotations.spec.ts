@@ -10,7 +10,7 @@ import {
   addHighlight,
   addPageNote,
   removeAnnotation,
-} from '../../packages/core/src/review-commands.js';
+} from '../../packages/core/src/document-commands.js';
 import {
   expectFirstVisibleReferenceCard,
   expectFirstVisibleReferencePlacement,
@@ -179,7 +179,7 @@ async function expectReferencePointerTargetNonInteractive(
 ): Promise<void> {
   const evidence = await page.evaluate(({ x, y }) => {
     const interactiveSelector = [
-      '[data-pdf-link-control]', '[data-review-contextual-ui]', '[data-review-editor]',
+      '[data-pdf-link-control]', '[data-reader-contextual-ui]', '[data-reader-editor]',
       'input', 'textarea', '[contenteditable="true"]',
     ].join(',');
     const hit = document.elementFromPoint(x, y);
@@ -232,7 +232,7 @@ async function dragSelection(page: Page, pdfPage: Locator): Promise<void> {
     const cursor = await pdfPage.evaluate((element) => getComputedStyle(element).cursor);
     await page.mouse.click(box.x + 150 * scale, box.y + 68 * scale);
     await page.waitForTimeout(200);
-    const insertionCaretCount = await page.locator('[data-review-insertion-caret]').count();
+    const insertionCaretCount = await page.locator('[data-reader-insertion-caret]').count();
     throw new Error(`Reference selection was not published: ${JSON.stringify({
       hitEvidence,
       nativeSelection,
@@ -296,7 +296,7 @@ async function openPageNoteContextMenu(page: Page, pdfPage: Locator): Promise<vo
     const bottom = Math.min(pageBounds.bottom, viewportBounds.bottom) - 24;
     const unsafe = [
       '[data-owned-mark]', '[data-owned-annotation-layer]', '[data-source-annotation-layer]',
-      '[data-source-link-layer]', '[data-pdf-link-interaction]', '[data-review-contextual-ui]',
+      '[data-source-link-layer]', '[data-pdf-link-interaction]', '[data-reader-contextual-ui]',
     ].join(',');
     for (let y = bottom; y >= top; y -= 32) {
       for (let x = right; x >= left; x -= 32) {
@@ -358,7 +358,7 @@ async function openLongReferenceCard(page: Page) {
     (candidate) => candidate.payload.comment === LONG_REFERENCE_COMMENT,
   );
   if (!item) throw new Error('Long-card annotation is unavailable.');
-  const row = page.locator(`[data-review-item="${item.id}"]`);
+  const row = page.locator(`[data-annotation-item="${item.id}"]`);
   await row.hover();
   await row.getByRole('button', { name: 'Open in References' }).click();
   const activeTab = page.locator('[data-reference-tab][aria-selected="true"]');
@@ -367,7 +367,7 @@ async function openLongReferenceCard(page: Page) {
     `[data-reference-pdf-viewport] [data-owned-focus-id="${item.id}"]`,
   );
   const ownedMark = page.locator(
-    `[data-reference-pdf-viewport] [data-owned-mark][data-review-id="${item.id}"]`,
+    `[data-reference-pdf-viewport] [data-owned-mark][data-annotation-id="${item.id}"]`,
   ).first();
   const inspection = page.locator('[data-reference-annotation-inspection]');
   await expect(mark).toBeVisible();
@@ -457,14 +457,14 @@ test('reuses an annotation Reference tab, reveals its mark, and leaves Main and 
   await expect.poll(() => mainViewport.evaluate((element) => element.scrollTop))
     .toBe(knownMainTop);
   const unchangedMain = await mainSnapshot(page);
-  const row = page.locator(`[data-review-item="${item.id}"]`);
+  const row = page.locator(`[data-annotation-item="${item.id}"]`);
   await row.hover();
   await row.getByRole('button', { name: 'Open in References' }).click();
 
   const tab = page.locator('[data-reference-tab][aria-selected="true"]');
   await expectReferenceReady(page, tab);
   const referenceMark = page.locator(
-    `[data-reference-pdf-viewport] [data-owned-mark][data-review-id="${item.id}"]`,
+    `[data-reference-pdf-viewport] [data-owned-mark][data-annotation-id="${item.id}"]`,
   );
   await expect(referenceMark).toHaveCount(1);
   await expect(page.locator('[data-reference-annotation-inspection]')).toBeVisible();
@@ -497,13 +497,13 @@ test('reuses an annotation Reference tab, reveals its mark, and leaves Main and 
   const other = host.broker.state(sessionId)!.items.find(
     (candidate) => candidate.payload.comment === 'Distinct annotation on the same page.',
   )!;
-  const otherRow = page.locator(`[data-review-item="${other.id}"]`);
+  const otherRow = page.locator(`[data-annotation-item="${other.id}"]`);
   await otherRow.hover();
   await otherRow.getByRole('button', { name: 'Open in References' }).click();
   await expectReferenceReady(page, page.locator(`[data-reference-tab][aria-selected="true"]`));
   await expect(page.locator('[data-reference-tab]')).toHaveCount(2);
   await expect(page.locator('[data-reference-annotation-inspection]')).toHaveCount(1);
-  await page.locator('#review-workspace').getByRole('button', { name: 'Hide References', exact: true }).click();
+  await page.locator('#reader-workspace').getByRole('button', { name: 'Hide References', exact: true }).click();
   await expect(page.locator('[data-reference-annotation-inspection]')).toHaveCount(0);
   expect(await mainSnapshot(page)).toEqual(unchangedMain);
 });
@@ -518,7 +518,7 @@ test('creates, edits, reopens, and deletes one shared selection annotation from 
     '[data-reference-pdf-viewport] .pdf-workspace__page[data-page-index="1"]',
   );
   await dragSelection(page, referencePage);
-  await expect(page.locator('[data-review-stage]')).toHaveAttribute(
+  await expect(page.locator('[data-reader-stage]')).toHaveAttribute(
     'data-reference-layout',
     /wide-(?:bottom|split)/u,
   );
@@ -567,11 +567,11 @@ test('creates, edits, reopens, and deletes one shared selection annotation from 
   )!;
   expect(item).toMatchObject({ kind: 'highlight', pageIndex: 1 });
   const referenceFragments = page.locator(
-    `[data-reference-pdf-viewport] [data-owned-mark][data-review-id="${item.id}"]`,
+    `[data-reference-pdf-viewport] [data-owned-mark][data-annotation-id="${item.id}"]`,
   );
   await expect.poll(() => referenceFragments.count()).toBeGreaterThan(0);
   await expect(page.locator(
-    `.pdf-workspace:not(.pdf-workspace--reference) [data-review-id="${item.id}"]`,
+    `.pdf-workspace:not(.pdf-workspace--reference) [data-annotation-id="${item.id}"]`,
   )).not.toHaveCount(0);
   expect(await mainSnapshot(page)).toEqual(unchangedMain);
 
@@ -592,7 +592,7 @@ test('creates, edits, reopens, and deletes one shared selection annotation from 
     page,
     'reference-highlight-edit',
     '[data-comment-composer]',
-    `[data-reference-pdf-viewport] [data-owned-mark][data-review-id="${item.id}"]`,
+    `[data-reference-pdf-viewport] [data-owned-mark][data-annotation-id="${item.id}"]`,
   );
   await installPostClickTransitionProbe(
     page,
@@ -612,7 +612,7 @@ test('creates, edits, reopens, and deletes one shared selection annotation from 
     page,
     'reference-highlight-edit',
     edit,
-    `[data-reference-pdf-viewport] [data-owned-mark][data-review-id="${item.id}"]`,
+    `[data-reference-pdf-viewport] [data-owned-mark][data-annotation-id="${item.id}"]`,
   );
   await edit.getByRole('textbox', { name: 'Comment' }).fill('Cancelled Reference edit.');
   await installPostClickTransitionProbe(
@@ -667,14 +667,14 @@ test('creates, edits, reopens, and deletes one shared selection annotation from 
     'true',
   );
   await openAnnotations(page);
-  const row = page.locator(`[data-review-item="${item.id}"]`);
+  const row = page.locator(`[data-annotation-item="${item.id}"]`);
   await expect(row).toContainText('Edited shared Reference highlight.');
 
   await page.getByRole('group', { name: 'Workspace trays', exact: true }).getByRole('button', { name: 'Hide Workspace', exact: true }).click();
-  const workspace = page.locator('[data-review-workspace]');
+  const workspace = page.locator('[data-reader-workspace]');
   await expect(workspace).toHaveAttribute('data-workspace-open', 'false');
   const mainMark = page.locator(
-    `.pdf-workspace:not(.pdf-workspace--reference) [data-owned-mark][data-review-id="${item.id}"]`,
+    `.pdf-workspace:not(.pdf-workspace--reference) [data-owned-mark][data-annotation-id="${item.id}"]`,
   ).first();
   await mainMark.scrollIntoViewIfNeeded();
   const mainMarkBounds = await mainMark.boundingBox();
@@ -711,7 +711,7 @@ test('creates, edits, reopens, and deletes one shared selection annotation from 
   await row.getByRole('button', { name: /Remove Highlight annotation/u }).click();
   await expect.poll(() => host.broker.state(sessionId)?.items.some(({ id }) => id === item.id))
     .toBe(false);
-  await expect(page.locator(`[data-review-id="${item.id}"]`)).toHaveCount(0);
+  await expect(page.locator(`[data-annotation-id="${item.id}"]`)).toHaveCount(0);
 });
 
 test('opens a residual source mark in References as read only, including metadata-only content', async ({ page }) => {
@@ -731,13 +731,13 @@ test('opens a residual source mark in References as read only, including metadat
     (candidate) => candidate.payload.comment === 'Owned inspection replaced by a source inspection.',
   );
   if (!ownedItem) throw new Error('Owned-to-source inspection item is unavailable.');
-  const ownedRow = page.locator(`[data-review-item="${ownedItem.id}"]`);
+  const ownedRow = page.locator(`[data-annotation-item="${ownedItem.id}"]`);
   await ownedRow.hover();
   await ownedRow.getByRole('button', { name: 'Open in References' }).click();
   await expectReferenceReady(page, page.locator('[data-reference-tab][aria-selected="true"]'));
   const inspection = page.locator('[data-reference-annotation-inspection]');
   const ownedMark = page.locator(
-    `[data-reference-pdf-viewport] [data-owned-mark][data-review-id="${ownedItem.id}"]`,
+    `[data-reference-pdf-viewport] [data-owned-mark][data-annotation-id="${ownedItem.id}"]`,
   ).first();
   await expect(inspection).toHaveAttribute('data-annotation-origin', 'owned');
   await expect(inspection).toHaveAttribute('data-peek-selected', 'true');
@@ -856,7 +856,7 @@ test('keeps Reference card hover, selection, dismissal, and focus lifecycle moun
   const itemId = await inspection.getAttribute('data-annotation-peek');
   if (!itemId) throw new Error('Long-card annotation identity is unavailable.');
   const mainOwnedMark = page.locator(
-    `.pdf-workspace:not(.pdf-workspace--reference) [data-owned-mark][data-review-id="${itemId}"]`,
+    `.pdf-workspace:not(.pdf-workspace--reference) [data-owned-mark][data-annotation-id="${itemId}"]`,
   ).first();
   const mainFocus = page.locator(
     `.pdf-workspace:not(.pdf-workspace--reference) [data-owned-focus-id="${itemId}"]`,
@@ -914,7 +914,7 @@ test('keeps Reference card hover, selection, dismissal, and focus lifecycle moun
   ).click({ position: { x: 8, y: 8 } });
   await expect(inspection).toHaveCount(0);
 
-  const toolsWorkspace = page.locator('#review-tools-workspace');
+  const toolsWorkspace = page.locator('#reader-tools-workspace');
   await toolsWorkspace.getByRole('button', { name: 'Hide Workspace', exact: true }).click();
   await expect(toolsWorkspace).toHaveAttribute('data-tools-workspace-open', 'false');
   await expect(activeTab).toHaveAttribute('aria-selected', 'true');
@@ -1063,7 +1063,7 @@ test('cancels an owned-mark press when the active Reference tab changes', async 
   );
   if (!initiatingItem || !successorItem) throw new Error('Cross-tab pointer items are unavailable.');
   const openItem = async (id: string) => {
-    const row = page.locator(`[data-review-item="${id}"]`);
+    const row = page.locator(`[data-annotation-item="${id}"]`);
     await row.hover();
     await row.getByRole('button', { name: 'Open in References' }).click();
     const selectedTab = page.locator('[data-reference-tab][aria-selected="true"]');
@@ -1083,7 +1083,7 @@ test('cancels an owned-mark press when the active Reference tab changes', async 
   await page.keyboard.press('Escape');
   await expect(inspection).toHaveCount(0);
   const initiatingMark = page.locator(
-    `[data-reference-pdf-viewport] [data-owned-mark][data-review-id="${initiatingItem.id}"]`,
+    `[data-reference-pdf-viewport] [data-owned-mark][data-annotation-id="${initiatingItem.id}"]`,
   );
   const bounds = await initiatingMark.boundingBox();
   if (!bounds) throw new Error('Initiating Reference mark has no pointer bounds.');
@@ -1218,7 +1218,7 @@ test('opens an editable native import beside References without resizing the tra
     (item) => item.kind === 'pdfAnnotation' && item.pageIndex === 0,
   );
   if (!native) throw new Error('Editable native annotation is unavailable.');
-  const row = page.locator(`[data-review-item="${native.id}"]`);
+  const row = page.locator(`[data-annotation-item="${native.id}"]`);
   await row.hover();
   await row.getByRole('button', { name: 'Open in References' }).click();
   await expectReferenceReady(page, page.locator('[data-reference-tab][aria-selected="true"]'));
@@ -1226,7 +1226,7 @@ test('opens an editable native import beside References without resizing the tra
   await expect(inspection).toBeVisible();
   if (await inspection.getAttribute('data-placement') === 'bottom-sheet') {
     const geometryEvidence = await page.locator(
-      `[data-reference-pdf-viewport] [data-owned-native-geometry][data-review-id="${native.id}"]`,
+      `[data-reference-pdf-viewport] [data-owned-native-geometry][data-annotation-id="${native.id}"]`,
     ).evaluateAll((elements) => elements.map((element) => ({
       rect: element.getBoundingClientRect().toJSON(),
       style: element.getAttribute('style'),
@@ -1242,7 +1242,7 @@ test('opens an editable native import beside References without resizing the tra
       })));
     const placementEvidence = await inspection.evaluate((element) => {
       const reader = element.closest<HTMLElement>('.annotation-peek--reference-inspection') ?? element;
-      const stage = document.querySelector<HTMLElement>('[data-review-stage]');
+      const stage = document.querySelector<HTMLElement>('[data-reader-stage]');
       const scrollport = document.querySelector<HTMLElement>(
         '[data-reference-pdf-viewport] [data-viewer-framing-viewport]',
       );
@@ -1295,7 +1295,7 @@ test('opens an editable native import beside References without resizing the tra
   await expect(inspection).toHaveCount(0);
   await expect(nativeMark).toBeFocused();
   const nativeBounds = await page.locator(
-    `[data-reference-pdf-viewport] [data-owned-native-geometry][data-review-id="${native.id}"]`,
+    `[data-reference-pdf-viewport] [data-owned-native-geometry][data-annotation-id="${native.id}"]`,
   ).first().boundingBox();
   if (!nativeBounds) throw new Error('Native Reference mark has no pointer bounds.');
   await page.mouse.click(
@@ -1340,7 +1340,7 @@ test('closes a deleted passive reader and preserves a stale edit with Save disab
   const stale = host.broker.state(sessionId)!.items.find(
     (item) => item.payload.comment === 'Stale editing target.',
   )!;
-  const passiveRow = page.locator(`[data-review-item="${passive.id}"]`);
+  const passiveRow = page.locator(`[data-annotation-item="${passive.id}"]`);
   await passiveRow.hover();
   await passiveRow.getByRole('button', { name: 'Open in References' }).click();
   await expectReferenceReady(page, page.locator('[data-reference-tab][aria-selected="true"]'));
@@ -1351,7 +1351,7 @@ test('closes a deleted passive reader and preserves a stale edit with Save disab
   );
   await expect(page.locator('[data-reference-annotation-inspection]')).toHaveCount(0);
 
-  const staleRow = page.locator(`[data-review-item="${stale.id}"]`);
+  const staleRow = page.locator(`[data-annotation-item="${stale.id}"]`);
   await staleRow.hover();
   await staleRow.getByRole('button', { name: 'Open in References' }).click();
   await expectReferenceReady(page, page.locator('[data-reference-tab][aria-selected="true"]'));
@@ -1411,7 +1411,7 @@ test('defers document authority replacement while a Reference edit is active', a
     (candidate) => candidate.payload.comment === 'Document replacement edit target.',
   );
   if (!item) throw new Error('Document replacement edit item is unavailable.');
-  const row = page.locator(`[data-review-item="${item.id}"]`);
+  const row = page.locator(`[data-annotation-item="${item.id}"]`);
   await row.hover();
   await row.getByRole('button', { name: 'Open in References' }).click();
   await expectReferenceReady(page, page.locator('[data-reference-tab][aria-selected="true"]'));
@@ -1427,7 +1427,7 @@ test('defers document authority replacement while a Reference edit is active', a
   const draft = 'Keep this Reference draft after document authority changes.';
   await editor.fill(draft);
   await expect(page.locator(
-    `[data-reference-pdf-viewport] [data-review-id="${item.id}"][data-authoring-preview="true"]`,
+    `[data-reference-pdf-viewport] [data-annotation-id="${item.id}"][data-authoring-preview="true"]`,
   )).not.toHaveCount(0);
   await expect.poll(() => host.broker.state(launched.sessionId)?.pendingDrafts.some(
     (candidate) => candidate.text === draft,
@@ -1449,7 +1449,7 @@ test('defers document authority replacement while a Reference edit is active', a
   await expect(editor).toHaveValue(draft);
   await expect(apply).toBeEnabled();
   await expect(page.locator(
-    `[data-reference-pdf-viewport] [data-review-id="${item.id}"][data-authoring-preview="true"]`,
+    `[data-reference-pdf-viewport] [data-annotation-id="${item.id}"][data-authoring-preview="true"]`,
   )).not.toHaveCount(0);
   expect(host.broker.state(launched.sessionId)!.items.some(
     (candidate) => candidate.payload.comment === draft,
@@ -1515,7 +1515,7 @@ test('recovers a closed annotation-origin editor and reuses its tab after applyi
     (candidate) => candidate.payload.comment === 'Annotation-origin recovery target.',
   );
   if (!item) throw new Error('Annotation-origin recovery item is unavailable.');
-  const row = page.locator(`[data-review-item="${item.id}"]`);
+  const row = page.locator(`[data-annotation-item="${item.id}"]`);
   await row.hover();
   await row.getByRole('button', { name: 'Open in References' }).click();
   const originTab = page.locator('[data-reference-tab][aria-selected="true"]');
@@ -1625,7 +1625,7 @@ test('authors on a Reference page and preserves one focused draft through switch
   await expect(editor).toBeFocused();
 
   await clickWithHitEvidence(
-    page.locator('#review-workspace').getByRole('button', { name: 'Hide References', exact: true }),
+    page.locator('#reader-workspace').getByRole('button', { name: 'Hide References', exact: true }),
     'Hide References',
   );
   await expect(editor).toHaveValue(draft);
@@ -1679,9 +1679,9 @@ test('authors on a Reference page and preserves one focused draft through switch
       const reference = document.querySelector<HTMLElement>('[data-reference-pdf-viewport]');
       const viewport = reference?.querySelector<HTMLElement>('[data-viewer-framing-viewport]');
       const targetPage = reference?.querySelector<HTMLElement>('.pdf-workspace__page[data-page-index="1"]');
-      const workspace = document.querySelector<HTMLElement>('aside[data-review-workspace]');
-      const layout = document.querySelector<HTMLElement>('.review-layout');
-      const drawerHost = document.querySelector<HTMLElement>('.review-drawer-host');
+      const workspace = document.querySelector<HTMLElement>('aside[data-reader-workspace]');
+      const layout = document.querySelector<HTMLElement>('.reader-layout');
+      const drawerHost = document.querySelector<HTMLElement>('.reader-drawer-host');
       const rect = (element: HTMLElement | null | undefined) =>
         element?.getBoundingClientRect().toJSON() ?? null;
       return {
@@ -1837,14 +1837,14 @@ test('keeps Reference links above marks and creates a keyboard Page Note on the 
     (item) => item.payload.comment === 'Two fragments overlap the PDF link.',
   );
   if (!overlap) throw new Error('Overlap fixture annotation is unavailable.');
-  await expect(reference.locator(`[data-owned-mark][data-review-id="${overlap.id}"]`))
+  await expect(reference.locator(`[data-owned-mark][data-annotation-id="${overlap.id}"]`))
     .toHaveCount(2);
   const targetLink = reference.getByRole('button', {
     name: 'Open PDF link to Target-to-target detail link, Page 3',
   });
   await expect(targetLink).toBeVisible();
   const overlapMarks = await reference
-    .locator(`[data-owned-mark][data-review-id="${overlap.id}"]`)
+    .locator(`[data-owned-mark][data-annotation-id="${overlap.id}"]`)
     .all();
   const [linkBounds, ...markBounds] = await Promise.all([
     targetLink.boundingBox(),

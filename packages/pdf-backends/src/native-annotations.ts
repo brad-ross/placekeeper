@@ -4,8 +4,8 @@ import { type PdfAnnotationObject } from '@embedpdf/models';
 import { canEditPdfAnnotationComment, canDeletePdfAnnotation, isEditablePdfAnnotationSubtype, nativePdfAnnotationIdentity, VERIFIED_NATIVE_PDF_ANNOTATION_NAME_PREFIX } from '../../core/src/native-pdf-annotation.js';
 import { PdfWriterError, type PdfWriterAnnotation, type PdfWriteRequest, type PdfWriteResult, type PdfRewriteEligibility, type PdfWrittenAnnotationEvidence } from '../../core/src/pdf-writer.js';
 import { embedPdfSubtypeName } from './embedpdf-annotation.js';
-import type { Annotation } from '../../core/src/review-model.js';
-import { assertAnnotation } from '../../core/src/review-reducer.js';
+import type { Annotation } from '../../core/src/document-model.js';
+import { assertAnnotation } from '../../core/src/document-reducer.js';
 import { projectAnnotations } from '../../core/src/annotation-projection.js';
 
 export interface NativePdfAnnotation {

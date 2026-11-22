@@ -5,13 +5,13 @@ import type {
   DocumentSourceIdentity,
   DocumentState,
   DocumentWorkflowMode,
-} from "./review-model.js";
-import { canonicalizeAnnotation, DEFAULT_ANNOTATION_NAME } from "./review-model.js";
+} from "./document-model.js";
+import { canonicalizeAnnotation, DEFAULT_ANNOTATION_NAME } from "./document-model.js";
 import {
   assertAnnotation,
   InvalidDocumentCommandError,
   MAX_DOCUMENT_SELECTION_SEGMENTS,
-} from "./review-item-validation.js";
+} from "./annotation-validation.js";
 export {
   assertPortableAnnotationGroupWritable,
   PORTABLE_ANNOTATION_MAX_BYTES,

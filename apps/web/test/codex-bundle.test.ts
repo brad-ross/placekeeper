@@ -13,9 +13,9 @@ describe('packaged native reader', () => {
     expect(css).toContain('[data-production-review]');
     expect(css).toContain('.pdf-workspace__page');
     expect(css).toContain('.annotation-item');
-    expect(css).toContain('--review-font-ui');
+    expect(css).toContain('--reader-font-ui');
     expect(css).toContain('#root[data-production-root=true]{position:relative;inset:auto;min-height:0}');
-    expect(css).toContain('#root[data-production-root=true] .review-shell{min-height:0}');
+    expect(css).toContain('#root[data-production-root=true] .reader-shell{min-height:0}');
     expect(source).not.toMatch(/<link[^>]+stylesheet/u);
     expect(output.map(asset => asset.fileName)).toEqual(['review-v1.html']);
   }, 30_000);

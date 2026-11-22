@@ -17,9 +17,9 @@ import {
   decodePlacekeeperLinkFragment,
   encodePlacekeeperLinkFragment,
 } from "../../../packages/core/src/placekeeper-link.js";
-import { createDocumentState } from "../../../packages/core/src/review-model.js";
-import { isDocumentPanelKey } from "../../../packages/core/src/review-runtime-protocol.js";
-import { ProductionReaderApp } from "./app/ProductionReviewApp.js";
+import { createDocumentState } from "../../../packages/core/src/document-model.js";
+import { isDocumentPanelKey } from "../../../packages/core/src/document-runtime-protocol.js";
+import { ProductionReaderApp } from "./app/ProductionReaderApp.js";
 import type { HostForwardSyncTexRequest, ProductionSession } from "./host/session-contracts.js";
 import {
   reopenProductionSession,
@@ -29,8 +29,8 @@ import {
 import {
   createCopyLinkCommand,
   type CopyLinkStatus,
-} from "./review/CopyLinkControl.js";
-import { ReaderIcon, type ReaderIconName } from "./review/ReviewIcon.js";
+} from "./reader/CopyLinkControl.js";
+import { ReaderIcon, type ReaderIconName } from "./reader/ReaderIcon.js";
 import { createBrowserHostRuntime } from "./host/browser-runtime.js";
 import {
   createRpcHostRuntime,
@@ -43,7 +43,7 @@ import { subscribeRuntimeDocumentSource } from "./host/runtime-document-source.j
 import type {
   DocumentCommandInvocation,
   DocumentCommandSurfaceSnapshot,
-} from "./review/review-command-surface.js";
+} from "./reader/document-command-surface.js";
 import {
   AccessibilityTransitionCoordinator,
   type AccessibilityTransitionEffect,
@@ -530,8 +530,8 @@ export function RuntimeLoadingWorkspace(props: {
 }
 
 export function RuntimeProductionReaderApp(props: {
-  readonly onContextSnapshot?: (snapshot: import('./host/review-context-snapshot.js').DocumentContextSnapshot) => void;
-  readonly agentBridge?: import('./host/review-agent-bridge.js').DocumentAgentBridge;
+  readonly onContextSnapshot?: (snapshot: import('./host/document-context-snapshot.js').DocumentContextSnapshot) => void;
+  readonly agentBridge?: import('./host/document-agent-bridge.js').DocumentAgentBridge;
   readonly runtime?: HostRuntime;
   readonly initial?: HostRuntimeBootstrap;
   readonly loadingDocumentTitle?: string;
@@ -685,7 +685,7 @@ export function RuntimeProductionReaderApp(props: {
   // real session afresh so its first render cannot reuse placeholder resources.
   // Later generations keep this instance and its predecessor reading capture.
   if (upgradeClosed) return <div role="status">This document was protected and closed for the upgrade. Reopen it in Placekeeper after installation finishes.</div>;
-  return <>{upgradeMessage && <div className="review-upgrade-status" role="status">{upgradeMessage}</div>}<div className="review-upgrade-content" inert={upgradeFrozen}><ProductionReaderApp
+  return <>{upgradeMessage && <div className="reader-upgrade-status" role="status">{upgradeMessage}</div>}<div className="reader-upgrade-content" inert={upgradeFrozen}><ProductionReaderApp
     key={loaded === undefined ? 'preparing-runtime' : 'active-runtime'}
     {...(props.onContextSnapshot === undefined ? {} : { onContextSnapshot: props.onContextSnapshot })}
     {...(props.agentBridge === undefined ? {} : { agentBridge: props.agentBridge })}

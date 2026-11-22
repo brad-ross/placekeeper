@@ -1,4 +1,4 @@
-import type { AnnotationKind } from './review-model.js';
+import type { AnnotationKind } from './document-model.js';
 import type { NativePdfAnnotationIdentityProvenance } from './native-pdf-annotation.js';
 
 export type PdfWriterAnnotationKind = AnnotationKind;

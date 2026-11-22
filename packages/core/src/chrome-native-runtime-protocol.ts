@@ -4,7 +4,7 @@ import {
   sanitizeChromeDocumentRuntimeRequest,
   sanitizeChromeDocumentRuntimeResponse,
   type DocumentRuntimeBrokerMethod,
-} from "./review-runtime-protocol.js";
+} from "./document-runtime-protocol.js";
 
 export const CHROME_RUNTIME_PROTOCOL = "placekeeper.chrome-runtime" as const;
 export const CHROME_RUNTIME_PROTOCOL_VERSION = 2 as const;

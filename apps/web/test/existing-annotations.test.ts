@@ -2,9 +2,9 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 
-import { createDocumentState, type DocumentState } from '../../../packages/core/src/review-model.js';
-import { ReaderShell } from '../src/app/ReviewShell.js';
-import type { DestinationBand } from '../src/review/navigation-coordinator.js';
+import { createDocumentState, type DocumentState } from '../../../packages/core/src/document-model.js';
+import { ReaderShell } from '../src/app/ReaderShell.js';
+import type { DestinationBand } from '../src/reader/navigation-coordinator.js';
 
 import {
   ExistingAnnotationDiscoveryAuthority,

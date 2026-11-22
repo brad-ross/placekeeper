@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
 import { parseElectronDocumentHelperMessage } from "../src/electron-helper-protocol.js";
-import { sanitizeNativeDocumentRuntimeResponse } from "../src/review-runtime-protocol.js";
+import { sanitizeNativeDocumentRuntimeResponse } from "../src/document-runtime-protocol.js";
 const base = { protocolVersion: 1, windowId: "window_12345678", attemptId: "attempt_12345678", requestId: "request_12345678" };
 
 it("admits portable absolute Electron paths ", () => {

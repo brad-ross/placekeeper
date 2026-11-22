@@ -16,7 +16,7 @@ import {
   inspectPortableAnnotationsForImport,
   type VisiblePortableAnnotation,
 } from '../../core/src/portable-annotation.js';
-import type { Annotation } from '../../core/src/review-model.js';
+import type { Annotation } from '../../core/src/document-model.js';
 
 const ENCRYPT_MARKER = new TextEncoder().encode('/Encrypt');
 const DOC_MDP_MARKER = new TextEncoder().encode('/DocMDP');

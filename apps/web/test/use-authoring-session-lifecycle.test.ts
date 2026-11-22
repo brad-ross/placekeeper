@@ -1,21 +1,21 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { createDocumentState } from '../../../packages/core/src/review-model.js';
+import { createDocumentState } from '../../../packages/core/src/document-model.js';
 import {
   attachmentOrderedInteractionTransport,
   authoringAuthorityFor,
   beginDocumentInteraction,
   type DocumentInteractionHandle,
   type DocumentInteractionReceipt,
-} from '../src/review/authoring-session.js';
-import { DocumentInteractions } from '../../service/src/sessions/review-interactions.js';
+} from '../src/reader/authoring-session.js';
+import { DocumentInteractions } from '../../service/src/sessions/document-interactions.js';
 import {
   AuthoringAcknowledgementQueue,
   canonicalStateForFinalizedInteraction,
   consumeFinalizedInteractionState,
   finalizeReacquiredInteraction,
   releaseDeletedAuthoringInteraction,
-} from '../src/review/use-authoring-session.js';
+} from '../src/reader/use-authoring-session.js';
 
 function receipt(interactionToken: string): DocumentInteractionReceipt {
   return {
@@ -276,7 +276,7 @@ describe('authoring interaction lifecycle ownership', () => {
   });
 });
 
-import { requireProtectedAuthoringInput, settleAuthoringBeforeClose } from '../src/review/use-authoring-session.js';
+import { requireProtectedAuthoringInput, settleAuthoringBeforeClose } from '../src/reader/use-authoring-session.js';
 it('close rejects a rejected new put-draft even if its prior protected draft remains', () => {
   const state = { ...documentState(4), pendingDrafts: [{ id: 'draft-1', text: 'old acknowledged input' }] } as unknown as ReturnType<typeof documentState>;
   expect(() => requireProtectedAuthoringInput(state, 'draft-1', 'latest input', false)).toThrow('not acknowledged');

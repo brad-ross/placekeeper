@@ -89,8 +89,8 @@ export function createViewerFramingControls(
     const viewportElement = root?.querySelector<HTMLElement>('[data-viewer-framing-viewport]') ?? null;
     const pageElement = root?.querySelector<HTMLElement>(`[data-page-index="${targetPage}"]`) ?? null;
     const targetElements = target?.reviewId && root
-      ? Array.from(root.querySelectorAll<HTMLElement>('[data-owned-mark][data-review-id]'))
-        .filter((element) => element.dataset.reviewId === target.reviewId)
+      ? Array.from(root.querySelectorAll<HTMLElement>('[data-owned-mark][data-annotation-id]'))
+        .filter((element) => element.dataset.annotationId === target.reviewId)
       : [];
     const targetRect = unionViewerRects(targetElements
       .map((element) => elementRect(element))

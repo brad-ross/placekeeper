@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
 import { SessionBroker } from '../src/sessions/session-broker.js';
 import { ExtensionRuntimeManager } from '../src/codex/extension-runtime.js';
-import { ExtensionRecentDocuments } from '../src/codex/extension-recent-reviews.js';
+import { ExtensionRecentDocuments } from '../src/codex/extension-recent-documents.js';
 import { CodexServiceRuntimeBackend } from '../src/codex/codex-runtime-backend.js';
 import { PdfSaveCoordinator } from '../src/saving/pdf-save-coordinator.js';
 import { ExportCoordinator } from '../src/export/export-coordinator.js';
@@ -16,7 +16,7 @@ import { HOST_RESOURCE_CHUNK_BYTES } from '../../../packages/core/src/host-resou
 import { writePrivateFile } from '../src/platform/private-storage.js';
 import { DraftSnapshotStore } from '../src/recovery/draft-snapshot.js';
 import type { PdfWriter } from '../../../packages/core/src/pdf-writer.js';
-import { addPageNote } from '../../../packages/core/src/review-commands.js';
+import { addPageNote } from '../../../packages/core/src/document-commands.js';
 const cleanups: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
 async function fixture(options: {writer?:PdfWriter;realVerification?:boolean;now?:()=>number} = {}) {

@@ -21,7 +21,7 @@ import {
   type PdfWriterErrorCode,
   type PdfWriterAnnotation,
 } from "../../../packages/core/src/pdf-writer.js";
-import { addPageNote } from "../../../packages/core/src/review-commands.js";
+import { addPageNote } from "../../../packages/core/src/document-commands.js";
 import { FileCapabilityRegistry } from "../src/files/file-capabilities.js";
 import { ExportCoordinator } from "../src/export/export-coordinator.js";
 import { SessionBroker } from "../src/sessions/session-broker.js";

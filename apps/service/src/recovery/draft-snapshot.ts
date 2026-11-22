@@ -11,8 +11,8 @@ import {
   stat,
 } from "node:fs/promises";
 import { basename, join } from "node:path";
-import { normalizeDocumentState, type DocumentState } from "../../../../packages/core/src/review-model.js";
-import { normalizeDocumentHistory } from "../../../../packages/core/src/review-history.js";
+import { normalizeDocumentState, type DocumentState } from "../../../../packages/core/src/document-model.js";
+import { normalizeDocumentHistory } from "../../../../packages/core/src/document-history.js";
 import { canonicalSha256 } from "../../../../packages/core/src/live-context.js";
 import type { NativePdfAnnotationIdentityProvenance } from "../../../../packages/core/src/native-pdf-annotation.js";
 import type {

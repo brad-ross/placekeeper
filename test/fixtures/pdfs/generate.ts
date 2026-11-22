@@ -21,7 +21,7 @@ import { largeTextHeavyPdf } from './large-text-heavy.js';
 import { fitTextBookPdf } from './fit-text-book.js';
 
 import { projectAnnotation } from '../../../packages/core/src/annotation-projection.js';
-import type { Annotation } from '../../../packages/core/src/review-model.js';
+import type { Annotation } from '../../../packages/core/src/document-model.js';
 import { createSelectedPdfWriter } from '../../../packages/pdf-backends/src/selected-writer.js';
 
 const reportedMathSymbolInventory = [

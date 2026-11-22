@@ -55,7 +55,7 @@ for (const resourceHost of ['codex', 'browser'] as const) {
         const style = document.createElement('style'); style.textContent = css; document.head.append(style);
         const root = document.getElementById('root')!; root.dataset.productionRoot = 'true'; root.style.cssText = 'width:700px;height:700px';
         const referenceHost = document.createElement('div'); referenceHost.style.cssText = 'position:fixed;right:0;top:0;width:400px;height:650px'; document.body.append(referenceHost);
-        referenceHost.style.setProperty('--review-pdf-selection-bg', getComputedStyle(root).getPropertyValue('--review-pdf-selection-bg'));
+        referenceHost.style.setProperty('--reader-pdf-selection-bg', getComputedStyle(root).getPropertyValue('--reader-pdf-selection-bg'));
         const mounted = createRoot(root);
         let registry!: import('@embedpdf/core').PluginRegistry;
         let ready!: () => void;
@@ -133,7 +133,7 @@ for (const resourceHost of ['codex', 'browser'] as const) {
           // Compare the actual composited paint with the original sibling multiply
           // layer. The baseline uses the same raster, token and rotated rects,
           // without introducing a transformed ancestor around the blend layer.
-          const token = getComputedStyle(image.parentElement!).getPropertyValue('--review-pdf-selection-bg').trim();
+          const token = getComputedStyle(image.parentElement!).getPropertyValue('--reader-pdf-selection-bg').trim();
           const left = Math.min(...expected.map(rect => rect.origin.x));
           const top = Math.min(...expected.map(rect => rect.origin.y));
           const right = Math.max(...expected.map(rect => rect.origin.x + rect.size.width));

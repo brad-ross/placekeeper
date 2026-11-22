@@ -8,7 +8,7 @@ const rowPaint = (row: Locator) => row.evaluate((element) => {
 
 async function leaveRow(page: Page) {
   await page.mouse.move(0, 0);
-  await page.locator('.review-chrome__page-input').focus();
+  await page.locator('.reader-chrome__page-input').focus();
 }
 
 async function expectPageCenteredOnLastAction(row: Locator) {
@@ -17,7 +17,7 @@ async function expectPageCenteredOnLastAction(row: Locator) {
     const range = document.createRange();
     range.selectNodeContents(number);
     const text = range.getBoundingClientRect();
-    const icon = element.querySelector('.row-action-group__direct > :last-child .review-icon')!.getBoundingClientRect();
+    const icon = element.querySelector('.row-action-group__direct > :last-child .reader-icon')!.getBoundingClientRect();
     return { textX: text.x + text.width / 2, textY: text.y + text.height / 2,
       iconX: icon.x + icon.width / 2, iconY: icon.y + icon.height / 2 };
   });
@@ -29,7 +29,7 @@ for (const scrollbarWidth of [8, 17]) {
   test(`workspace right inset includes its ${scrollbarWidth}px scrollbar`, async ({ page, browserName }) => {
     test.skip(browserName !== 'chromium', 'Custom classic scrollbar sizes are a Chromium geometry fixture.');
     await page.setViewportSize({ width: 1280, height: 900 });
-    await page.goto('/test/acceptance/review-harness/index.html?visual=tray&search=canonical');
+    await page.goto('/test/acceptance/reader-harness/index.html?visual=tray&search=canonical');
     await page.addStyleTag({ content: `
       #workspace-panel-annotations, #workspace-panel-outline, .pdf-search__results {
         max-height: 150px; overflow-y: scroll; scrollbar-gutter: stable; scrollbar-width: auto; scrollbar-color: auto;
@@ -60,15 +60,15 @@ for (const width of [1280, 620, 390]) {
   test(`workspace row intent and page/action endcaps match the outline at ${width}px`, async ({ page, browserName }) => {
     page.on('pageerror', (error) => { throw error; });
     await page.setViewportSize({ width, height: 900 });
-    await page.goto('/test/acceptance/review-harness/index.html?visual=outline');
+    await page.goto('/test/acceptance/reader-harness/index.html?visual=outline');
     const openOutlineWorkspace = page.getByRole('button', { name: 'Show Workspace', exact: true });
     if (await openOutlineWorkspace.isVisible()) await openOutlineWorkspace.click();
     await page.getByRole('tab', { name: 'Outline', exact: true }).click();
     const collapse = page.locator('[data-outline-expansion-toggle]:visible');
     await page.mouse.move(0, 0);
-    await page.locator('.review-chrome__page-input').focus();
+    await page.locator('.reader-chrome__page-input').focus();
     await expect(collapse).toHaveCSS('opacity', '0');
-    await page.locator('.review-workspace__header:visible').first().hover();
+    await page.locator('.reader-workspace__header:visible').first().hover();
     await expect(collapse).toHaveCSS('opacity', '1');
     await page.mouse.move(0, 0);
     await page.keyboard.press('Tab');
@@ -90,7 +90,7 @@ for (const width of [1280, 620, 390]) {
     const pointerFocusesOutline = await outline.locator('.outline-navigator__destination')
       .evaluate((element) => element === document.activeElement);
 
-    await page.goto('/test/acceptance/review-harness/index.html?visual=tray&search=canonical');
+    await page.goto('/test/acceptance/reader-harness/index.html?visual=tray&search=canonical');
     const openTrayWorkspace = page.getByRole('button', { name: 'Show Workspace', exact: true });
     if (await openTrayWorkspace.isVisible()) await openTrayWorkspace.click();
     await page.getByRole('tab', { name: 'Annotations', exact: true }).click();
@@ -105,7 +105,7 @@ for (const width of [1280, 620, 390]) {
       if (kind === 'Search') await page.getByRole('searchbox').fill('signal');
       const row = kind === 'Search'
         ? page.locator('[data-search-result]').first()
-        : page.locator('[data-review-item="owned-replace"]');
+        : page.locator('[data-annotation-item="owned-replace"]');
       await row.hover();
       await expectPageCenteredOnLastAction(row);
       const cardBounds = (await row.locator('.annotation-item__content').boundingBox())!;
@@ -161,11 +161,11 @@ test('touch rows expose actions in the page slot while read-only rows retain pag
   const context = await browser.newContext({ hasTouch: true, viewport: { width: 390, height: 800 } });
   const page = await context.newPage();
   try {
-    await page.goto('/test/acceptance/review-harness/index.html?visual=tray&search=canonical');
+    await page.goto('/test/acceptance/reader-harness/index.html?visual=tray&search=canonical');
     const open = page.getByRole('button', { name: 'Show Workspace', exact: true });
     if (await open.isVisible()) await open.click();
     await page.getByRole('tab', { name: 'Annotations', exact: true }).click();
-    const owned = page.locator('[data-review-item="owned-highlight"]');
+    const owned = page.locator('[data-annotation-item="owned-highlight"]');
     await expect(owned.locator('.annotation-item__page')).toHaveCSS('opacity', '0');
     await expect(owned.locator('.row-action-group__direct')).toHaveCSS('opacity', '1');
     for (const button of await owned.locator('.row-action-group__direct button').all()) {
@@ -190,11 +190,11 @@ test('touch rows expose actions in the page slot while read-only rows retain pag
 for (const width of [1280, 620]) {
   test(`returning from a long annotation releases pointer hover and preserves keyboard return at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 });
-    await page.goto('/test/acceptance/review-harness/index.html?visual=tray');
+    await page.goto('/test/acceptance/reader-harness/index.html?visual=tray');
     const open = page.getByRole('button', { name: 'Show Workspace', exact: true });
     if (await open.isVisible()) await open.click();
     await page.getByRole('tab', { name: 'Annotations', exact: true }).click();
-    const row = page.locator('[data-review-item="owned-highlight"]');
+    const row = page.locator('[data-annotation-item="owned-highlight"]');
     const more = row.locator('[data-read-full-annotation="true"]');
     await more.click();
     await page.locator('[data-full-annotation-action="back"]').click();
@@ -224,10 +224,10 @@ for (const { width, surface } of [{ width: 1280, surface: 'right' }, { width: 62
     const page = await browser.newPage(baseURL === undefined ? {} : { baseURL });
     try {
       await page.setViewportSize({ width, height: 900 });
-      await page.goto('/test/acceptance/review-harness/?fit-modes=book');
+      await page.goto('/test/acceptance/reader-harness/?fit-modes=book');
       await waitForStaticPdf(page);
-      const stage = page.locator('[data-review-stage]');
-      const document = stage.locator('.review-document');
+      const stage = page.locator('[data-reader-stage]');
+      const document = stage.locator('.reader-document');
       const scrollport = document.locator('[data-viewer-framing-viewport]');
       const toggle = page.getByRole('group', { name: 'Workspace trays' })
         .locator(`[data-workspace-tray-toggle="${surface}"]`);
@@ -271,10 +271,10 @@ for (const { width, surface } of [{ width: 1280, surface: 'right' }, { width: 62
 
 test('bottom resize handle sits inside the tray with a thin faded upper edge', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
-  await page.goto('/test/acceptance/review-harness/index.html?visual=reference-layout');
+  await page.goto('/test/acceptance/reader-harness/index.html?visual=reference-layout');
   await page.getByRole('button', { name: 'Show References', exact: true }).click();
   const handle = page.locator('[data-reference-resize-handle="bottom"]');
-  const tray = page.locator('.review-workspace[data-workspace-presentation="bottom"]');
+  const tray = page.locator('.reader-workspace[data-workspace-presentation="bottom"]');
   await expect(handle).toBeVisible();
   await expect.poll(async () => Math.abs((await handle.boundingBox())!.y - (await tray.boundingBox())!.y)).toBeLessThan(0.5);
   const trayBox = (await tray.boundingBox())!;
@@ -298,7 +298,7 @@ test('bottom resize handle sits inside the tray with a thin faded upper edge', a
 
 test('vertical reference tabs fill their rail and horizontal tabs fit their titles', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
-  await page.goto('/test/acceptance/review-harness/index.html?visual=reference-layout');
+  await page.goto('/test/acceptance/reader-harness/index.html?visual=reference-layout');
   await page.getByRole('button', { name: 'Show References', exact: true }).click();
   const tab = page.locator('.reference-tab-segment:visible').first();
   await expect(tab).toBeVisible();
@@ -320,7 +320,7 @@ test('vertical reference tabs fill their rail and horizontal tabs fit their titl
   expect((await tab.boundingBox())!.width).toBeLessThan(longWidth);
   expect((await tab.boundingBox())!.width).toBeGreaterThanOrEqual(112);
   const handle = page.locator('[data-reference-resize-handle="right"]');
-  const tray = page.locator('.review-workspace[data-workspace-presentation="right"]');
+  const tray = page.locator('.reader-workspace[data-workspace-presentation="right"]');
   await expect(handle).toBeVisible();
   await expect.poll(async () => Math.abs((await handle.boundingBox())!.x - (await tray.boundingBox())!.x)).toBeLessThan(.5);
   const shape = await handle.evaluate((element) => {
@@ -336,7 +336,7 @@ test('vertical reference tabs fill their rail and horizontal tabs fit their titl
 
 test('horizontal reference tabs in a bottom workspace fit short titles', async ({ page }) => {
   await page.setViewportSize({ width: 620, height: 900 });
-  await page.goto('/test/acceptance/review-harness/index.html?visual=reference-layout');
+  await page.goto('/test/acceptance/reader-harness/index.html?visual=reference-layout');
   await page.getByRole('button', { name: 'Show Workspace', exact: true }).click();
   await page.getByRole('tab', { name: 'References', exact: true }).click();
   const tabs = page.locator('.reference-tabs[data-reference-tabs-orientation="horizontal"]:visible');
@@ -351,7 +351,7 @@ test('horizontal reference tabs in a bottom workspace fit short titles', async (
 });
 
 test('workspace scrollbars retain native appearance and scroll normally', async ({ page }) => {
-  await page.goto('/test/acceptance/review-harness/index.html?visual=tray&search=canonical');
+  await page.goto('/test/acceptance/reader-harness/index.html?visual=tray&search=canonical');
   await page.addStyleTag({ content: `
     #workspace-panel-annotations, #workspace-panel-outline, .pdf-search__results {
       max-height: 24px; min-height: 0; overflow-y: scroll;
@@ -376,7 +376,7 @@ test('workspace scrollbars retain native appearance and scroll normally', async 
 
 async function openReferences(page: Page, width: number, returnAvailable = true) {
   await page.setViewportSize({ width, height: 900 });
-  await page.goto(`/test/acceptance/review-harness/index.html?visual=reference-layout${returnAvailable ? '&referenceReturn=visible' : ''}`);
+  await page.goto(`/test/acceptance/reader-harness/index.html?visual=reference-layout${returnAvailable ? '&referenceReturn=visible' : ''}`);
   if (width >= 900) await page.getByRole('button', { name: 'Show References', exact: true }).click();
   else {
     await page.getByRole('button', { name: 'Show Workspace', exact: true }).click();
@@ -393,7 +393,7 @@ async function referenceTabGeometry(tab: Locator) {
     const textRange = document.createRange();
     textRange.selectNodeContents(page);
     const number = textRange.getBoundingClientRect();
-    const icon = element.querySelector('[data-reference-tab-action="close"] .review-icon')!.getBoundingClientRect();
+    const icon = element.querySelector('[data-reference-tab-action="close"] .reader-icon')!.getBoundingClientRect();
     return {
       tab: element.getBoundingClientRect().toJSON(),
       title: element.querySelector('.reference-tab-segment__selector')!.getBoundingClientRect().toJSON(),
@@ -417,12 +417,12 @@ for (const width of [1280, 620]) {
     const actions = active.locator('.reference-tab-segment__action, .reference-panel__return');
     const selector = active.getByRole('tab');
     await page.mouse.move(0, 0);
-    await page.locator('.review-chrome__page-input').focus();
+    await page.locator('.reader-chrome__page-input').focus();
     // The title contains "Lemma 2"; page metadata correctly supplies 18.
     await expect(number).toHaveText('18');
     await expect(number).toHaveCSS('opacity', '1');
     for (const action of await actions.all()) await expect(action).toHaveCSS('opacity', '0');
-    await page.locator("[data-review-stage]").evaluate(async element => {
+    await page.locator("[data-reader-stage]").evaluate(async element => {
       await Promise.all(element.getAnimations({ subtree: true }).filter(animation => animation.effect?.getTiming().iterations !== Infinity).map(animation => animation.finished.catch(() => undefined)));
     });
     const before = await referenceTabGeometry(active);
@@ -492,21 +492,21 @@ test('touch reference tabs expose actions instead of page metadata only on the a
 
 
 test('decorative backing leaves zero-width native overlay scrollbars exposed', async ({ page }) => {
-  await page.goto('/test/acceptance/review-harness/index.html?visual=outline');
-  await page.locator('.review-layout').evaluate(element => {
-    (element as HTMLElement).style.setProperty('--review-main-scrollbar-width', '0px');
-    (element as HTMLElement).style.setProperty('--review-main-scrollbar-height', '0px');
+  await page.goto('/test/acceptance/reader-harness/index.html?visual=outline');
+  await page.locator('.reader-layout').evaluate(element => {
+    (element as HTMLElement).style.setProperty('--reader-main-scrollbar-width', '0px');
+    (element as HTMLElement).style.setProperty('--reader-main-scrollbar-height', '0px');
   });
-  await expect(page.locator('.review-overlay-frame')).toHaveCSS('clip-path', 'inset(0px 16px 16px 0px)');
+  await expect(page.locator('.reader-overlay-frame')).toHaveCSS('clip-path', 'inset(0px 16px 16px 0px)');
 });
 
 test('native scrollbar backing stays stationary without changing document scroll extents', async ({ page }) => {
-  await page.goto('/test/acceptance/review-harness/index.html?visual=outline');
+  await page.goto('/test/acceptance/reader-harness/index.html?visual=outline');
   const result = await page.evaluate(async () => {
-    const modulePath = '/apps/web/src/review/use-review-overlay-geometry.ts';
+    const modulePath = '/apps/web/src/reader/use-reader-overlay-geometry.ts';
     const { protectNativeScrollbarBacking } = await import(modulePath);
     const viewport = document.createElement('div');
-    viewport.style.cssText = 'position:fixed;inset:0 auto auto 0;width:300px;height:200px;box-sizing:border-box;padding:12px 20px;overflow:auto;scrollbar-width:none;--review-surface-canvas:rgb(240,240,240)';
+    viewport.style.cssText = 'position:fixed;inset:0 auto auto 0;width:300px;height:200px;box-sizing:border-box;padding:12px 20px;overflow:auto;scrollbar-width:none;--reader-surface-canvas:rgb(240,240,240)';
     viewport.innerHTML = '<div class="pdf-workspace__scrollbar-backing"></div><div data-viewer-framing-content style="width:600px;height:800px;background:red"></div>';
     document.body.append(viewport);
     protectNativeScrollbarBacking(viewport);
@@ -538,13 +538,13 @@ test('native scrollbar backing stays stationary without changing document scroll
 
 for (const presentation of ['right', 'bottom']) {
   test(`document shadow clears the bottom backing with a ${presentation} workspace`, async ({ page }) => {
-    await page.goto('/test/acceptance/review-harness/index.html?visual=outline');
+    await page.goto('/test/acceptance/reader-harness/index.html?visual=outline');
     const clearance = await page.evaluate(presentation => {
       const host = document.createElement('div');
-      host.className = 'review-document';
+      host.className = 'reader-document';
       host.style.cssText = 'position:fixed;inset:0 auto auto 0;width:600px;height:400px';
       const runway = presentation === 'bottom' ? 180 : 0;
-      host.innerHTML = `<div class="pdf-workspace__viewport" style="box-sizing:border-box;scrollbar-width:none"><div style="position:relative;height:800px"><div data-last-page style="height:800px;background:white"></div><div style="position:absolute;top:0;height:calc(${800 + runway}px + ${runway > 0 ? 'var(--review-page-bottom-clearance)' : '0px'});width:1px;visibility:hidden"></div></div></div>`;
+      host.innerHTML = `<div class="pdf-workspace__viewport" style="box-sizing:border-box;scrollbar-width:none"><div style="position:relative;height:800px"><div data-last-page style="height:800px;background:white"></div><div style="position:absolute;top:0;height:calc(${800 + runway}px + ${runway > 0 ? 'var(--reader-page-bottom-clearance)' : '0px'});width:1px;visibility:hidden"></div></div></div>`;
       document.body.append(host);
       const viewport = host.firstElementChild as HTMLElement;
       viewport.scrollTop = viewport.scrollHeight;
@@ -558,13 +558,13 @@ for (const presentation of ['right', 'bottom']) {
 }
 
 test('bottom workspace keeps its inset from the native scrollbar edges', async ({ page }) => {
-  await page.goto('/test/acceptance/review-harness/index.html?visual=outline');
+  await page.goto('/test/acceptance/reader-harness/index.html?visual=outline');
   const margins = await page.evaluate(() => {
     const layout = document.createElement('div');
-    layout.className = 'review-layout';
-    layout.style.cssText = 'position:fixed;width:800px;height:600px;--review-overlay-inset:12px';
+    layout.className = 'reader-layout';
+    layout.style.cssText = 'position:fixed;width:800px;height:600px;--reader-overlay-inset:12px';
     layout.dataset.workspacePresentation = 'bottom';
-    layout.innerHTML = '<div class="review-tools-workspace" data-workspace-presentation="bottom" data-tools-workspace-open="true"></div>';
+    layout.innerHTML = '<div class="reader-tools-workspace" data-workspace-presentation="bottom" data-tools-workspace-open="true"></div>';
     document.body.append(layout);
     const tray = getComputedStyle(layout.firstElementChild!);
     const result = { right: tray.right, bottom: tray.bottom };
@@ -575,14 +575,14 @@ test('bottom workspace keeps its inset from the native scrollbar edges', async (
 });
 
 test('empty references do not paint a bottom edge fade', async ({ page }) => {
-  await page.goto('/test/acceptance/review-harness/index.html?visual=outline');
+  await page.goto('/test/acceptance/reader-harness/index.html?visual=outline');
   const display = await page.evaluate(() => {
     const layout = document.createElement('div');
-    layout.className = 'review-layout';
+    layout.className = 'reader-layout';
     layout.dataset.referencesAvailable = 'false';
     layout.dataset.scrollBottomFade = 'true';
     layout.dataset.bottomOverlay = 'false';
-    layout.innerHTML = '<div class="review-overlay-frame"><span class="review-overlay-frame__outer-bottom-fade"></span></div>';
+    layout.innerHTML = '<div class="reader-overlay-frame"><span class="reader-overlay-frame__outer-bottom-fade"></span></div>';
     document.body.append(layout);
     const fade = layout.querySelector('span')!;
     const empty = getComputedStyle(fade).display;
@@ -595,13 +595,13 @@ test('empty references do not paint a bottom edge fade', async ({ page }) => {
 });
 
 test('bottom workspace margins leave both native scrollbars above their backing', async ({ page }) => {
-  await page.goto('/test/acceptance/review-harness/index.html?visual=outline');
+  await page.goto('/test/acceptance/reader-harness/index.html?visual=outline');
   const styles = await page.evaluate(() => {
     const layout = document.createElement('div');
-    layout.className = 'review-layout';
+    layout.className = 'reader-layout';
     Object.assign(layout.dataset, { workspacePresentation: 'bottom', bottomOverlay: 'true', rightOverlay: 'false', scrollRightFade: 'true' });
-    layout.style.cssText = '--review-surface-canvas:#f7f7f7;--review-main-scrollbar-width:0px;--review-main-scrollbar-height:0px;--review-overlay-bottom-start:200px;--scrollbar-backing-width:600px;--scrollbar-backing-height:400px';
-    layout.innerHTML = '<div class="review-overlay-frame"><span class="review-overlay-frame__outer-right-fade"></span></div><div class="pdf-workspace__scrollbar-backing"></div>';
+    layout.style.cssText = '--reader-surface-canvas:#f7f7f7;--reader-main-scrollbar-width:0px;--reader-main-scrollbar-height:0px;--reader-overlay-bottom-start:200px;--scrollbar-backing-width:600px;--scrollbar-backing-height:400px';
+    layout.innerHTML = '<div class="reader-overlay-frame"><span class="reader-overlay-frame__outer-right-fade"></span></div><div class="pdf-workspace__scrollbar-backing"></div>';
     document.body.append(layout);
     const frame = layout.firstElementChild!;
     const backing = getComputedStyle(layout.lastElementChild!, '::after');
@@ -617,13 +617,13 @@ test('bottom workspace margins leave both native scrollbars above their backing'
 });
 
 test('right tray and horizontal overflow use the same full-height fade layer', async ({ page }) => {
-  await page.goto('/test/acceptance/review-harness/index.html?visual=outline');
+  await page.goto('/test/acceptance/reader-harness/index.html?visual=outline');
   const result = await page.evaluate(() => {
     const layout = document.createElement('div');
-    layout.className = 'review-layout';
+    layout.className = 'reader-layout';
     Object.assign(layout.dataset, { workspacePresentation: 'right', rightOverlay: 'true' });
-    layout.style.cssText = '--review-surface-canvas:#f7f7f7;--review-overlay-right-start:560px;--review-overlay-fade-size:12px;--scrollbar-backing-width:600px;--scrollbar-backing-height:400px';
-    layout.innerHTML = '<div class="review-overlay-frame"><span class="review-overlay-frame__right-backing"></span><span class="review-overlay-frame__right-fade"></span></div><div class="pdf-workspace__scrollbar-backing"></div>';
+    layout.style.cssText = '--reader-surface-canvas:#f7f7f7;--reader-overlay-right-start:560px;--reader-overlay-fade-size:12px;--scrollbar-backing-width:600px;--scrollbar-backing-height:400px';
+    layout.innerHTML = '<div class="reader-overlay-frame"><span class="reader-overlay-frame__right-backing"></span><span class="reader-overlay-frame__right-fade"></span></div><div class="pdf-workspace__scrollbar-backing"></div>';
     document.body.append(layout);
     const backing = layout.lastElementChild!;
     const open = getComputedStyle(backing, '::after');
@@ -635,7 +635,7 @@ test('right tray and horizontal overflow use the same full-height fade layer', a
     const scroll = getComputedStyle(backing, '::after');
     const scrollStyles = { background: scroll.backgroundImage, height: scroll.height, display: scroll.display };
     layout.dataset.bottomOverlay = 'true';
-    layout.style.setProperty('--review-overlay-bottom-start', '300px');
+    layout.style.setProperty('--reader-overlay-bottom-start', '300px');
     const bottomWithScroll = getComputedStyle(backing, '::after').backgroundImage;
     layout.remove();
     return { open: openStyles, closed, scroll: scrollStyles, bottomWithScroll, oldLayers };
@@ -651,13 +651,13 @@ test('right tray and horizontal overflow use the same full-height fade layer', a
 });
 
 test('top fade spans the complete scrollport beneath native scrollbars', async ({ page }) => {
-  await page.goto('/test/acceptance/review-harness/index.html?visual=outline');
+  await page.goto('/test/acceptance/reader-harness/index.html?visual=outline');
   const result = await page.evaluate(() => {
     const layout = document.createElement('div');
-    layout.className = 'review-layout';
+    layout.className = 'reader-layout';
     layout.dataset.scrollTopFade = 'true';
-    layout.style.cssText = '--review-surface-canvas:#f7f7f7;--scrollbar-backing-width:600px;--review-overlay-fade-size:12px';
-    layout.innerHTML = '<div class="review-overlay-frame"><span class="review-overlay-frame__top-fade"></span></div><div class="pdf-workspace__scrollbar-backing"></div>';
+    layout.style.cssText = '--reader-surface-canvas:#f7f7f7;--scrollbar-backing-width:600px;--reader-overlay-fade-size:12px';
+    layout.innerHTML = '<div class="reader-overlay-frame"><span class="reader-overlay-frame__top-fade"></span></div><div class="pdf-workspace__scrollbar-backing"></div>';
     document.body.append(layout);
     const fade = getComputedStyle(layout.lastElementChild!, '::before');
     const result = { width: fade.width, height: fade.height, oldLayer: getComputedStyle(layout.querySelector('span')!).display };
@@ -668,12 +668,12 @@ test('top fade spans the complete scrollport beneath native scrollbars', async (
 });
 
 test('macOS toolbar keeps its native-control clearance during resize and overlay geometry changes', async ({ page }) => {
-  await page.goto('/test/acceptance/review-harness/index.html?visual=outline');
+  await page.goto('/test/acceptance/reader-harness/index.html?visual=outline');
   const positions = await page.evaluate(() => {
     const shell = document.createElement('div');
-    shell.className = 'electron-review-shell';
+    shell.className = 'electron-reader-shell';
     shell.dataset.nativePlatform = 'darwin';
-    shell.innerHTML = '<header class="review-chrome"><div data-title>Title and page</div><div>Zoom</div></header>';
+    shell.innerHTML = '<header class="reader-chrome"><div data-title>Title and page</div><div>Zoom</div></header>';
     document.body.append(shell);
     const positions = [];
     for (const width of [1200, 900, 700, 1100, 600]) {

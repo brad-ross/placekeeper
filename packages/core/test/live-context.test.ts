@@ -13,7 +13,7 @@ import {
   type ExistingPdfAnnotation,
 } from "../src/live-context.js";
 import { createCompleteDisposition } from "../src/disposition.js";
-import type { Annotation } from "../src/review-model.js";
+import type { Annotation } from "../src/document-model.js";
 
 const id = (suffix: number) =>
   `00000000-0000-4000-8000-${suffix.toString().padStart(12, "0")}`;

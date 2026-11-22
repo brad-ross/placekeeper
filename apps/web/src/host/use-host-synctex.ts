@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, type RefObject } from 'react';
-import type { DocumentStateView } from '../../../../packages/core/src/review-model.js';
+import type { DocumentStateView } from '../../../../packages/core/src/document-model.js';
 import type { PdfViewerNavigation } from '../pdf/viewer-navigation-adapter.js';
 import type { LocationRestoreStatus } from '../generation-status.js';
 import type { HostForwardSyncTexRequest, ReverseSyncTexRequest } from './session-contracts.js';

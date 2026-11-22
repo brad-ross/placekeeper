@@ -5,11 +5,11 @@ import { createHash } from "node:crypto";
 import { lstat, open, realpath } from "node:fs/promises";
 import { basename, dirname, isAbsolute, relative, resolve } from "node:path";
 
-import type { SourceHint } from "../../../../packages/core/src/structured-review-item.js";
+import type { SourceHint } from "../../../../packages/core/src/structured-annotation.js";
 import {
   anchorEvidenceFromAnnotation,
   type Annotation,
-} from "../../../../packages/core/src/review-model.js";
+} from "../../../../packages/core/src/document-model.js";
 import type { FrozenDocumentDelivery } from "../export/export-coordinator.js";
 import { isContained } from "../files/file-capabilities.js";
 import {

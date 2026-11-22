@@ -5,8 +5,8 @@ import {
   normalizeExcerptText,
   trailingContext,
 } from '../src/pdf/context-excerpt.js';
-import { annotationContent } from '../src/review/annotation-content.js';
-import type { Annotation } from '../../../packages/core/src/review-model.js';
+import { annotationContent } from '../src/reader/annotation-content.js';
+import type { Annotation } from '../../../packages/core/src/document-model.js';
 
 describe('context excerpts', () => {
   it('drops a cut partial word before the match and marks the cut', () => {

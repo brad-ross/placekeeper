@@ -2,9 +2,9 @@ import { describe, expect, it, vi } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
-import { addPageNote, setAnnotationName } from "../../../packages/core/src/review-commands.js";
+import { addPageNote, setAnnotationName } from "../../../packages/core/src/document-commands.js";
 import type { PdfWriter } from "../../../packages/core/src/pdf-writer.js";
-import type { Annotation } from "../../../packages/core/src/review-model.js";
+import type { Annotation } from "../../../packages/core/src/document-model.js";
 import { createBrowserDocumentSession } from "../../../packages/pdf-backends/src/browser-document-session.js";
 import {
   STATIC_PDF_MAX_BYTES,

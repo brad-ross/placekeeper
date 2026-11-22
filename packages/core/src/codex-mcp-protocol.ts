@@ -1,5 +1,5 @@
 import { encodePlacekeeperLinkFragment, decodePlacekeeperLinkFragment, type PlacekeeperLinkLocation } from "./placekeeper-link.js";
-import { isDocumentRuntimeMethodForHost, sanitizeChromeDocumentRuntimeRequest, type DocumentRuntimeMethod, } from "./review-runtime-protocol.js";
+import { isDocumentRuntimeMethodForHost, sanitizeChromeDocumentRuntimeRequest, type DocumentRuntimeMethod, } from "./document-runtime-protocol.js";
 export const CODEX_MCP_PROTOCOL = "placekeeper.codex-mcp" as const;
 export const CODEX_MCP_PROTOCOL_VERSION = 1 as const;
 export const CODEX_DISPLAY_TOOL = "mcp__placekeeper__display_review" as const;

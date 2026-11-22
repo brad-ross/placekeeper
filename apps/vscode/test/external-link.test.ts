@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { VersionedWebviewBridge } from '../src/webview-bridge.js';
-import { DOCUMENT_RUNTIME_PROTOCOL, DOCUMENT_RUNTIME_VERSION } from '../../../packages/core/src/review-runtime-protocol.js';
+import { DOCUMENT_RUNTIME_PROTOCOL, DOCUMENT_RUNTIME_VERSION } from '../../../packages/core/src/document-runtime-protocol.js';
 
 const identity = { panelId: 'panel_1234567890123456', sessionId: 'session_1234567890123456', generation: 2, revision: 3 };
 const request = { protocol: DOCUMENT_RUNTIME_PROTOCOL, version: DOCUMENT_RUNTIME_VERSION, kind: 'external-link-request', ...identity, requestId: 'request_1234567890123456', url: 'https://example.com/a?q=b#c' };

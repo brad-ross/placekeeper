@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 import { expect, test } from '@playwright/test';
 import { PDFArray, PDFDict, PDFDocument, PDFName, PDFNumber, PDFRawStream } from 'pdf-lib';
 import { projectAnnotation } from '../../packages/core/src/annotation-projection.js';
-import type { Annotation } from '../../packages/core/src/review-model.js';
+import type { Annotation } from '../../packages/core/src/document-model.js';
 import { readPortableAnnotations } from '../../packages/pdf-backends/src/embedpdf-adapter.js';
 
 /** Exercise the real browser worker and serializer, independent of authoring gestures. */

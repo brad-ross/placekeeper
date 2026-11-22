@@ -1,5 +1,5 @@
 import { ExtensionRuntimeManager } from "../codex/extension-runtime.js";
-import { createUpgradeDocumentProtection, UpgradeDocumentParticipants } from "./upgrade-review-participants.js";
+import { createUpgradeDocumentProtection, UpgradeDocumentParticipants } from "./upgrade-document-participants.js";
 import { UpgradePreparationCoordinator } from "./upgrade-preparation.js";
 import type { NativeTaskLaunchReceipt } from "../desktop/native-task-launches.js";
 import { NativeSyncTex } from "../synctex/native-synctex.js";
@@ -29,7 +29,7 @@ import { TaskBindingRegistry } from "../context/task-binding-registry.js";
 import { DaemonLifecycleCoordinator } from "./daemon-lifecycle.js";
 import { decodePlacekeeperLink } from "../../../../packages/core/src/placekeeper-link.js";
 import { decodeHostPlacekeeperLink, openPlacekeeperLink } from "../links/placekeeper-link.js";
-import type { DocumentWorkflowMode } from "../../../../packages/core/src/review-model.js";
+import type { DocumentWorkflowMode } from "../../../../packages/core/src/document-model.js";
 import { ExportCoordinator, type FrozenDocumentDelivery } from "../export/export-coordinator.js";
 import {
   BrowserSourceStore,

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createDocumentState } from "../../../packages/core/src/review-model.js";
+import { createDocumentState } from "../../../packages/core/src/document-model.js";
 import { loadProductionSession, reopenProductionSession } from "../src/app/session-api.js";
 
 function jsonResponse(value: unknown, status = 200): Response {

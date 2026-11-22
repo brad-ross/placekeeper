@@ -42,7 +42,7 @@ Read [Concepts](docs/concepts.md) for domain vocabulary and the [documentation i
 | `neutral-context-status.css`, `neutral-annotation-rows-reader.css`, `neutral-workspace-interactions.css` | Status, annotation hierarchy, and deliberately late interaction refinements. |
 | `review-design-tokens.css`, `review-modal-surface.css` | Scoped shared tokens and modal/control grammar, including recovery, static launcher, and Chrome handler consumers. |
 
-Global `--pk-*` and scoped `--review-*` properties are not interchangeable aliases. Keep portal and non-production-root consumers in view. Desktop layout changes require evidence from the packaged Electron app; browser layout bounds alone cannot prove native-window behavior.
+Global `--pk-*` and scoped `--reader-*` properties are not interchangeable aliases. Keep portal and non-production-root consumers in view. Desktop layout changes require evidence from the packaged Electron app; browser layout bounds alone cannot prove native-window behavior.
 
 ## Build and test
 

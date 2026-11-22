@@ -1,12 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { DocumentInteractions } from '../../service/src/sessions/review-interactions.js';
-import { createDocumentState } from '../../../packages/core/src/review-model.js';
+import { DocumentInteractions } from '../../service/src/sessions/document-interactions.js';
+import { createDocumentState } from '../../../packages/core/src/document-model.js';
 import { createBrowserHostRuntime } from '../src/host/browser-runtime.js';
 import {
   attachmentOrderedInteractionTransport,
   beginDocumentInteraction,
-} from '../src/review/authoring-session.js';
+} from '../src/reader/authoring-session.js';
 
 afterEach(() => {
   vi.useRealTimers();

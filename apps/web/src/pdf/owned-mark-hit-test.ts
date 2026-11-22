@@ -1,6 +1,6 @@
 import { boundingRectOrEmpty } from '@embedpdf/models';
 import type { PdfWriterAnnotation } from '../../../../packages/core/src/pdf-writer.js';
-import { annotationIdForPdfAnnotation } from '../review/annotation-projection.js';
+import { annotationIdForPdfAnnotation } from '../reader/annotation-projection.js';
 
 export interface OwnedMarkPoint {
   readonly x: number;

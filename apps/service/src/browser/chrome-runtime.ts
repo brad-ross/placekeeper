@@ -16,12 +16,12 @@ import {
   DocumentExportConflictError,
   sanitizeChromeDocumentRuntimeResponse,
   type DocumentRuntimeBrokerMethod,
-} from "../../../../packages/core/src/review-runtime-protocol.js";
+} from "../../../../packages/core/src/document-runtime-protocol.js";
 import { deadlineWasSubstantiallyDelayed } from "../../../../packages/core/src/suspend-aware-deadline.js";
 import { CHROME_EXTENSION_ORIGIN } from "./chrome-handoff.js";
 import { canonicalJson } from "../runtime/canonical-json.js";
 import { ChromeRuntimeOperationJournal } from "./runtime-operation-journal.js";
-import type { DocumentInteractionAttachment } from "../sessions/review-interactions.js";
+import type { DocumentInteractionAttachment } from "../sessions/document-interactions.js";
 export { ChromeRuntimeOperationJournal } from "./runtime-operation-journal.js";
 
 const SHA256 = /^[a-f0-9]{64}$/u;

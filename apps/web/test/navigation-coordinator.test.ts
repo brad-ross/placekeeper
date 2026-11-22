@@ -24,15 +24,15 @@ import {
   type ReferenceReturnPresentationState,
   type OutlineTargetOrderLocation,
   type NavigationCoordinatorDependencies,
-} from '../src/review/navigation-coordinator.js';
-import type { DocumentLocationHistoryPort } from '../src/review/review-location-history.js';
-import type { AnnotationReaderIdentity } from '../src/review/annotation-reader.js';
+} from '../src/reader/navigation-coordinator.js';
+import type { DocumentLocationHistoryPort } from '../src/reader/document-location-history.js';
+import type { AnnotationReaderIdentity } from '../src/reader/annotation-reader.js';
 import {
   createReferenceNavigationState,
   reduceReferenceNavigation,
   type ReferenceNavigationAction,
   type ReferenceNavigationState,
-} from '../src/review/reference-navigation-state.js';
+} from '../src/reader/reference-navigation-state.js';
 
 const location = (pageIndex: number, y = 10, zoom = 1): PdfViewerLocation => ({
   pageIndex,

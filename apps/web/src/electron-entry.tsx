@@ -6,8 +6,8 @@ import { FocusedLaunchNavigation } from './host/electron-focused-navigation.js';
 import { ElectronSourceEndpointDialog } from './host/ElectronSourceEndpointDialog.js';
 import { createElectronHostRuntime } from './host/electron-runtime.js';
 import type { ElectronShellBridge, ElectronShellIdentity } from '../../../packages/core/src/electron-shell-protocol.js';
-import type { DocumentCommandInvocation, DocumentCommandSurfaceSnapshot } from './review/review-command-surface.js';
-import './app/review-layout.css';
+import type { DocumentCommandInvocation, DocumentCommandSurfaceSnapshot } from './reader/document-command-surface.js';
+import './app/reader-layout.css';
 declare global { interface Window { placekeeper: ElectronShellBridge } }
 const windowControlsOverlay = (navigator as Navigator & {
     windowControlsOverlay?: EventTarget & { readonly visible: boolean; getTitlebarAreaRect(): DOMRect };
@@ -84,7 +84,7 @@ function ElectronDocument({ bridge, identity }: { bridge: ElectronShellBridge; i
         return () => window.removeEventListener('beforeunload', beforeUnload);
     }, [bridge, identity]);
     useEffect(() => { const dispose = () => { focusedNavigation.dispose(); runtime.dispose(); }; window.addEventListener('pagehide', dispose, { once: true }); return () => window.removeEventListener('pagehide', dispose); }, [runtime]);
-    return <div className="electron-review-shell" data-native-platform={chromeMetrics?.platform} style={{ '--electron-interface-scale': chromeMetrics?.scale ?? 1 } as React.CSSProperties} data-window-controls-overlay={overlayVisible} data-toolbar-hovered={toolbarHovered} inert={closing}>
+    return <div className="electron-reader-shell" data-native-platform={chromeMetrics?.platform} style={{ '--electron-interface-scale': chromeMetrics?.scale ?? 1 } as React.CSSProperties} data-window-controls-overlay={overlayVisible} data-toolbar-hovered={toolbarHovered} inert={closing}>
         <RuntimeProductionReaderApp runtime={runtime} loadingDocumentTitle="Opening PDF"
             {...(identity.presentation ? { initialPresentation: identity.presentation } : {})}
             onPresentationChange={state => { void bridge.presentation(identity, state); }}

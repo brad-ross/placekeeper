@@ -1,6 +1,6 @@
 /** Product limit shared by PDF Copy and selection-based review actions. */
-export { PDF_SELECTION_PAGE_LIMIT } from '../../../../packages/core/src/review-model.js';
-import { PDF_SELECTION_PAGE_LIMIT } from '../../../../packages/core/src/review-model.js';
+export { PDF_SELECTION_PAGE_LIMIT } from '../../../../packages/core/src/document-model.js';
+import { PDF_SELECTION_PAGE_LIMIT } from '../../../../packages/core/src/document-model.js';
 
 /**
  * Resource headroom for detecting an over-limit selection before product validation.

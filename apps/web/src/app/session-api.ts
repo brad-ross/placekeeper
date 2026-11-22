@@ -1,6 +1,6 @@
 import type { SaveDestinationResult } from "../host/session-contracts.js";
 import type { SaveStatus } from "../../../../packages/core/src/save-status.js";
-import type { DocumentCommand, DocumentStateView } from "../../../../packages/core/src/review-model.js";
+import type { DocumentCommand, DocumentStateView } from "../../../../packages/core/src/document-model.js";
 import type {
   ProductionSession,
   ProductionSessionApi,
@@ -9,11 +9,11 @@ import type {
   DocumentInteractionAttachment,
   SaveCopyProposal,
 } from "../host/session-contracts.js";
-import type { RejectedDocumentCommand } from "../review/review-command-result.js";
+import type { RejectedDocumentCommand } from "../reader/document-command-result.js";
 import type {
   ReadingLocationResolutionRequestV1,
   ReadingLocationResolutionV1,
-} from "../../../../packages/core/src/review-runtime-protocol.js";
+} from "../../../../packages/core/src/document-runtime-protocol.js";
 
 export type ReopenRecoveryChoice = "resume" | "discard" | "fork";
 

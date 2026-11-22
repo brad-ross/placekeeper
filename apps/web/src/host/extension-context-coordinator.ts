@@ -1,6 +1,6 @@
 import type { OpenAIModelContext, OpenAIModelContextHostState } from '@openai/mcp-extensions/app';
 import type { DocumentContextMember, DocumentContextPublicationStatus } from './document-in-context.js';
-import type { DocumentContextSnapshot } from './review-context-snapshot.js';
+import type { DocumentContextSnapshot } from './document-context-snapshot.js';
 
 type Block = NonNullable<NonNullable<OpenAIModelContextHostState>['content']>[number];
 export const backgroundContextUri = 'placekeeper-context:///background';

@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { addPageNote } from "../../../packages/core/src/review-commands.js";
+import { addPageNote } from "../../../packages/core/src/document-commands.js";
 import { DraftSnapshotStore, type SnapshotHooks } from "../src/recovery/draft-snapshot.js";
 import { NativeAppLifecycleManager } from "../src/desktop/app-lifecycle.js";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";

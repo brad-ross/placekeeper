@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { InstalledCandidate } from './electron-installed-harness.js';
-import { DOCUMENT_RUNTIME_PROTOCOL, DOCUMENT_RUNTIME_VERSION } from '../../packages/core/src/review-runtime-protocol.js';
+import { DOCUMENT_RUNTIME_PROTOCOL, DOCUMENT_RUNTIME_VERSION } from '../../packages/core/src/document-runtime-protocol.js';
 
 test('packaged candidate renders and activates a real PDF without system Node', async ({}, testInfo) => {
   const candidate = await InstalledCandidate.create();
@@ -13,14 +13,14 @@ test('packaged candidate renders and activates a real PDF without system Node', 
       const overlay = (navigator as Navigator & { windowControlsOverlay?: {
         visible: boolean; getTitlebarAreaRect(): DOMRect;
       } }).windowControlsOverlay;
-      const chrome = document.querySelector<HTMLElement>('[data-review-chrome]')!;
+      const chrome = document.querySelector<HTMLElement>('[data-reader-chrome]')!;
       const bounds = chrome.getBoundingClientRect();
-      const shell = chrome.closest<HTMLElement>('.electron-review-shell')!;
+      const shell = chrome.closest<HTMLElement>('.electron-reader-shell')!;
       const macOS = shell.dataset.nativePlatform === 'darwin';
       const interfaceScale = Number(getComputedStyle(shell).getPropertyValue('--electron-interface-scale')) || 1;
       const safe = overlay?.getTitlebarAreaRect();
-      const identity = chrome.querySelector<HTMLElement>('.review-chrome__identity')!.getBoundingClientRect();
-      const navigation = chrome.querySelector<HTMLElement>('.review-chrome__left-controls')!.getBoundingClientRect();
+      const identity = chrome.querySelector<HTMLElement>('.reader-chrome__identity')!.getBoundingClientRect();
+      const navigation = chrome.querySelector<HTMLElement>('.reader-chrome__left-controls')!.getBoundingClientRect();
       const controls = [...chrome.querySelectorAll<HTMLElement>('button,input,[tabindex]')]
         .filter(element => element.checkVisibility());
       return {
@@ -36,9 +36,9 @@ test('packaged candidate renders and activates a real PDF without system Node', 
         }),
         drag: getComputedStyle(chrome).getPropertyValue('-webkit-app-region'),
         inputsClickable: controls.every(element => getComputedStyle(element).getPropertyValue('-webkit-app-region') === 'no-drag'),
-        controlGroups: [...chrome.querySelectorAll<HTMLElement>('[data-review-chrome-group]')]
+        controlGroups: [...chrome.querySelectorAll<HTMLElement>('[data-reader-chrome-group]')]
           .filter(element => element.checkVisibility())
-          .map(element => ({ group: element.dataset.reviewChromeGroup,
+          .map(element => ({ group: element.dataset.readerChromeGroup,
             region: getComputedStyle(element).getPropertyValue('-webkit-app-region') })),
       };
     });
@@ -60,12 +60,12 @@ test('packaged candidate renders and activates a real PDF without system Node', 
     await workspaceToggle.click();
     const expandedToggle = trayControls.getByRole('button', { name: 'Hide Workspace', exact: true });
     await expect(expandedToggle).toHaveAttribute('aria-expanded', 'true');
-    const tray = page.locator('#review-tools-workspace[data-tools-workspace-open="true"], #review-workspace[data-workspace-open="true"]');
+    const tray = page.locator('#reader-tools-workspace[data-tools-workspace-open="true"], #reader-workspace[data-workspace-open="true"]');
     await tray.getByRole('button', { name: 'Hide Workspace', exact: true }).click();
     await expect(workspaceToggle).toHaveAttribute('aria-expanded', 'false');
     await expect(workspaceToggle).toBeFocused();
 
-    const pageInput = page.locator('[data-review-chrome] .review-chrome__page-input');
+    const pageInput = page.locator('[data-reader-chrome] .reader-chrome__page-input');
     await pageInput.click();
     await expect(pageInput).toBeFocused();
     await pageInput.fill('1');

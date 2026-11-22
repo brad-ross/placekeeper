@@ -1,6 +1,6 @@
 import { ensurePrivateDirectory, writePrivateFile } from "../src/platform/private-storage.js";
-import { addPageNote, setAnnotationName } from "../../../packages/core/src/review-commands.js";
-import type { Annotation } from "../../../packages/core/src/review-model.js";
+import { addPageNote, setAnnotationName } from "../../../packages/core/src/document-commands.js";
+import type { Annotation } from "../../../packages/core/src/document-model.js";
 import type { PdfWriter } from "../../../packages/core/src/pdf-writer.js";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";

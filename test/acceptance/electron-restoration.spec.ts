@@ -26,8 +26,8 @@ test('saved window bounds, page, and zoom survive transient startup defaults', a
   try {
     const page = await candidate.launch({ restoreSavedWindows: true });
     await expect(page.locator('[data-production-review]')).toHaveAttribute('data-initial-view-ready', 'true', { timeout: 30_000 });
-    await expect(page.locator('.review-chrome__page-input')).toHaveValue('2');
-    await expect(page.locator('.review-chrome__zoom-input')).toHaveValue('125');
+    await expect(page.locator('.reader-chrome__page-input')).toHaveValue('2');
+    await expect(page.locator('.reader-chrome__zoom-input')).toHaveValue('125');
     await expect.poll(() => page.evaluate(() => window.placekeeper.identity())).toMatchObject({ presentation });
     await expect.poll(() => observed.length).toBeGreaterThan(0);
     watcher.close();
@@ -50,7 +50,7 @@ test('saved window bounds, page, and zoom survive transient startup defaults', a
     if (focused.kind !== 'link-open' || !focused.response.ok || !('launchId' in focused.response)) throw new Error('Explicit focused link was not staged');
     const originalIdentity = await page.evaluate(() => window.placekeeper.identity());
     await candidate.openLaunch(focused.response.launchId);
-    await expect(page.locator('.review-chrome__page-input')).toHaveValue('1');
+    await expect(page.locator('.reader-chrome__page-input')).toHaveValue('1');
     await expect.poll(() => page.evaluate(() => window.placekeeper.identity())).toMatchObject({ windowId: originalIdentity.windowId, presentation: { pageIndex: 0 } });
   } finally { watcher.close(); await Promise.all(reads); await candidate.dispose(); }
 });

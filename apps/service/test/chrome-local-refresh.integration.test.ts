@@ -10,8 +10,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createNativeEmbeddedDocument } from "../../chrome-extension/src/chrome-runtime.js";
 import type { NativePort } from "../../chrome-extension/src/chrome-api.js";
 import { createRpcHostRuntime } from "../../web/src/host/vscode-runtime.js";
-import { anchorEvidenceFromAnnotation } from "../../../packages/core/src/review-model.js";
-import type { Annotation } from "../../../packages/core/src/review-model.js";
+import { anchorEvidenceFromAnnotation } from "../../../packages/core/src/document-model.js";
+import type { Annotation } from "../../../packages/core/src/document-model.js";
 import { PlacekeeperHost } from "../src/host/placekeeper-host.js";
 
 const extensionOrigin = "chrome-extension://cgegjjjhbhnfgcoipeffhogoojfoekgg";

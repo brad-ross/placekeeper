@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ExistingPdfAnnotation } from "../../../packages/core/src/live-context.js";
-import type { Annotation } from "../../../packages/core/src/review-model.js";
+import type { Annotation } from "../../../packages/core/src/document-model.js";
 import * as embedPdfAdapter from "../../../packages/pdf-backends/src/embedpdf-adapter.js";
 import { inspectLivePdf, LiveContextService } from "../src/context/live-context-service.js";
 import { RestartReconnectStore } from "../src/context/restart-reconnect-store.js";

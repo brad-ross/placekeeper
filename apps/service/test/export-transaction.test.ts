@@ -9,9 +9,9 @@ import type {
   PdfWriter,
   PdfWriterAnnotation,
 } from "../../../packages/core/src/pdf-writer.js";
-import { addHighlight, setAnnotationName } from "../../../packages/core/src/review-commands.js";
-import type { DocumentSourceIdentity } from "../../../packages/core/src/review-model.js";
-import { createDocumentState } from "../../../packages/core/src/review-model.js";
+import { addHighlight, setAnnotationName } from "../../../packages/core/src/document-commands.js";
+import type { DocumentSourceIdentity } from "../../../packages/core/src/document-model.js";
+import { createDocumentState } from "../../../packages/core/src/document-model.js";
 import { FileCapabilityRegistry } from "../src/files/file-capabilities.js";
 import { ExportCoordinator } from "../src/export/export-coordinator.js";
 import { DraftSnapshotStore } from "../src/recovery/draft-snapshot.js";

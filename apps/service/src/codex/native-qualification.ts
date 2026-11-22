@@ -1,5 +1,5 @@
 import { qualificationDirectory, readQualificationDescriptor } from "./native-qualification-files.js";
-import { DOCUMENT_RUNTIME_METHODS } from "../../../../packages/core/src/review-runtime-protocol.js";
+import { DOCUMENT_RUNTIME_METHODS } from "../../../../packages/core/src/document-runtime-protocol.js";
 import { createHmac, randomBytes } from "node:crypto";
 import { closeSync, constants, fstatSync, openSync, writeSync } from "node:fs";
 import { join } from "node:path";

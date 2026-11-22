@@ -1,5 +1,5 @@
 import { externalWebUrl } from "../../../../packages/core/src/external-web-url.js";
-import { DocumentExportConflictError, type DocumentExportFence } from "../../../../packages/core/src/review-runtime-protocol.js";
+import { DocumentExportConflictError, type DocumentExportFence } from "../../../../packages/core/src/document-runtime-protocol.js";
 import type { SaveStatus } from "../../../../packages/core/src/save-status.js";
 import { projectAnnotations } from "../../../../packages/core/src/annotation-projection.js";
 import type {
@@ -7,8 +7,8 @@ import type {
   PdfWriteResult,
 } from "../../../../packages/core/src/pdf-writer.js";
 import { assertPortableAnnotationWritable, createImportedDocumentState } from "../../../../packages/core/src/portable-annotation.js";
-import type { DocumentState } from "../../../../packages/core/src/review-model.js";
-import { reduceDocument } from "../../../../packages/core/src/review-reducer.js";
+import type { DocumentState } from "../../../../packages/core/src/document-model.js";
+import { reduceDocument } from "../../../../packages/core/src/document-reducer.js";
 import { createBrowserEmbedPdfWriter } from "../../../../packages/pdf-backends/src/browser-writer.js";
 import {
   BrowserDocumentSessionError,

@@ -1,14 +1,14 @@
 import { describe, expect, it } from 'vitest';
 
-import { measureReaderOverlayGeometry } from '../src/review/use-review-overlay-geometry.js';
+import { measureReaderOverlayGeometry } from '../src/reader/use-reader-overlay-geometry.js';
 import {
   chooseContextActionAvailableRect,
   chooseContextActionPlacement,
-} from '../src/review/ContextActionPalette.js';
+} from '../src/reader/ContextActionPalette.js';
 import {
   choosePassageEditorPlacement,
   passageEditorPlacementForRequest,
-} from '../src/review/use-passage-editor-placement.js';
+} from '../src/reader/use-passage-editor-placement.js';
 
 const rect = (left: number, top: number, width: number, height: number) => ({
   left,

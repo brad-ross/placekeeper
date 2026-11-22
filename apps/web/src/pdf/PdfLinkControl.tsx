@@ -1,4 +1,4 @@
-import { ReaderTooltipButton } from '../review/ReviewTooltipButton.js';
+import { ReaderTooltipButton } from '../reader/ReaderTooltipButton.js';
 import { classifyPdfExternalLink } from './pdf-external-link.js';
 import {
   PdfAnnotationBorderStyle,

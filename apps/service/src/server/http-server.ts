@@ -1,12 +1,12 @@
-import type { UpgradeDocumentParticipants } from "../host/upgrade-review-participants.js";
-import { isUpgradeDocumentSettlement } from "../../../../packages/core/src/upgrade-review-protocol.js";
+import type { UpgradeDocumentParticipants } from "../host/upgrade-document-participants.js";
+import { isUpgradeDocumentSettlement } from "../../../../packages/core/src/upgrade-document-protocol.js";
 import {
   DocumentExportConflictError,
   isReadingLocationResolutionRequest,
   isDocumentExportFence,
   isSaveDestinationConfirmation,
   type DocumentExportFence,
-} from "../../../../packages/core/src/review-runtime-protocol.js";
+} from "../../../../packages/core/src/document-runtime-protocol.js";
 import { rejectedDestinationName } from "../saving/pdf-save-coordinator.js";
 import { createHash, randomBytes } from "node:crypto";
 import { readFile, realpath } from "node:fs/promises";
@@ -18,12 +18,12 @@ import {
   digestSecretHex,
   validateRequestSecurity,
 } from "../../../../packages/core/src/session-security.js";
-import type { DocumentCommand } from "../../../../packages/core/src/review-model.js";
+import type { DocumentCommand } from "../../../../packages/core/src/document-model.js";
 import {
   InvalidDocumentCommandError,
   DocumentConflictError,
   DocumentDraftConflictError,
-} from "../../../../packages/core/src/review-reducer.js";
+} from "../../../../packages/core/src/document-reducer.js";
 import { isContained } from "../files/file-capabilities.js";
 import {
   isRecoveryDecision,
@@ -36,7 +36,7 @@ import type { PdfSaveCoordinator } from "../saving/pdf-save-coordinator.js";
 import type { DaemonLifecycleCoordinator } from "../host/daemon-lifecycle.js";
 import { ExportCoordinatorError, type ExportCoordinator } from "../export/export-coordinator.js";
 import { openPlacekeeperLink, parsePlacekeeperReadableViewRoute } from "../links/placekeeper-link.js";
-import type { DocumentInteractionAttachment } from "../sessions/review-interactions.js";
+import type { DocumentInteractionAttachment } from "../sessions/document-interactions.js";
 
 const MAX_BODY_BYTES = 256 * 1024;
 const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}";
@@ -697,7 +697,7 @@ export async function startHttpServer(
         if (!attachment || !owned || owned.sessionId !== upgradeMatch[1] || owned.credential !== bearerCredential(request) || JSON.stringify(owned.attachment) !== JSON.stringify(attachment)) { send(response, 403, 'Upgrade connection unavailable'); return; }
         const id = `control:${attachment.incarnationId}`;
         if (upgradeMatch[2] === 'settle' && !isUpgradeDocumentSettlement(body.request)) { send(response, 400, 'Invalid upgrade settlement'); return; }
-        sendJson(response, 200, upgradeMatch[2] === 'poll' ? options.upgradeParticipants.poll(id) : await options.upgradeParticipants.settle(id, body.request as import('../../../../packages/core/src/upgrade-review-protocol.js').UpgradeDocumentSettlement));
+        sendJson(response, 200, upgradeMatch[2] === 'poll' ? options.upgradeParticipants.poll(id) : await options.upgradeParticipants.settle(id, body.request as import('../../../../packages/core/src/upgrade-document-protocol.js').UpgradeDocumentSettlement));
         return;
       }
       if (stateMatch !== null && request.method === "GET") {

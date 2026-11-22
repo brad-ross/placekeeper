@@ -7,7 +7,7 @@ import { subscribeNativeRaster } from './HostRenderLayer.js';
 import type { ViewerResourcePolicy } from './embedpdf-viewer.js';
 import { ANNOTATION_PALETTE } from '../../../../packages/core/src/annotation-appearance.js';
 import { OwnedTextMark } from './OwnedTextMark.js';
-import { ReaderIcon } from '../review/ReviewIcon.js';
+import { ReaderIcon } from '../reader/ReaderIcon.js';
 import type { SourceAnnotationStyle } from './source-annotation-style.js';
 
 export interface SourceReaderMark {
@@ -21,10 +21,10 @@ export interface SourceReaderMark {
 /** DOM identity shared by native-source visuals that represent an owned review item. */
 export function sourceReaderMarkIdentityAttributes(
   entry: Pick<SourceReaderMark, 'ownedAnnotationId'>,
-): { readonly 'data-review-id'?: string } {
+): { readonly 'data-annotation-id'?: string } {
   return entry.ownedAnnotationId === undefined
     ? {}
-    : { 'data-review-id': entry.ownedAnnotationId };
+    : { 'data-annotation-id': entry.ownedAnnotationId };
 }
 
 function markKind(annotation: PdfAnnotationObject) {

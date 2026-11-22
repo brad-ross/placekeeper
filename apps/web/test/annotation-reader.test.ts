@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
-import type { Annotation, AnnotationKind } from '../../../packages/core/src/review-model.js';
+import type { Annotation, AnnotationKind } from '../../../packages/core/src/document-model.js';
 import type { ExistingAnnotation } from '../src/pdf/existing-annotations.js';
 import {
   projectExistingAnnotationReader,
   projectOwnedAnnotationReader,
   resolveAnnotationReader,
   type AnnotationReaderIdentity,
-} from '../src/review/annotation-reader.js';
+} from '../src/reader/annotation-reader.js';
 
 function owned(
   kind: AnnotationKind,

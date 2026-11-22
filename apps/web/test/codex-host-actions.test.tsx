@@ -1,6 +1,6 @@
 import { createCodexHostRuntime } from "../src/host/codex-runtime.js";
 import { describe, expect, it, vi } from 'vitest';
-import { createCopyLinkCommand } from '../src/review/CopyLinkControl.js';
+import { createCopyLinkCommand } from '../src/reader/CopyLinkControl.js';
 
 describe('native link copying', () => {
   it('resolves a host link only on demand and retains a selectable link after clipboard denial', async () => {

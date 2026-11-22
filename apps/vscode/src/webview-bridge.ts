@@ -1,12 +1,12 @@
 import { externalWebUrl } from '../../../packages/core/src/external-web-url.js';
-import { isUpgradeDocumentSettlement } from "../../../packages/core/src/upgrade-review-protocol.js";
+import { isUpgradeDocumentSettlement } from "../../../packages/core/src/upgrade-document-protocol.js";
 import { nativeSyncTexRequest } from "../../../packages/core/src/native-synctex-protocol.js";
 import {
   DocumentExportConflictError,
   isReadingLocationResolutionRequest,
   isDocumentExportFence,
   isSaveDestinationConfirmation,
-} from "../../../packages/core/src/review-runtime-protocol.js";
+} from "../../../packages/core/src/document-runtime-protocol.js";
 import { randomBytes } from "node:crypto";
 import WebSocket from "ws";
 import {
@@ -16,7 +16,7 @@ import {
   type DocumentRuntimeBrokerMethod,
   type DocumentRuntimeInvokeMethod,
   type DocumentRuntimeMethod,
-} from "../../../packages/core/src/review-runtime-protocol.js";
+} from "../../../packages/core/src/document-runtime-protocol.js";
 
 const SAFE_ID = /^[A-Za-z0-9_-]{16,128}$/u;
 const MAX_MESSAGE_BYTES = 65_536;

@@ -1,20 +1,20 @@
-import { documentEdgeGeometry } from '../../scripts/testing/review-edge-geometry.js';
+import { documentEdgeGeometry } from '../../scripts/testing/document-edge-geometry.js';
 import { expect, test, type Page } from '@playwright/test';
 import { addStaticKeyboardPageNote, waitForStaticPdf } from '../../scripts/static-browser-journey.js';
 
-const mainPage = (page: Page, index = 0) => page.locator(`.review-document .pdf-workspace__page[data-page-index="${index}"]`);
-const viewport = (page: Page) => page.locator('.review-document [data-viewer-framing-viewport]');
-const fitButton = (page: Page) => page.locator('[data-review-zoom-action="fit-width"]');
+const mainPage = (page: Page, index = 0) => page.locator(`.reader-document .pdf-workspace__page[data-page-index="${index}"]`);
+const viewport = (page: Page) => page.locator('.reader-document [data-viewer-framing-viewport]');
+const fitButton = (page: Page) => page.locator('[data-reader-zoom-action="fit-width"]');
 
 async function openBook(page: Page, scan = false) {
   await page.setViewportSize({ width: 900, height: 1100 });
-  await page.goto(`/test/acceptance/review-harness/?fit-modes=${scan ? 'scan' : 'book'}`);
+  await page.goto(`/test/acceptance/reader-harness/?fit-modes=${scan ? 'scan' : 'book'}`);
   await waitForStaticPdf(page);
   await expect(page.getByRole('textbox', { name: /^Current zoom/u })).toBeEnabled();
 }
 
 async function openZoom(page: Page) {
-  await page.locator('[data-review-chrome]').hover({ position: { x: 2, y: 2 } });
+  await page.locator('[data-reader-chrome]').hover({ position: { x: 2, y: 2 } });
   await page.getByRole('button', { name: 'Open zoom controls' }).hover();
   await expect(page.getByRole('menu', { name: 'PDF zoom', exact: true })).toBeVisible();
 }
@@ -175,8 +175,8 @@ test('cycles fit modes, supports keyboard choices, and releases horizontal lock 
   await expect(fitButton(page)).toHaveAttribute('data-fit-mode', 'page');
   await fit(page, 'text');
   await openZoom(page);
-  await page.locator('[data-review-horizontal-lock]').click();
-  const stage = page.locator('[data-review-stage]');
+  await page.locator('[data-reader-horizontal-lock]').click();
+  const stage = page.locator('[data-reader-stage]');
   await expect(stage).toHaveAttribute('data-horizontal-scroll-locked', 'true');
   // An explicit unchanged entry releases fit ownership, but does not change numeric scale.
   const zoomInput = page.getByRole('textbox', { name: /^Current zoom/u });
@@ -292,7 +292,7 @@ test('fits the whole page after height changes and reports a textless document f
 
 test('switches from text to whole-page fitting in a wide short viewport', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 720 });
-  await page.goto('/test/acceptance/review-harness/?fit-modes=book');
+  await page.goto('/test/acceptance/reader-harness/?fit-modes=book');
   await waitForStaticPdf(page);
   await fit(page, 'text');
   await fit(page, 'page');
@@ -348,8 +348,8 @@ test('selection, page notes, and distant destinations follow shifted page geomet
       const samples: { x: number; y: number; width: number; height: number }[] = [];
       let frames = 0;
       const sample = () => {
-        const target = document.querySelector('.review-document .pdf-workspace__page[data-page-index="11"]');
-        const viewport = document.querySelector('.review-document [data-viewer-framing-viewport]')!;
+        const target = document.querySelector('.reader-document .pdf-workspace__page[data-page-index="11"]');
+        const viewport = document.querySelector('.reader-document [data-viewer-framing-viewport]')!;
         const rect = target?.getBoundingClientRect();
         const frame = viewport.getBoundingClientRect();
         if (rect && rect.bottom > frame.top && rect.top < frame.bottom) {
@@ -384,7 +384,7 @@ test('selection, page notes, and distant destinations follow shifted page geomet
 test('active text fitting follows right workspace closure while custom zoom stays fixed', async ({ page }) => {
   await openBook(page);
   await page.setViewportSize({ width: 1400, height: 1100 });
-  const workspace = page.locator('#review-tools-workspace');
+  const workspace = page.locator('#reader-tools-workspace');
   await page.getByRole('button', { name: 'Show Workspace', exact: true }).click();
   await expect(workspace).toHaveAttribute('data-tools-workspace-open', 'true');
   await fit(page, 'text');
@@ -423,8 +423,8 @@ test('refits text to the reading area when the workspace opens during a resize f
   await goToPage(page, 2);
   await openZoom(page);
   await page.getByRole('button', { name: 'Show Workspace', exact: true }).evaluate((button) => {
-    const fitControl = document.querySelector('[data-review-zoom-action="fit-width"]')!;
-    const zoom = document.querySelector<HTMLInputElement>('.review-chrome__zoom-input')!;
+    const fitControl = document.querySelector('[data-reader-zoom-action="fit-width"]')!;
+    const zoom = document.querySelector<HTMLInputElement>('.reader-chrome__zoom-input')!;
     const initialZoom = Number(zoom.value);
     // Open as soon as the resize changes the zoom, while the fit still owns
     // the operation and before it validates the new geometry on later frames.
@@ -437,8 +437,8 @@ test('refits text to the reading area when the workspace opens during a resize f
     observer.observe(zoom, { attributeFilter: ['value'] });
   });
   await page.setViewportSize({ width: 1400, height: 1100 });
-  await expect(page.locator('#review-tools-workspace')).toHaveAttribute('data-tools-workspace-open', 'true');
-  const readingWidth = await page.locator('.review-document').evaluate((element) => element.getBoundingClientRect().width);
+  await expect(page.locator('#reader-tools-workspace')).toHaveAttribute('data-tools-workspace-open', 'true');
+  const readingWidth = await page.locator('.reader-document').evaluate((element) => element.getBoundingClientRect().width);
   // Fit text leaves 36px on either side and 24px for the tray inset and fade.
   await expect.poll(() => scale(page, 1)).toBeCloseTo((readingWidth - 96) / 300, 2);
   await openZoom(page);
@@ -453,8 +453,8 @@ for (const scrollbarWidth of [null, 15]) {
     await openBook(page);
     if (scrollbarWidth !== null) {
       await page.addStyleTag({ content: `
-        .review-document .pdf-workspace__viewport::-webkit-scrollbar { width: ${scrollbarWidth}px; height: ${scrollbarWidth}px; }
-        .review-document .pdf-workspace__viewport::-webkit-scrollbar-thumb { background: #888; }
+        .reader-document .pdf-workspace__viewport::-webkit-scrollbar { width: ${scrollbarWidth}px; height: ${scrollbarWidth}px; }
+        .reader-document .pdf-workspace__viewport::-webkit-scrollbar-thumb { background: #888; }
       ` });
       await expect.poll(() => viewport(page).evaluate((element) =>
         (element as HTMLElement).offsetWidth - element.clientWidth)).toBe(scrollbarWidth);
@@ -463,19 +463,19 @@ for (const scrollbarWidth of [null, 15]) {
       const style = getComputedStyle(element);
       return [style.paddingLeft, style.paddingRight];
     })).toEqual(['10px', '10px']);
-    const frame = page.locator('.review-overlay-frame');
-    await expect(frame.locator('.review-overlay-frame__right-backing')).toHaveCSS('display', 'none');
-    await expect(frame.locator('.review-overlay-frame__right-fade')).toHaveCSS('display', 'none');
+    const frame = page.locator('.reader-overlay-frame');
+    await expect(frame.locator('.reader-overlay-frame__right-backing')).toHaveCSS('display', 'none');
+    await expect(frame.locator('.reader-overlay-frame__right-fade')).toHaveCSS('display', 'none');
     await fit(page, 'text');
     const expectBalancedMargins = async (index = 0) => {
       await expect.poll(async () => {
-        const { clearRight } = await page.locator('[data-review-stage]').evaluate(documentEdgeGeometry);
+        const { clearRight } = await page.locator('[data-reader-stage]').evaluate(documentEdgeGeometry);
         return mainPage(page, index).evaluate((element, { pageIndex, clearRight }) => {
           const bounds = element.getBoundingClientRect();
           const zoom = bounds.width / 600;
           const textLeft = bounds.left + (pageIndex % 2 === 0 ? 90 : 210) * zoom;
           const textRight = textLeft + 300 * zoom;
-          const viewport = element.closest('.review-document')!.getBoundingClientRect();
+          const viewport = element.closest('.reader-document')!.getBoundingClientRect();
           // Native horizontal scrolling quantizes to whole CSS pixels; WebKit
           // truncates fractional offsets. Compare centers, since a margin
           // difference doubles that subpixel positioning error.
@@ -503,10 +503,10 @@ for (const scrollbarWidth of [null, 15]) {
     await page.keyboard.press('Escape');
     await page.mouse.move(0, 1090);
     await page.getByRole('button', { name: 'Show Workspace', exact: true }).click();
-    await expect(page.locator('#review-tools-workspace')).toHaveAttribute('data-tools-workspace-open', 'true');
+    await expect(page.locator('#reader-tools-workspace')).toHaveAttribute('data-tools-workspace-open', 'true');
     await expectBalancedMargins(1);
     await page.getByRole('group', { name: 'Workspace trays', exact: true }).getByRole('button', { name: 'Hide Workspace', exact: true }).click();
-    await expect(page.locator('#review-tools-workspace')).toHaveAttribute('data-tools-workspace-open', 'false');
+    await expect(page.locator('#reader-tools-workspace')).toHaveAttribute('data-tools-workspace-open', 'false');
     await expectBalancedMargins(1);
   });
 }

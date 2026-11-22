@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
-import { reduceDocument } from '../../../packages/core/src/review-reducer.js';
-import { createDocumentState, type DocumentState } from '../../../packages/core/src/review-model.js';
+import { reduceDocument } from '../../../packages/core/src/document-reducer.js';
+import { createDocumentState, type DocumentState } from '../../../packages/core/src/document-model.js';
 import {
   beginDocumentInteraction,
   createAuthoringSession,
   pendingDraftForAuthoring,
   type DocumentInteractionReceipt,
-} from '../src/review/authoring-session.js';
+} from '../src/reader/authoring-session.js';
 
 const selection = {
   pageIndex: 0,

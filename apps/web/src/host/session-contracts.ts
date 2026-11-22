@@ -3,12 +3,12 @@ import type {
   ReadingLocationResolutionRequestV1,
   ReadingLocationResolutionV1,
   DocumentExportFence,
-} from "../../../../packages/core/src/review-runtime-protocol.js";
-import type { DocumentCommand, DocumentStateView, SaveDestinationConfirmation } from "../../../../packages/core/src/review-model.js";
+} from "../../../../packages/core/src/document-runtime-protocol.js";
+import type { DocumentCommand, DocumentStateView, SaveDestinationConfirmation } from "../../../../packages/core/src/document-model.js";
 import type { SaveStatus } from "../../../../packages/core/src/save-status.js";
 import type { LiveContextBindingStatus } from "../../../../packages/core/src/live-context.js";
-import type { RejectedDocumentCommand } from "../review/review-command-result.js";
-import type { DocumentInteractionTransport } from "../review/authoring-session.js";
+import type { RejectedDocumentCommand } from "../reader/document-command-result.js";
+import type { DocumentInteractionTransport } from "../reader/authoring-session.js";
 
 export interface ProductionSession {
   readonly sessionId: string;

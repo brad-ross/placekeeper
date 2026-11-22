@@ -1,6 +1,6 @@
 import type { PdfRewriteEligibility } from "../../../../packages/core/src/pdf-writer.js";
 import type { PlacekeeperLinkLocation } from "../../../../packages/core/src/placekeeper-link.js";
-import type { Annotation, DocumentState, DocumentWorkflowMode } from "../../../../packages/core/src/review-model.js";
+import type { Annotation, DocumentState, DocumentWorkflowMode } from "../../../../packages/core/src/document-model.js";
 import type { SessionCredentialStore } from "../../../../packages/core/src/session-security.js";
 import type { ChromePdfInspection } from "../browser/chrome-pdf-validator.js";
 import type { RestartReconnectStore } from "../context/restart-reconnect-store.js";

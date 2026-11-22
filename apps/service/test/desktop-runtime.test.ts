@@ -6,8 +6,8 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { reduceDocument } from "../../../packages/core/src/review-reducer.js";
-import type { PendingDocumentDraftV1, DocumentCommand, DocumentState } from "../../../packages/core/src/review-model.js";
+import { reduceDocument } from "../../../packages/core/src/document-reducer.js";
+import type { PendingDocumentDraftV1, DocumentCommand, DocumentState } from "../../../packages/core/src/document-model.js";
 
 import { DraftSnapshotStore } from "../src/recovery/draft-snapshot.js";
 

@@ -13,8 +13,8 @@ import {
   projectAnnotation,
   projectAnnotationProjections,
 } from '../../packages/core/src/annotation-projection.js';
-import { MAX_DOCUMENT_SELECTION_SEGMENTS } from '../../packages/core/src/review-reducer.js';
-import type { Annotation, DocumentState } from '../../packages/core/src/review-model.js';
+import { MAX_DOCUMENT_SELECTION_SEGMENTS } from '../../packages/core/src/document-reducer.js';
+import type { Annotation, DocumentState } from '../../packages/core/src/document-model.js';
 import {
   createEmbedPdfWriter,
   inspectPdfWithEmbedPdf,

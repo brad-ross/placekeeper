@@ -1,7 +1,7 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 
-const fixtureUrl = '/test/acceptance/review-harness/index.html?reconciliation=1';
-const productionFixtureUrl = '/test/acceptance/review-harness/index.html?visual=tray&reconciliation=1';
+const fixtureUrl = '/test/acceptance/reader-harness/index.html?reconciliation=1';
+const productionFixtureUrl = '/test/acceptance/reader-harness/index.html?visual=tray&reconciliation=1';
 
 const viewports = [
   { name: 'wide', width: 1280, height: 900 },
@@ -11,13 +11,13 @@ const viewports = [
 async function openAnnotations(page: Page) {
   const presentation = (page.viewportSize()?.width ?? 1280) < 900 ? 'bottom' : 'right';
   const workspace = presentation === 'bottom'
-    ? page.locator('#review-workspace')
-    : page.locator('#review-tools-workspace');
+    ? page.locator('#reader-workspace')
+    : page.locator('#reader-tools-workspace');
   const openAttribute = presentation === 'bottom'
     ? 'data-workspace-open'
     : 'data-tools-workspace-open';
 
-  await expect(page.locator('[data-review-stage]')).toHaveAttribute(
+  await expect(page.locator('[data-reader-stage]')).toHaveAttribute(
     'data-workspace-presentation',
     presentation,
   );
@@ -535,7 +535,7 @@ test('reattachment suppresses PDF caret and action shortcuts until the reader ex
   const trigger = reattachmentRow(panel).getByRole('button', {
     name: /Reattach previous Highlight annotation on page 1/u,
   });
-  const caret = page.locator('[data-review-insertion-caret]');
+  const caret = page.locator('[data-reader-insertion-caret]');
 
   await page.getByRole('button', { name: 'Use caret' }).click();
   await expect(caret).toBeVisible();
@@ -625,7 +625,7 @@ test('reattachment suppresses PDF caret and action shortcuts until the reader ex
 test('header Delete settles a failed terminal reattachment before later interactions', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 760 });
   await page.goto(
-    '/test/acceptance/review-harness/index.html?reconciliation=default'
+    '/test/acceptance/reader-harness/index.html?reconciliation=default'
       + '&interaction-lifecycle=1&finalize-fails-twice=1',
   );
   const panel = await openAnnotations(page);
@@ -681,7 +681,7 @@ test('header Delete settles a failed terminal reattachment before later interact
   expect(kinds).toEqual(['delete', 'highlight']);
   await expect(panel.locator('[data-reconciliation-entry]')).toHaveCount(1);
   await expect(highlightTrigger).toHaveCount(0);
-  await expect(panel.locator(`[data-review-item="${highlightTarget}"]`)).toHaveCount(1);
+  await expect(panel.locator(`[data-annotation-item="${highlightTarget}"]`)).toHaveCount(1);
 
   const deleteTrigger = panel.getByRole('button', {
     name: 'Reattach previous Delete annotation on page 2',
@@ -700,7 +700,7 @@ test('header Delete settles a failed terminal reattachment before later interact
 
 test('Escape from the PDF closes the attachment reader instead of the workspace', async ({ page }) => {
   const panel = await openFixture(page, viewports[0]);
-  const workspace = page.locator('#review-tools-workspace');
+  const workspace = page.locator('#reader-tools-workspace');
   const trigger = reattachmentRow(panel).getByRole('button', {
     name: /Reattach previous Highlight annotation on page 1/u,
   });

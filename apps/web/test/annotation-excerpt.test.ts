@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { annotationExcerptOverflows } from '../src/review/AnnotationExcerpt.js';
+import { annotationExcerptOverflows } from '../src/reader/AnnotationExcerpt.js';
 
 describe('annotation excerpt overflow geometry', () => {
   it('only reports rendered overflow beyond the reserved three-line box', () => {

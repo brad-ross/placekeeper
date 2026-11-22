@@ -6,7 +6,7 @@ import { expect, test, type Locator, type Page } from "@playwright/test";
 import { PDFArray, PDFDict, PDFDocument, PDFName } from "pdf-lib";
 
 import { PlacekeeperHost } from "../../apps/service/src/host/placekeeper-host.js";
-import { addPageNote } from "../../packages/core/src/review-commands.js";
+import { addPageNote } from "../../packages/core/src/document-commands.js";
 import { readEditableAnnotations } from "../../packages/pdf-backends/src/embedpdf-adapter.js";
 
 /*
@@ -360,7 +360,7 @@ test("Covers AE1. a split citation previews its bibliography entry, names its ta
     return band.getBoundingClientRect().bottom - viewport.getBoundingClientRect().top;
   });
   await expect.poll(bandBottom).toBeGreaterThan(0);
-  await page.locator(".review-chrome__page-input").focus();
+  await page.locator(".reader-chrome__page-input").focus();
   await referenceViewport.hover();
   await page.mouse.wheel(0, Math.ceil(await bandBottom()) + 8);
   await expect.poll(bandBottom).toBeLessThan(0);
@@ -416,7 +416,7 @@ test("Covers AE4. the main-reader band clears once scrolled fully out of view an
   await expect(bands).toHaveCount(3, { timeout: READY_TIMEOUT_MS });
   // The band appears while the jump is still settling; scrolling before it
   // settles would be pulled back to the destination.
-  await expect(page.locator(".review-workspace__status"))
+  await expect(page.locator(".reader-workspace__status"))
     .toHaveText("Main document destination opened.", { timeout: READY_TIMEOUT_MS });
   const viewport = mainWorkspace(page).locator("[data-viewer-framing-viewport]");
   await expect.poll(() => boundsInside(bands.first(), viewport)).toBe(true);
@@ -553,7 +553,7 @@ test("a long link-derived tab name truncates in the right-docked bar and keeps i
   const tablist = page.getByRole("tablist", { name: "Open references" });
 
   // Bottom dock: tabs stack in a vertical rail and the name fills the rail.
-  await expect(page.locator("[data-review-stage]")).toHaveAttribute("data-reference-layout", "wide-bottom");
+  await expect(page.locator("[data-reader-stage]")).toHaveAttribute("data-reference-layout", "wide-bottom");
   await expect(tablist).toHaveAttribute("aria-orientation", "vertical");
   const rail = await label.evaluate((element) => ({
     overflow: getComputedStyle(element).textOverflow,
@@ -570,7 +570,7 @@ test("a long link-derived tab name truncates in the right-docked bar and keeps i
   await moveRight.locator("..").hover();
   await expect(moveRight).toHaveCSS("opacity", "1");
   await moveRight.click();
-  await expect(page.locator("[data-review-stage]")).toHaveAttribute("data-reference-layout", "wide-right");
+  await expect(page.locator("[data-reader-stage]")).toHaveAttribute("data-reference-layout", "wide-right");
   await expect(tablist).toHaveAttribute("aria-orientation", "horizontal");
   const capped = await label.evaluate((element) => ({
     overflow: getComputedStyle(element).textOverflow,
@@ -588,9 +588,9 @@ test("main link hit targets and their menu stay below an overlapping References 
   const first = await openLinkMenu(page, bodyLink(page, 4, 0), 4);
   await expectSnippetReady(first);
   await chooseOpenInReferences(page, first, `${AGARWAL}, Page 4`);
-  const stage = page.locator("[data-review-stage]");
+  const stage = page.locator("[data-reader-stage]");
   await expect(stage).toHaveAttribute("data-reference-layout", "wide-bottom");
-  const referenceSurface = page.locator("[data-review-workspace]");
+  const referenceSurface = page.locator("[data-reader-workspace]");
   await expect.poll(() => referenceSurface.evaluate((element) => getComputedStyle(element).transform))
     .toBe("none");
 

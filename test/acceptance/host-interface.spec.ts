@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 
 test('host bootstrap loads the outline for a resumed document generation', async ({ page }) => {
-  await page.goto('/test/acceptance/review-harness/?host-history=1&host-resumed=1');
+  await page.goto('/test/acceptance/reader-harness/?host-history=1&host-resumed=1');
   await page.locator('#root').evaluate(root => { root.dataset.productionRoot = 'true'; });
   const loading = page.getByRole('status', { name: 'Opening document', exact: true });
   for (const width of [1280, 375]) {
@@ -31,7 +31,7 @@ test('host bootstrap loads the outline for a resumed document generation', async
 for (const source of ['main', 'reference']) {
   test(`host bootstrap attaches history before opening a ${source} link in Main`, async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 900 });
-    await page.goto('/test/acceptance/review-harness/?host-history=1');
+    await page.goto('/test/acceptance/reader-harness/?host-history=1');
     await expect(page.locator('[data-runtime-loading-workspace]')).toBeVisible();
     await page.getByRole('button', { name: 'Finish host bootstrap' }).click();
     await expect(page.locator('[data-runtime-loading-workspace]')).toHaveCount(0);
@@ -68,7 +68,7 @@ for (const source of ['main', 'reference']) {
     const back = page.getByRole('button', { name: 'Back in document history' });
     await expect(back).toBeVisible();
     await expect(back).toBeEnabled();
-    await page.locator('[data-review-chrome]').hover({ position: { x: 2, y: 2 } });
+    await page.locator('[data-reader-chrome]').hover({ position: { x: 2, y: 2 } });
     await back.click();
     await expect(pageInput).toHaveValue('1');
     await page.getByRole('button', { name: 'Forward in document history' }).click();
@@ -77,7 +77,7 @@ for (const source of ['main', 'reference']) {
 }
 
 test('host reattachment with no unresolved annotations gives transient neutral feedback', async ({ page }) => {
-  await page.goto('/test/acceptance/review-harness/?host-reattach=1');
+  await page.goto('/test/acceptance/reader-harness/?host-reattach=1');
   const notice = page.locator('[data-host-command-status]');
   await expect(notice).toHaveCount(0);
   await page.getByRole('button', { name: 'Request host reattachment' }).click();
@@ -306,7 +306,7 @@ test('Chrome popup supports Tab and Space with a neutral keyboard focus ring', a
 async function openAnimatedHostDocument(page: Page, width = 1280) {
   await page.setViewportSize({ width, height: 900 });
   await page.emulateMedia({ reducedMotion: 'no-preference' });
-  await page.goto('/test/acceptance/review-harness/?host-history=1');
+  await page.goto('/test/acceptance/reader-harness/?host-history=1');
   // This host harness normally omits the production root's design tokens.
   await page.locator('#root').evaluate((root) => { root.dataset.productionRoot = 'true'; });
   await page.getByRole('button', { name: 'Finish host bootstrap' }).click();
@@ -318,7 +318,7 @@ test('normal-motion workspace opening and closing refit after the tray settles',
   await openAnimatedHostDocument(page, 960);
   const samples = await page.evaluate(() => new Promise<{ width: number; trayX: number }[]>((resolve) => {
     const pdf = document.querySelector<HTMLElement>('[data-page-index="0"]')!;
-    const tray = document.querySelector<HTMLElement>('#review-tools-workspace')!;
+    const tray = document.querySelector<HTMLElement>('#reader-tools-workspace')!;
     const samples: { width: number; trayX: number }[] = [];
     const start = performance.now();
     const sample = () => {
@@ -363,11 +363,11 @@ for (const width of [1280, 640]) {
     await openAnimatedHostDocument(page, width);
     await page.getByRole('button', { name: 'Open PDF link to Primary result, Page 2', exact: true }).click();
     await page.getByRole('menuitem', { name: 'Open in References', exact: true }).click();
-    const references = page.locator('.review-workspace');
+    const references = page.locator('.reader-workspace');
     await expect(references).toHaveAttribute('data-workspace-open', 'true');
     await page.waitForTimeout(300);
     const samples = await page.evaluate(() => new Promise<{ height: number; y: number }[]>((resolve) => {
-      const tray = document.querySelector<HTMLElement>('.review-workspace')!;
+      const tray = document.querySelector<HTMLElement>('.reader-workspace')!;
       const samples: { height: number; y: number }[] = [];
       const start = performance.now();
       const sample = () => {
@@ -411,7 +411,7 @@ for (const { referencesOpen, tall, zoomPercent } of [
     if (referencesOpen) {
       await page.getByRole('button', { name: 'Open PDF link to Primary result, Page 2', exact: true }).click();
       await page.getByRole('menuitem', { name: 'Open in References', exact: true }).click();
-      await expect(page.locator('.review-workspace')).toHaveAttribute('data-workspace-open', 'true');
+      await expect(page.locator('.reader-workspace')).toHaveAttribute('data-workspace-open', 'true');
     }
     const zoom = page.getByRole('textbox', { name: /Current zoom/ });
     await zoom.fill(String(zoomPercent));
@@ -419,7 +419,7 @@ for (const { referencesOpen, tall, zoomPercent } of [
     await page.waitForTimeout(400);
     const samples = await page.evaluate(() => new Promise<{ width: number; y: number; trayHeight: number; trayX: number }[]>((resolve) => {
       const pdf = document.querySelector<HTMLElement>('[data-page-index="0"]')!;
-      const tray = document.querySelector<HTMLElement>('#review-tools-workspace')!;
+      const tray = document.querySelector<HTMLElement>('#reader-tools-workspace')!;
       const samples: { width: number; y: number; trayHeight: number; trayX: number }[] = [];
       const start = performance.now();
       const sample = () => {
@@ -462,7 +462,7 @@ test('refreshes the current page when workspace occlusion changes without scroll
     });
   };
   await page.setViewportSize({ width: 375, height: 800 });
-  await page.goto('/test/acceptance/review-harness/?host-history=1&host-resumed=1');
+  await page.goto('/test/acceptance/reader-harness/?host-history=1&host-resumed=1');
   await page.locator('#root').evaluate(root => { root.dataset.productionRoot = 'true'; });
   await page.getByRole('button', { name: 'Finish host bootstrap' }).click();
   const currentPage = page.getByRole('textbox', { name: /^Current page \d+ of 4/u });
@@ -514,7 +514,7 @@ test('refreshes the current page when a right workspace narrows mixed-width page
   }));
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.emulateMedia({ reducedMotion: 'reduce' });
-  await page.goto('/test/acceptance/review-harness/?host-history=1&host-resumed=1');
+  await page.goto('/test/acceptance/reader-harness/?host-history=1&host-resumed=1');
   await page.locator('#root').evaluate(root => { root.dataset.productionRoot = 'true'; });
   await page.getByRole('button', { name: 'Finish host bootstrap' }).click();
   const currentPage = page.getByRole('textbox', { name: /^Current page \d+ of 4/u });

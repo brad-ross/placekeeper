@@ -1,5 +1,5 @@
 import { realpath } from 'node:fs/promises';
-import { ExtensionRecentDocuments } from './extension-recent-reviews.js';
+import { ExtensionRecentDocuments } from './extension-recent-documents.js';
 import { HostResourcePersistence, type HostCopyRecoveryMatch } from './host-resource-persistence.js';
 import type { HostResourceRequest, HostResourceFile } from '../../../../packages/core/src/host-resource-protocol.js';
 import { reconcileNativeSource } from "./reconcile-native-source.js";
@@ -7,8 +7,8 @@ import { randomBytes } from 'node:crypto';
 import { digestSecretHex } from '../../../../packages/core/src/session-security.js';
 import { CODEX_MAX_ENCODED_RESPONSE_BYTES, parseCodexAppRequest, type CodexAppResponse } from '../../../../packages/core/src/codex-mcp-protocol.js';
 import { parseExtensionRequest, type ExtensionResult, type ExtensionPresentation, type ExtensionRequest } from '../../../../packages/core/src/extension-protocol.js';
-import { DocumentExportConflictError } from '../../../../packages/core/src/review-runtime-protocol.js';
-import type { UpgradeDocumentStatus } from '../../../../packages/core/src/upgrade-review-protocol.js';
+import { DocumentExportConflictError } from '../../../../packages/core/src/document-runtime-protocol.js';
+import type { UpgradeDocumentStatus } from '../../../../packages/core/src/upgrade-document-protocol.js';
 import type { SessionBroker } from '../sessions/session-broker.js';
 import type { OpenDocumentResult, RecoveryOfferIdentity } from '../sessions/session-contracts.js';
 import type { CodexActiveScope, CodexServiceRuntimeBackend } from './codex-runtime-backend.js';

@@ -5,7 +5,7 @@ import { isAbsolute } from "node:path";
 import { assessPdfRewriteEligibility } from "../../../../packages/pdf-backends/src/embedpdf-adapter.js";
 import { readEditableAnnotations } from "../../../../packages/pdf-backends/src/embedpdf-adapter.js";
 import type { PdfRewriteEligibility } from "../../../../packages/core/src/pdf-writer.js";
-import type { Annotation } from "../../../../packages/core/src/review-model.js";
+import type { Annotation } from "../../../../packages/core/src/document-model.js";
 import { MAX_CHROME_PDF_BYTES } from "./chrome-pdf-limits.js";
 
 const MAX_VALIDATION_OUTPUT_BYTES = 1_024;

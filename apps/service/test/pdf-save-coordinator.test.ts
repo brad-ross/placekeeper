@@ -6,10 +6,10 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { setAnnotationName } from "../../../packages/core/src/review-commands.js";
+import { setAnnotationName } from "../../../packages/core/src/document-commands.js";
 import { PdfWriterError, type PdfWriter } from "../../../packages/core/src/pdf-writer.js";
 import { inspectProjectedPortableAnnotations } from "../../../packages/core/src/portable-annotation.js";
-import type { DocumentCommand, Annotation, DocumentState } from "../../../packages/core/src/review-model.js";
+import type { DocumentCommand, Annotation, DocumentState } from "../../../packages/core/src/document-model.js";
 import { NativeRuntimeManager } from "../src/desktop/native-runtime.js";
 import { ChromeServiceRuntimeBackend } from "../src/browser/chrome-runtime-backend.js";
 import { ChromeTransferStore } from "../src/browser/chrome-handoff.js";

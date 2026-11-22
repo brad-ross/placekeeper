@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { createDocumentState, type DocumentCommand } from "../../../packages/core/src/review-model.js";
+import { createDocumentState, type DocumentCommand } from "../../../packages/core/src/document-model.js";
 import type { SaveStatus } from "../../../packages/core/src/save-status.js";
 import {
   gateDocumentCommand,

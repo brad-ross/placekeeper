@@ -14,7 +14,7 @@ import {
   type ChromeRuntimeBackend,
   type ChromeRuntimeProjection,
 } from "../src/browser/chrome-runtime.js";
-import { DocumentInteractions } from "../src/sessions/review-interactions.js";
+import { DocumentInteractions } from "../src/sessions/document-interactions.js";
 
 const origin = "chrome-extension://cgegjjjhbhnfgcoipeffhogoojfoekgg/";
 const connectionId = "connection-runtime-1";

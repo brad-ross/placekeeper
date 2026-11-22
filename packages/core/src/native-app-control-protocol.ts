@@ -1,4 +1,4 @@
-import { isUpgradeDocumentSettlement, upgradeDocumentStatus, type UpgradeDocumentStatus, type UpgradeDocumentSettlement } from "./upgrade-review-protocol.js";
+import { isUpgradeDocumentSettlement, upgradeDocumentStatus, type UpgradeDocumentStatus, type UpgradeDocumentSettlement } from "./upgrade-document-protocol.js";
 import { isEditorEndpoint, isEditorPath, isEditorToken } from "./editor-navigation-protocol.js";
 export const NATIVE_APP_CONTROL_PROTOCOL_VERSION = 1 as const;
 

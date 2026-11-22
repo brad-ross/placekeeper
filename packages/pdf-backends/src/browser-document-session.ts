@@ -4,7 +4,7 @@ import type {
   PdfWriteResult,
   PdfWriter,
 } from '../../core/src/pdf-writer.js';
-import type { Annotation } from '../../core/src/review-model.js';
+import type { Annotation } from '../../core/src/document-model.js';
 
 export interface BrowserPdfProjectionIdentity {
   readonly pageIndex: number;

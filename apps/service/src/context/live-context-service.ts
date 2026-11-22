@@ -11,13 +11,13 @@ import {
   type LiveSaveStatus,
   type DocumentSnapshot,
 } from "../../../../packages/core/src/live-context.js";
-import type { SourceHint } from "../../../../packages/core/src/structured-review-item.js";
+import type { SourceHint } from "../../../../packages/core/src/structured-annotation.js";
 import {
   anchorEvidenceFromAnnotation,
   normalizeDocumentSelectionAnchor,
   type JsonValue,
   type Annotation,
-} from "../../../../packages/core/src/review-model.js";
+} from "../../../../packages/core/src/document-model.js";
 import { portableAnnotationProjectionId } from "../../../../packages/core/src/grouped-annotation-envelope.js";
 import { isNavigationalPdfAnnotationSubtype } from "../../../../packages/core/src/pdf-annotation-classification.js";
 import { inspectPdfAnnotationCatalogWithEmbedPdf } from "../../../../packages/pdf-backends/src/embedpdf-adapter.js";

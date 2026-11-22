@@ -13,7 +13,7 @@ import {
   type AtomicLiveContextObservationV1,
   type LiveExecutionBaselineV1,
 } from "../../../../packages/core/src/live-context.js";
-import type { Annotation } from "../../../../packages/core/src/review-model.js";
+import type { Annotation } from "../../../../packages/core/src/document-model.js";
 import {
   inspectPdfWithEmbedPdf,
   type InspectedPdf,

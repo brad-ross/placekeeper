@@ -1,0 +1,1238 @@
+import { useCallback, useId, useLayoutEffect, useRef, useState, type MouseEvent, type PointerEvent, type ReactNode, type Ref } from 'react';
+
+import {
+  VIEWER_ZOOM_MAX_PERCENT,
+  VIEWER_ZOOM_MIN_PERCENT,
+  type ViewerControls,
+  type ViewerControlsSnapshot,
+} from '../pdf/viewer-controls.js';
+import type { PdfFitMode, PdfFitState } from '../pdf/viewer-navigation.js';
+import { ReaderIcon } from './ReaderIcon.js';
+import { ReaderTooltipButton } from './ReaderTooltipButton.js';
+import type { LiveContextBindingStatus } from '../../../../packages/core/src/live-context.js';
+import { CodexContextStatus } from './CodexContextStatus.js';
+import { DocumentContextButton, type DocumentContextButtonProps } from './DocumentContextButton.js';
+import { CopyLinkControl, type CopyLinkControlProps } from './CopyLinkControl.js';
+import {
+  DocumentActionsMenu,
+  documentIdentityLabel,
+  type DocumentActionsMenuProps,
+} from './DocumentActionsMenu.js';
+import { TopBarMenu } from './TopBarMenu.js';
+import {
+  READER_CHROME_PRESENTATIONS,
+  chooseReaderChromeHistoryCompact,
+  chooseReaderChromePresentation,
+  chooseReaderChromeTitlePresentation,
+  type ReaderChromePresentation,
+  type ReaderChromePresentationWidths,
+  type ReaderChromeTitlePresentation,
+} from './reader-chrome-layout.js';
+
+/**
+ * Width left for the document title text once the other toolbar controls
+ * and the title button's own icon and padding have their natural widths.
+ * Independent of whether the title is currently shown.
+ */
+function measureReaderChromeTitleRoom(chrome: HTMLElement): number {
+  const style = getComputedStyle(chrome);
+  const contentWidth = chrome.clientWidth
+    - (Number.parseFloat(style.paddingLeft) || 0)
+    - (Number.parseFloat(style.paddingRight) || 0);
+  const columnGap = Number.parseFloat(style.columnGap) || 0;
+  const width = (element: Element | null) => element?.getBoundingClientRect().width ?? 0;
+  const identity = chrome.querySelector<HTMLElement>(':scope > .reader-chrome__identity');
+  const trigger = identity?.querySelector<HTMLElement>('.reader-chrome__save-identity') ?? null;
+  const filename = trigger?.querySelector<HTMLElement>('.reader-chrome__filename') ?? null;
+  const context = identity?.querySelector<HTMLElement>(':scope > [data-reader-context-status]') ?? null;
+  const trays = chrome.querySelector(':scope > .reader-chrome__tray-controls');
+  const identityGap = identity === null ? 0 : Number.parseFloat(getComputedStyle(identity).columnGap) || 0;
+  const filenameShown = filename !== null && getComputedStyle(filename).display !== 'none';
+  const triggerChrome = width(trigger) - (filenameShown ? width(filename) : 0);
+  return contentWidth
+    - width(chrome.querySelector(':scope > .reader-chrome__left-controls'))
+    - width(chrome.querySelector(':scope > .reader-chrome__viewer-controls'))
+    - 2 * columnGap
+    - (trays === null ? 0 : width(trays) + columnGap)
+    - (context === null ? 0 : width(context) + identityGap)
+    - triggerChrome;
+}
+
+export function validPageNumber(draft: string, totalPages: number): number | undefined {
+  const normalized = draft.trim();
+  if (!/^[+-]?\d+$/u.test(normalized)) return undefined;
+  const pageNumber = Number(normalized);
+  if (!Number.isSafeInteger(pageNumber)) return undefined;
+  return Math.min(Math.max(pageNumber, 1), totalPages);
+}
+
+export function validZoomPercent(draft: string): number | undefined {
+  const normalized = draft.trim();
+  if (!/^[+-]?\d+$/u.test(normalized)) return undefined;
+  const zoomPercent = Number(normalized);
+  if (!Number.isSafeInteger(zoomPercent)) return undefined;
+  return Math.min(
+    Math.max(zoomPercent, VIEWER_ZOOM_MIN_PERCENT),
+    VIEWER_ZOOM_MAX_PERCENT,
+  );
+}
+
+export type ResolvedZoomDraft =
+  | { readonly valid: false }
+  | { readonly valid: true; readonly request?: number };
+
+export function resolveZoomDraft(draft: string, publishedZoomPercent: number): ResolvedZoomDraft {
+  const zoomPercent = validZoomPercent(draft);
+  if (zoomPercent === undefined) return { valid: false };
+  return zoomPercent === publishedZoomPercent
+    ? { valid: true }
+    : { valid: true, request: zoomPercent };
+}
+
+export function zoomEditorKeyAction(
+  key: string,
+  isComposing: boolean,
+): 'submit' | 'cancel' | undefined {
+  if (isComposing) return undefined;
+  if (key === 'Enter') return 'submit';
+  if (key === 'Escape') return 'cancel';
+  return undefined;
+}
+
+export type TopBarMenuId = 'document' | 'navigation' | 'zoom' | 'history';
+
+const FIT_MODES: readonly PdfFitMode[] = ['page', 'width', 'text'];
+const FIT_LABELS: Record<PdfFitMode, string> = { page: 'Fit page', width: 'Fit width', text: 'Fit text' };
+const FIT_ICONS = { page: 'fit-page', width: 'fit-width', text: 'fit-text' } as const;
+
+export function resolveTopBarMenuRequest(input: {
+  readonly activeMenu: TopBarMenuId | null;
+  readonly requestedMenu: TopBarMenuId;
+  readonly requestedOpen: boolean;
+  readonly documentMenuPending: boolean;
+}): TopBarMenuId | null {
+  if (input.documentMenuPending) return 'document';
+  if (input.requestedOpen) return input.requestedMenu;
+  return input.activeMenu === input.requestedMenu ? null : input.activeMenu;
+}
+
+/** Fits the page input to its digits (about 0.6em each) plus its 6px left padding. */
+export function pageInputWidth(value: string): string {
+  return `calc(${Math.max(1, value.length) * 0.62}em + 6px)`;
+}
+
+/** Fits the zoom input to its digits; its 6px lead sits on the zoom value. */
+export function zoomInputWidth(value: string): string {
+  return `${Math.max(1, value.length) * 0.62}em`;
+}
+
+export interface ReaderChromeTrayToggle {
+  readonly surface: 'right' | 'bottom';
+  readonly target: 'Workspace' | 'References';
+  readonly open: boolean;
+  readonly controls: string;
+  readonly buttonRef: Ref<HTMLButtonElement>;
+  readonly onToggle: () => void;
+}
+
+export interface ReaderChromeProps {
+  readonly documentTitle: string;
+  /** The PDF's own title when it has one; shown in place of the filename. */
+  readonly displayTitle?: string;
+  readonly savedLabel?: string;
+  readonly showSaveStatusDot?: boolean;
+  readonly savePhase?: 'clean' | 'saving' | 'not-saved';
+  readonly savePendingDestination?: boolean;
+  readonly saveOptionsOpen?: boolean;
+  readonly documentActions?: Omit<
+    DocumentActionsMenuProps,
+    | 'documentTitle'
+    | 'displayTitle'
+    | 'savedLabel'
+    | 'savePhase'
+    | 'open'
+    | 'onOpenChange'
+    | 'onPendingChange'
+  >;
+  readonly controls?: ViewerControls;
+  readonly viewerState: ViewerControlsSnapshot;
+  readonly fitWidthReady?: boolean;
+  readonly onFitWidth?: () => void | Promise<void>;
+  readonly fitState?: PdfFitState;
+  readonly onFitMode?: (mode: PdfFitMode) => void | Promise<void>;
+  readonly onManualZoom?: () => void;
+  readonly horizontalScrollLocked?: boolean;
+  readonly horizontalScrollAvailable?: boolean;
+  readonly fitWidthCurrent?: boolean;
+  readonly onToggleHorizontalScrollLock?: () => void;
+  readonly beforeViewerAction?: () => Promise<void>;
+  readonly canUndo: boolean;
+  readonly canRedo: boolean;
+  readonly canNavigateBack?: boolean;
+  readonly canNavigateForward?: boolean;
+  readonly documentNavigationPending?: boolean;
+  readonly codexContext?: LiveContextBindingStatus;
+  readonly documentContext?: DocumentContextButtonProps;
+  readonly copyLink?: CopyLinkControlProps;
+  readonly onUndo: () => void;
+  readonly onRedo: () => void;
+  readonly onNavigateBack?: () => void;
+  readonly onNavigateForward?: () => void;
+  readonly onSaveOptions?: () => void;
+  readonly saveOptionsAvailable?: boolean;
+  readonly workspaceTrayToggles?: readonly ReaderChromeTrayToggle[];
+  readonly showReferencesShortcut?: boolean;
+}
+
+export function ReaderChrome({
+  showSaveStatusDot = true,
+  documentTitle,
+  displayTitle = documentTitle,
+  savedLabel = 'Saved',
+  savePhase = 'clean',
+  savePendingDestination = false,
+  saveOptionsOpen = false,
+  documentActions,
+  controls,
+  viewerState,
+  fitWidthReady = false,
+  onFitWidth = () => undefined,
+  fitState,
+  onFitMode,
+  onManualZoom,
+  horizontalScrollLocked = false,
+  horizontalScrollAvailable = false,
+  fitWidthCurrent = false,
+  onToggleHorizontalScrollLock,
+  beforeViewerAction,
+  canUndo,
+  canRedo,
+  canNavigateBack = false,
+  canNavigateForward = false,
+  documentNavigationPending = false,
+  codexContext,
+  documentContext,
+  copyLink,
+  onUndo,
+  onRedo,
+  onNavigateBack = () => undefined,
+  onNavigateForward = () => undefined,
+  onSaveOptions = () => undefined,
+  saveOptionsAvailable = true,
+  workspaceTrayToggles = [],
+  showReferencesShortcut = false,
+}: ReaderChromeProps) {
+  const hasWorkspaceTrayToggles = workspaceTrayToggles.length > 0;
+  const appleKeyboard = typeof navigator !== 'undefined' && /^(Mac|iPhone|iPad|iPod)/u.test(navigator.platform);
+  const referencesShortcutLabel = appleKeyboard ? '⌃⌘R' : 'Ctrl+Alt+R';
+  const referencesShortcutKeys = appleKeyboard ? 'Control+Meta+R' : 'Control+Alt+R';
+  const [compactTouch, setCompactTouch] = useState(false);
+  const compactHistoryFocusRef = useRef<TopBarMenuId | null>(null);
+  const [presentation, setPresentation] = useState<ReaderChromePresentation>('navigationCompact');
+  const [titlePresentation, setTitlePresentation] = useState<ReaderChromeTitlePresentation>('title');
+  // Too narrow for separate history controls even with an icon-only title.
+  const [narrowHistory, setNarrowHistory] = useState(false);
+  const titleMeasurementRef = useRef<{
+    presentation: ReaderChromeTitlePresentation;
+    narrow: boolean;
+    roomBeforeCombining: number | null;
+    widthBeforeCombining: number | null;
+    savings: number | null;
+  }>({ presentation: 'title', narrow: false, roomBeforeCombining: null, widthBeforeCombining: null, savings: null });
+  // Undo/Redo share one menu button and Back/Forward move into the page menu.
+  const compactHistory = compactTouch || narrowHistory;
+  const [activeTopBarMenu, setActiveTopBarMenu] = useState<TopBarMenuId | null>(null);
+  const topBarMenuKeyboardOpenRef = useRef(true);
+  const [topBarMenuHoverOpen, setTopBarMenuHoverOpen] = useState(false);
+  const [documentMenuPending, setDocumentMenuPending] = useState(false);
+  const [editingPage, setEditingPage] = useState(false);
+  const [pageDraft, setPageDraft] = useState('');
+  const [pageInvalid, setPageInvalid] = useState(false);
+  const pageInputRef = useRef<HTMLInputElement>(null);
+  const pagePointerActivationRef = useRef(false);
+  const restorePageTriggerFocus = useRef(false);
+  const pageStepIntent = useRef(false);
+  const focusedPageStep = useRef<HTMLButtonElement | null>(null);
+  const focusedHistoryAction = useRef<{ button: HTMLButtonElement; menuId: string } | null>(null);
+  const pageErrorId = useId();
+  const [editingZoom, setEditingZoom] = useState(false);
+  const [zoomDraft, setZoomDraft] = useState('');
+  const [zoomInvalid, setZoomInvalid] = useState(false);
+  const [fitRequestPending, setFitRequestPending] = useState(false);
+  const fitRequestRef = useRef(0);
+  const [fitOptionsOpen, setFitOptionsOpen] = useState(false);
+  const fitButtonRef = useRef<HTMLButtonElement | null>(null);
+  const fitOptionsRef = useRef<HTMLDivElement | null>(null);
+  const fitOptionsKeyboardOpenRef = useRef(false);
+  const fitOptionsDismissTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const fitChoiceFocusRef = useRef<'first' | 'last' | null>(null);
+  const fitOptionsId = `reader-fit-options-${useId().replaceAll(':', '')}`;
+  const zoomInputRef = useRef<HTMLInputElement>(null);
+  const zoomPointerActivationRef = useRef(false);
+  const restoreZoomTriggerFocus = useRef(false);
+  const zoomActionIntent = useRef(false);
+  const zoomErrorId = useId();
+  const saveTriggerRef = useRef<HTMLButtonElement>(null);
+  const chromeRef = useRef<HTMLElement>(null);
+  const sizingRackRef = useRef<HTMLDivElement>(null);
+  const measuredPresentationRef = useRef<ReaderChromePresentation | null>(null);
+  const presentationRef = useRef<ReaderChromePresentation>(presentation);
+  const activeTopBarMenuRef = useRef<TopBarMenuId | null>(null);
+  const documentMenuPendingRef = useRef(false);
+  const historyAnchorRef = useRef<HTMLElement | null>(null);
+  const navigationAnchorRef = useRef<HTMLElement | null>(null);
+  const zoomAnchorRef = useRef<HTMLElement | null>(null);
+  const navigationHoverRef = useRef<HTMLElement | null>(null);
+  const zoomHoverRef = useRef<HTMLElement | null>(null);
+  const pendingTransitionFocusRef = useRef<TopBarMenuId | null>(null);
+  const deferredTopBarFocusVersionRef = useRef(0);
+  const historyMenuId = `reader-history-menu-${useId().replaceAll(':', '')}`;
+  const navigationMenuId = `reader-navigation-menu-${useId().replaceAll(':', '')}`;
+  const zoomMenuId = `reader-zoom-menu-${useId().replaceAll(':', '')}`;
+  const saveOptionsWereOpen = useRef(saveOptionsOpen);
+  const saveStatusText = savePendingDestination
+    ? 'protected recovery, choose where to save'
+    : savePhase === 'not-saved'
+    ? 'not saved'
+    : savePhase === 'saving'
+      ? 'saving changes'
+      : savedLabel;
+  const saveStatusDisplay = savePendingDestination
+    ? 'Protected Recovery'
+    : savePhase === 'not-saved'
+    ? 'Not saved'
+    : savePhase === 'saving'
+      ? 'Saving changes'
+      : savedLabel;
+  const identityLabel = documentIdentityLabel(displayTitle, documentTitle);
+  const saveControlLabel = `${identityLabel}, ${saveStatusText}. Open automatic save options`;
+  const pageUnavailableId = 'viewer-page-controls-readiness';
+  const zoomUnavailableId = 'viewer-zoom-controls-readiness';
+  const fitWidthUnavailableId = 'viewer-fit-width-readiness';
+  const zoomUnavailable = viewerState.zoomReady ? undefined : zoomUnavailableId;
+  const selectedFit = fitState?.selectedMode ?? 'width';
+  const nextFit = FIT_MODES[(FIT_MODES.indexOf(selectedFit) + 1) % FIT_MODES.length]!;
+  const fitActive = fitState?.active ?? fitWidthCurrent;
+  const fitAction = fitActive ? nextFit : selectedFit;
+  const fitPending = fitState?.pending || fitRequestPending;
+  const fitStatus = fitPending ? 'Fitting…'
+    : !fitActive ? 'Custom zoom'
+    : fitState?.fallback ? 'Fit width, no reliable text bounds'
+    : FIT_LABELS[fitState?.effectiveMode ?? 'width'];
+  const fitLabel = onFitMode ? `Fit mode: ${fitStatus}. ${fitActive ? 'Next' : 'Apply'}: ${FIT_LABELS[fitAction]}` : 'Fit width';
+  const runViewerActionAsync = async (action: () => void | Promise<void>) => {
+    await beforeViewerAction?.();
+    await action();
+  };
+  const runViewerAction = (action: () => void) => {
+    void runViewerActionAsync(action);
+  };
+  const requestTopBarMenu = (requestedMenu: TopBarMenuId, requestedOpen: boolean) => {
+    if (requestedMenu !== 'zoom' || !requestedOpen) setFitOptionsOpen(false);
+    if (requestedOpen) deferredTopBarFocusVersionRef.current += 1;
+    setActiveTopBarMenu((activeMenu) => resolveTopBarMenuRequest({
+      activeMenu,
+      requestedMenu,
+      requestedOpen,
+      documentMenuPending,
+    }));
+  };
+  const openHoverMenu = (menu: 'navigation' | 'zoom', pointerType: string) => {
+    if (pointerType !== 'mouse' || !matchMedia('(hover: hover) and (pointer: fine)').matches || (menu === 'navigation'
+      ? !viewerState.pageReady || viewerState.totalPages <= 1
+      : !viewerState.zoomReady)) return;
+    if (activeTopBarMenu === menu) return;
+    setTopBarMenuHoverOpen(true);
+    topBarMenuKeyboardOpenRef.current = false;
+    requestTopBarMenu(menu, true);
+  };
+  const activateMenu = (menu: 'navigation' | 'zoom' | 'history', event: MouseEvent<HTMLButtonElement>) => {
+    const keyboard = event.detail === 0;
+    const pointerType = 'pointerType' in event.nativeEvent ? event.nativeEvent.pointerType : undefined;
+    const hover = matchMedia('(hover: hover) and (pointer: fine)').matches
+      && !keyboard && pointerType !== 'touch' && (topBarMenuHoverOpen || pointerType === 'mouse');
+    topBarMenuKeyboardOpenRef.current = keyboard;
+    setTopBarMenuHoverOpen(hover);
+    requestTopBarMenu(menu, hover || (keyboard && topBarMenuHoverOpen) || activeTopBarMenu !== menu);
+  };
+  const restoreTopBarTriggerFocus = (group: 'navigation' | 'zoom') => {
+    const version = ++deferredTopBarFocusVersionRef.current;
+    requestAnimationFrame(() => {
+      if (version !== deferredTopBarFocusVersionRef.current) return;
+      if (activeTopBarMenuRef.current !== null) return;
+      const target = group === 'navigation' ? navigationAnchorRef.current : zoomAnchorRef.current;
+      target?.focus({ preventScroll: true });
+    });
+  };
+  activeTopBarMenuRef.current = activeTopBarMenu;
+  documentMenuPendingRef.current = documentMenuPending;
+  presentationRef.current = presentation;
+
+  const prepareHistoryLayoutChange = useCallback(() => {
+    const focusedGroup = document.activeElement instanceof HTMLElement
+      ? document.activeElement.closest<HTMLElement>('[data-reader-chrome-group]')?.dataset.readerChromeGroup
+      : undefined;
+    // Combining history controls leaves the identity slot in place, so an
+    // open document menu survives with its focus and confirmation.
+    const documentMenuOpen = activeTopBarMenuRef.current === 'document';
+    compactHistoryFocusRef.current = documentMenuOpen ? null : activeTopBarMenuRef.current
+      ?? (focusedGroup as TopBarMenuId | undefined) ?? null;
+    if (!documentMenuOpen) setActiveTopBarMenu(null);
+  }, []);
+
+  useLayoutEffect(() => {
+    const media = matchMedia('(max-width: 480px) and (pointer: coarse)');
+    const update = () => {
+      if (media.matches === compactTouch) return;
+      if (!titleMeasurementRef.current.narrow) prepareHistoryLayoutChange();
+      setCompactTouch(media.matches);
+    };
+    update();
+    media.addEventListener('change', update);
+    return () => media.removeEventListener('change', update);
+  }, [compactTouch, prepareHistoryLayoutChange]);
+
+  useLayoutEffect(() => {
+    const group = compactHistoryFocusRef.current;
+    compactHistoryFocusRef.current = null;
+    if (group === null) return;
+    let target: HTMLElement | null | undefined;
+    switch (group) {
+      case 'history':
+        target = compactHistory ? historyAnchorRef.current
+          : chromeRef.current?.querySelector<HTMLElement>('.reader-chrome__history-control:not(:disabled)') ?? navigationAnchorRef.current;
+        break;
+      case 'navigation':
+        target = navigationAnchorRef.current;
+        break;
+      case 'zoom':
+        target = zoomAnchorRef.current;
+        break;
+      default:
+        target = chromeRef.current?.querySelector<HTMLElement>('[data-document-actions-trigger]') ?? saveTriggerRef.current;
+    }
+    target?.focus({ preventScroll: true });
+  }, [compactHistory]);
+
+  useLayoutEffect(() => {
+    const chrome = chromeRef.current;
+    const sizingRack = sizingRackRef.current;
+    if (!chrome || !sizingRack || typeof ResizeObserver === 'undefined') return;
+
+    let frame = 0;
+    let disposed = false;
+    const measure = () => {
+      frame = 0;
+      if (disposed) return;
+      const measuredWidths = Object.fromEntries(READER_CHROME_PRESENTATIONS.map((candidate) => {
+        const element = sizingRack.querySelector<HTMLElement>(
+          `[data-reader-chrome-candidate="${candidate}"]`,
+        );
+        return [candidate, element?.getBoundingClientRect().width ?? 0];
+      })) as ReaderChromePresentationWidths;
+      const availableWidth = chrome.getBoundingClientRect().width;
+      const nextPresentation = chooseReaderChromePresentation({
+        availableWidth,
+        widths: measuredWidths,
+        previous: measuredPresentationRef.current,
+      });
+      const measurementsValid = availableWidth > 0
+        && READER_CHROME_PRESENTATIONS.every((candidate) => measuredWidths[candidate] > 0);
+      if (measurementsValid) measuredPresentationRef.current = nextPresentation;
+      if (nextPresentation === presentationRef.current) return;
+      deferredTopBarFocusVersionRef.current += 1;
+
+      const activeElement = document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+      const focusedGroup = activeElement
+        ?.closest<HTMLElement>('[data-reader-chrome-group]')
+        ?.dataset.readerChromeGroup as TopBarMenuId | undefined;
+      // The document menu belongs to the identity slot, which every
+      // presentation keeps, so it stays open (with any stale-export
+      // confirmation) and keeps its own focus. Menus anchored to recomposed
+      // control groups close and return focus to their trigger.
+      const documentMenuOpen = activeTopBarMenuRef.current === 'document';
+      pendingTransitionFocusRef.current = documentMenuOpen ? null : activeTopBarMenuRef.current ?? focusedGroup ?? null;
+      setEditingPage(false);
+      setEditingZoom(false);
+      if (!documentMenuOpen) setActiveTopBarMenu(null);
+      setPresentation(nextPresentation);
+      presentationRef.current = nextPresentation;
+    };
+    const scheduleMeasure = () => {
+      if (disposed || frame !== 0) return;
+      frame = requestAnimationFrame(measure);
+    };
+    const observer = new ResizeObserver(scheduleMeasure);
+    observer.observe(chrome);
+    for (const candidate of sizingRack.querySelectorAll<HTMLElement>('[data-reader-chrome-candidate]')) {
+      observer.observe(candidate);
+    }
+    measure();
+    void document.fonts?.ready.then(scheduleMeasure);
+    return () => {
+      disposed = true;
+      if (frame !== 0) cancelAnimationFrame(frame);
+      observer.disconnect();
+    };
+  }, []);
+
+  // As the bar narrows: the title truncates with an ellipsis, then collapses
+  // to its file icon, then Undo/Redo and Back/Forward combine so the controls
+  // keep their normal spacing.
+  useLayoutEffect(() => {
+    const chrome = chromeRef.current;
+    if (!chrome || typeof ResizeObserver === 'undefined') return;
+    let frame = 0;
+    let disposed = false;
+    const measurement = titleMeasurementRef.current;
+    const measure = () => {
+      frame = 0;
+      if (disposed || chrome.clientWidth <= 0) return;
+      const titleRoom = measureReaderChromeTitleRoom(chrome);
+      const showsCombined = chrome.querySelector('.reader-chrome__history-trigger') !== null;
+      if (measurement.narrow && measurement.roomBeforeCombining !== null && showsCombined) {
+        // Count only the room the combined controls freed. If the bar also
+        // resized before this frame, that change in width is not savings;
+        // counting it could keep the controls combined at any width.
+        const widthChange = chrome.clientWidth - (measurement.widthBeforeCombining ?? chrome.clientWidth);
+        measurement.savings = titleRoom - measurement.roomBeforeCombining - widthChange;
+        measurement.roomBeforeCombining = null;
+        measurement.widthBeforeCombining = null;
+      }
+      const nextNarrow = chooseReaderChromeHistoryCompact({
+        titleRoom, compact: measurement.narrow, savings: measurement.savings,
+      });
+      if (nextNarrow !== measurement.narrow) {
+        measurement.narrow = nextNarrow;
+        // Record the room before combining so we can measure what it frees.
+        measurement.roomBeforeCombining = nextNarrow && !showsCombined ? titleRoom : null;
+        measurement.widthBeforeCombining = nextNarrow && !showsCombined ? chrome.clientWidth : null;
+        // Already combined (touch layout): nothing to free, so no runway owed.
+        measurement.savings = nextNarrow && showsCombined ? 0 : null;
+        if (chrome.dataset.readerChromeTouchCompact !== 'true') prepareHistoryLayoutChange();
+        setNarrowHistory(nextNarrow);
+      }
+      // Combined controls come after the title has collapsed; the freed room
+      // must not bring the title back, or widening would hide it again.
+      const next = measurement.narrow ? 'icon' : chooseReaderChromeTitlePresentation({
+        titleRoom, previous: measurement.presentation,
+      });
+      if (next === measurement.presentation) return;
+      measurement.presentation = next;
+      setTitlePresentation(next);
+    };
+    const scheduleMeasure = () => {
+      if (disposed || frame !== 0) return;
+      frame = requestAnimationFrame(measure);
+    };
+    const observer = new ResizeObserver(scheduleMeasure);
+    observer.observe(chrome);
+    for (const element of chrome.querySelectorAll<HTMLElement>(
+      ':scope > :is(.reader-chrome__identity, .reader-chrome__left-controls, .reader-chrome__viewer-controls, .reader-chrome__tray-controls)',
+    )) {
+      observer.observe(element);
+    }
+    measure();
+    void document.fonts?.ready.then(scheduleMeasure);
+    return () => {
+      disposed = true;
+      if (frame !== 0) cancelAnimationFrame(frame);
+      observer.disconnect();
+    };
+  }, [hasWorkspaceTrayToggles, prepareHistoryLayoutChange]);
+
+  useLayoutEffect(() => {
+    const focusGroup = pendingTransitionFocusRef.current;
+    if (focusGroup === null) return;
+    pendingTransitionFocusRef.current = null;
+    const anchors: Record<TopBarMenuId, HTMLElement | null> = {
+      document: chromeRef.current?.querySelector<HTMLElement>('[data-document-actions-trigger]') ?? null,
+      history: historyAnchorRef.current,
+      navigation: navigationAnchorRef.current,
+      zoom: zoomAnchorRef.current,
+    };
+    const target = anchors[focusGroup];
+    if (target && !target.contains(document.activeElement)) {
+      target.focus({ preventScroll: true });
+    }
+  }, [presentation]);
+
+  useLayoutEffect(() => {
+    if (saveOptionsWereOpen.current && !saveOptionsOpen) {
+      saveTriggerRef.current?.focus({ preventScroll: true });
+    }
+    saveOptionsWereOpen.current = saveOptionsOpen;
+  }, [saveOptionsOpen]);
+
+  useLayoutEffect(() => {
+    if (editingPage) {
+      pageInputRef.current?.focus({ preventScroll: true });
+      pageInputRef.current?.select();
+      return;
+    }
+    if (!restorePageTriggerFocus.current) return;
+    restorePageTriggerFocus.current = false;
+    pageInputRef.current?.focus({ preventScroll: true });
+  }, [editingPage]);
+
+  useLayoutEffect(() => {
+    if (editingZoom) {
+      zoomInputRef.current?.focus({ preventScroll: true });
+      zoomInputRef.current?.select();
+      return;
+    }
+    if (!restoreZoomTriggerFocus.current) return;
+    restoreZoomTriggerFocus.current = false;
+    zoomInputRef.current?.focus({ preventScroll: true });
+  }, [editingZoom]);
+
+  const startPageEdit = () => {
+    setPageDraft(String(viewerState.currentPage));
+    setPageInvalid(false);
+    setEditingPage(true);
+  };
+  const closePageEdit = (restoreFocus: boolean) => {
+    restorePageTriggerFocus.current = restoreFocus;
+    setPageInvalid(false);
+    setEditingPage(false);
+  };
+  const goToDraftPage = () => {
+    const pageNumber = validPageNumber(pageDraft, viewerState.totalPages);
+    if (pageNumber === undefined) return false;
+    if (pageNumber !== viewerState.currentPage) {
+      runViewerAction(() => controls?.goToPage(pageNumber));
+    }
+    return true;
+  };
+  const submitPageEditOnEnter = (closeMenu = false) => {
+    if (!goToDraftPage()) {
+      setPageInvalid(true);
+      return;
+    }
+    closePageEdit(!closeMenu);
+    if (closeMenu) {
+      requestTopBarMenu('navigation', false);
+      restoreTopBarTriggerFocus('navigation');
+    }
+  };
+  const submitPageEditOnBlur = () => {
+    goToDraftPage();
+    closePageEdit(false);
+  };
+  const preparePageStep = () => {
+    pageStepIntent.current = true;
+  };
+  const clearPageStepIntent = () => {
+    pageStepIntent.current = false;
+  };
+  const runPageStep = (button: HTMLButtonElement, step: () => void) => {
+    clearPageStepIntent();
+    button.focus({ preventScroll: true });
+    if (editingPage) closePageEdit(false);
+    runViewerAction(step);
+    focusedPageStep.current = button;
+  };
+  useLayoutEffect(() => {
+    const button = focusedPageStep.current;
+    if (activeTopBarMenu !== 'navigation') {
+      focusedPageStep.current = null;
+      return;
+    }
+    if (button === null || (button.isConnected && !button.disabled)) return;
+    focusedPageStep.current = null;
+    // Page navigation settles asynchronously; the old step can be greyed out at
+    // the first or last page well after the click's next frame. Move focus to
+    // the step that still works.
+    if (document.activeElement !== document.body && document.activeElement !== button) return;
+    const remaining = document.getElementById(navigationMenuId)
+      ?.querySelector<HTMLButtonElement>('[data-reader-page-step]:not(:disabled)');
+    (remaining ?? navigationAnchorRef.current)?.focus({ preventScroll: true });
+  });
+
+  const startZoomEdit = () => {
+    setZoomDraft(String(viewerState.zoomPercent));
+    setZoomInvalid(false);
+    setEditingZoom(true);
+  };
+  const closeZoomEdit = (restoreFocus: boolean) => {
+    restoreZoomTriggerFocus.current = restoreFocus;
+    setZoomInvalid(false);
+    setEditingZoom(false);
+  };
+  const zoomToDraftPercent = (explicitSubmission = false) => {
+    const resolved = resolveZoomDraft(zoomDraft, viewerState.zoomPercent);
+    if (!resolved.valid) return false;
+    const requestedZoom = resolved.request;
+    if (requestedZoom !== undefined) {
+      runViewerAction(() => controls?.zoomToPercent(requestedZoom));
+    } else if (explicitSubmission && onManualZoom) {
+      runViewerAction(onManualZoom);
+    }
+    return true;
+  };
+  const submitZoomEditOnEnter = (closeMenu = false) => {
+    if (!zoomToDraftPercent(true)) {
+      setZoomInvalid(true);
+      return;
+    }
+    closeZoomEdit(!closeMenu);
+    if (closeMenu) {
+      requestTopBarMenu('zoom', false);
+      restoreTopBarTriggerFocus('zoom');
+    }
+  };
+  const submitZoomEditOnBlur = () => {
+    zoomToDraftPercent();
+    closeZoomEdit(false);
+  };
+  const prepareZoomAction = () => {
+    zoomActionIntent.current = true;
+  };
+  const clearZoomActionIntent = () => {
+    zoomActionIntent.current = false;
+  };
+  const runZoomAction = (button: HTMLButtonElement, action: () => void) => {
+    clearZoomActionIntent();
+    button.focus({ preventScroll: true });
+    if (editingZoom) closeZoomEdit(false);
+    runViewerAction(action);
+  };
+  const focusFitChoice = (position: 'first' | 'last') => {
+    const choices = fitOptionsRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]');
+    (position === 'last' ? choices?.item(choices.length - 1) : choices?.item(0))?.focus({ preventScroll: true });
+  };
+  const cancelFitOptionsDismiss = () => clearTimeout(fitOptionsDismissTimerRef.current);
+  const leaveFitOptions = (event: PointerEvent<HTMLElement>) => {
+    if (event.pointerType !== 'mouse' || fitOptionsKeyboardOpenRef.current) return;
+    const next = event.relatedTarget;
+    if (next instanceof Node && (fitButtonRef.current?.contains(next) || fitOptionsRef.current?.contains(next))) return;
+    cancelFitOptionsDismiss();
+    // Allow crossing the small gap between the button and its choices.
+    fitOptionsDismissTimerRef.current = setTimeout(() => setFitOptionsOpen(false), 140);
+  };
+  useLayoutEffect(() => {
+    if (!fitOptionsOpen) fitOptionsKeyboardOpenRef.current = false;
+    return cancelFitOptionsDismiss;
+  }, [fitOptionsOpen]);
+  useLayoutEffect(() => {
+    const focus = fitChoiceFocusRef.current;
+    if (!fitOptionsOpen || focus === null) return;
+    fitChoiceFocusRef.current = null;
+    focusFitChoice(focus);
+  }, [fitOptionsOpen]);
+
+  const runFit = (button: HTMLButtonElement, mode: PdfFitMode) => {
+    clearZoomActionIntent();
+    button.focus({ preventScroll: true });
+    if (editingZoom) closeZoomEdit(false);
+    const request = ++fitRequestRef.current;
+    setFitRequestPending(true);
+    void runViewerActionAsync(() => onFitMode ? onFitMode(mode) : onFitWidth()).finally(() => {
+      if (fitRequestRef.current === request) setFitRequestPending(false);
+    });
+  };
+
+  const pageValue = (): ReactNode => viewerState.pageReady ? (
+    <span className="reader-chrome__page-control" data-reader-stat>
+      <span className="reader-chrome__page-editor" data-reader-page-editor={editingPage ? 'true' : 'false'}>
+        <input
+          ref={pageInputRef}
+          className="reader-chrome__page-input"
+          title="Page number"
+          type="text"
+          inputMode="numeric"
+          aria-label={`Current page ${viewerState.currentPage} of ${viewerState.totalPages}. Enter a page number`}
+          aria-invalid={pageInvalid}
+          aria-describedby={pageInvalid ? pageErrorId : undefined}
+          aria-errormessage={pageInvalid ? pageErrorId : undefined}
+          value={editingPage ? pageDraft : String(viewerState.currentPage)}
+          style={{ width: pageInputWidth(editingPage ? pageDraft : String(viewerState.currentPage)) }}
+          onPointerDown={() => { pagePointerActivationRef.current = !editingPage; }}
+          onPointerUp={(event) => {
+            if (!pagePointerActivationRef.current) return;
+            event.currentTarget.select();
+          }}
+          onPointerCancel={() => { pagePointerActivationRef.current = false; }}
+          onClick={(event) => {
+            if (!pagePointerActivationRef.current) return;
+            pagePointerActivationRef.current = false;
+            event.currentTarget.select();
+          }}
+          onFocus={() => { if (!editingPage) startPageEdit(); }}
+          onChange={(event) => {
+            setEditingPage(true);
+            setPageDraft(event.currentTarget.value);
+            setPageInvalid(false);
+          }}
+          onBlur={(event) => {
+            if (!editingPage) return;
+            const pageStep = event.relatedTarget instanceof Element
+              ? event.relatedTarget.closest('[data-reader-page-step]')
+              : null;
+            if (pageStepIntent.current || pageStep) {
+              clearPageStepIntent();
+              closePageEdit(false);
+            } else submitPageEditOnBlur();
+          }}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
+              event.preventDefault();
+              submitPageEditOnEnter(false);
+            }
+            if (event.key === 'Escape' && !event.nativeEvent.isComposing) {
+              event.preventDefault();
+              event.stopPropagation();
+              closePageEdit(true);
+            }
+          }}
+        />
+        {pageInvalid ? <span id={pageErrorId} className="reader-chrome__page-error" role="alert">
+          Enter a whole page number from 1 to {viewerState.totalPages}
+        </span> : null}
+      </span>
+    </span>
+  ) : <span
+    className="reader-chrome__stat"
+    data-reader-stat
+    aria-label="Current page unavailable"
+  >—</span>;
+
+  const zoomValue = (): ReactNode => viewerState.zoomReady ? (
+    <span className="reader-chrome__zoom-control" data-reader-stat aria-label="Zoom level">
+      <span className="reader-chrome__zoom-editor" data-reader-zoom-editor={editingZoom ? 'true' : 'false'}>
+        <input
+          ref={zoomInputRef}
+          className="reader-chrome__zoom-input"
+          title="Zoom percentage"
+          type="text"
+          inputMode="numeric"
+          aria-label={`Current zoom ${viewerState.zoomPercent} percent. Enter a zoom percentage`}
+          aria-invalid={zoomInvalid}
+          aria-describedby={zoomInvalid ? zoomErrorId : undefined}
+          aria-errormessage={zoomInvalid ? zoomErrorId : undefined}
+          value={editingZoom ? zoomDraft : String(viewerState.zoomPercent)}
+          style={{ width: zoomInputWidth(editingZoom ? zoomDraft : String(viewerState.zoomPercent)) }}
+          onPointerDown={() => { zoomPointerActivationRef.current = !editingZoom; }}
+          onPointerUp={(event) => {
+            if (!zoomPointerActivationRef.current) return;
+            event.currentTarget.select();
+          }}
+          onPointerCancel={() => { zoomPointerActivationRef.current = false; }}
+          onClick={(event) => {
+            if (!zoomPointerActivationRef.current) return;
+            zoomPointerActivationRef.current = false;
+            event.currentTarget.select();
+          }}
+          onFocus={() => { if (!editingZoom) startZoomEdit(); }}
+          onChange={(event) => {
+            setEditingZoom(true);
+            setZoomDraft(event.currentTarget.value);
+            setZoomInvalid(false);
+          }}
+          onBlur={(event) => {
+            if (!editingZoom) return;
+            const zoomAction = event.relatedTarget instanceof Element
+              ? event.relatedTarget.closest('[data-reader-zoom-action]')
+              : null;
+            if (zoomActionIntent.current || zoomAction) {
+              clearZoomActionIntent();
+              closeZoomEdit(false);
+            } else submitZoomEditOnBlur();
+          }}
+          onKeyDown={(event) => {
+            const action = zoomEditorKeyAction(event.key, event.nativeEvent.isComposing);
+            if (action === 'submit') {
+              event.preventDefault();
+              submitZoomEditOnEnter(false);
+            }
+            if (action === 'cancel') {
+              event.preventDefault();
+              event.stopPropagation();
+              closeZoomEdit(true);
+            }
+          }}
+        />
+        {zoomInvalid ? <span id={zoomErrorId} className="reader-chrome__zoom-error" role="alert">
+          Enter a whole zoom percentage from {VIEWER_ZOOM_MIN_PERCENT} to {VIEWER_ZOOM_MAX_PERCENT}
+        </span> : null}
+      </span>
+    </span>
+  ) : <span
+    className="reader-chrome__stat"
+    data-reader-stat
+    aria-label="Zoom unavailable"
+  >—</span>;
+
+  const runMenuHistoryAction = (button: HTMLButtonElement, action: () => void) => {
+    button.focus({ preventScroll: true });
+    const menuId = button.closest<HTMLElement>('[role="menu"]')?.id;
+    if (menuId) focusedHistoryAction.current = { button, menuId };
+    action();
+  };
+  useLayoutEffect(() => {
+    const activated = focusedHistoryAction.current;
+    if (activated === null) return;
+    const menu = document.getElementById(activated.menuId);
+    if (menu === null) {
+      focusedHistoryAction.current = null;
+      return;
+    }
+    const { button } = activated;
+    if (button.isConnected && !button.disabled) return;
+    focusedHistoryAction.current = null;
+    if (document.activeElement !== document.body && document.activeElement !== button) return;
+    // A history action can exhaust its direction after the command settles.
+    // Keep keyboard navigation in the menu when that action becomes disabled.
+    const remaining = menu.querySelector<HTMLElement>('[role="menuitem"]:not(:disabled)');
+    (remaining ?? menu).focus({ preventScroll: true });
+  });
+
+  // Edit history keeps both slots so the toolbar never shifts; unavailable
+  // actions are greyed out rather than removed.
+  const historyControls = <span
+    ref={(element) => { if (!compactHistory) historyAnchorRef.current = element; }}
+    tabIndex={compactHistory ? undefined : -1}
+    data-reader-chrome-group="history"
+    className="reader-chrome__control-cluster reader-chrome__edit-cluster"
+    role="group"
+    aria-label="Edit history"
+  >
+    {compactHistory ? <>
+      <ReaderTooltipButton label="Open edit history" tooltip={false} type="button"
+        ref={(element) => { historyAnchorRef.current = element; }}
+        className="reader-chrome__icon-control reader-chrome__history-trigger"
+        aria-haspopup="menu" aria-expanded={activeTopBarMenu === 'history'} aria-controls={historyMenuId}
+        onClick={(event) => activateMenu('history', event)}
+      ><span className="reader-chrome__paired-icon"><ReaderIcon name="undo" /><ReaderIcon name="redo" /></span></ReaderTooltipButton>
+      <TopBarMenu open={activeTopBarMenu === 'history'} menuId={historyMenuId} label="Edit history"
+        openerRef={historyAnchorRef} onDismiss={() => requestTopBarMenu('history', false)}>
+        <ReaderTooltipButton label="Undo" type="button" role="menuitem" disabled={!canUndo} onClick={(event) => runMenuHistoryAction(event.currentTarget, onUndo)}><ReaderIcon name="undo" /><span>Undo</span></ReaderTooltipButton>
+        <ReaderTooltipButton label="Redo" type="button" role="menuitem" disabled={!canRedo} onClick={(event) => runMenuHistoryAction(event.currentTarget, onRedo)}><ReaderIcon name="redo" /><span>Redo</span></ReaderTooltipButton>
+      </TopBarMenu>
+    </> : <>
+      <ReaderTooltipButton label="Undo" type="button" className="reader-chrome__icon-control reader-chrome__history-control" disabled={!canUndo} onClick={onUndo}><ReaderIcon name="undo" /></ReaderTooltipButton>
+      <ReaderTooltipButton label="Redo" type="button" className="reader-chrome__icon-control reader-chrome__history-control" disabled={!canRedo} onClick={onRedo}><ReaderIcon name="redo" /></ReaderTooltipButton>
+    </>}
+  </span>;
+
+  const mainHistoryControl = (direction: 'back' | 'forward', inMenu = false) => {
+    const backward = direction === 'back';
+    const available = backward ? canNavigateBack : canNavigateForward;
+    return <ReaderTooltipButton
+      label={backward ? 'Back in document history' : 'Forward in document history'}
+      type="button"
+      role={inMenu ? 'menuitem' : undefined}
+      className="reader-chrome__icon-control reader-chrome__main-history-control"
+      data-main-history={direction}
+      aria-busy={documentNavigationPending ? 'true' : undefined}
+      disabled={documentNavigationPending || !available}
+      onClick={(event) => {
+        const action = backward ? onNavigateBack : onNavigateForward;
+        if (inMenu) runMenuHistoryAction(event.currentTarget, action);
+        else action();
+      }}
+    ><ReaderIcon name={backward ? 'arrow-left' : 'arrow-right'} /></ReaderTooltipButton>;
+  };
+
+  const pageNavigationAvailable = viewerState.pageReady && viewerState.totalPages > 1;
+  const navigationMenuAvailable = pageNavigationAvailable
+    || (compactHistory && (canNavigateBack || canNavigateForward));
+  const navigationMenuLabel = viewerState.pageReady
+    ? `Page ${viewerState.currentPage} of ${viewerState.totalPages}. Open page navigation`
+    : navigationMenuAvailable ? 'Open document navigation' : 'Page navigation unavailable';
+
+  const navigationControls = <span
+    data-reader-chrome-group="navigation"
+    className="reader-chrome__control-cluster reader-chrome__navigation-cluster"
+    role="group"
+    aria-label="Document navigation"
+  >
+    <span className="reader-chrome__page-position" data-reader-page-position
+      ref={navigationHoverRef}
+      onPointerEnter={(event) => openHoverMenu('navigation', event.pointerType)}
+    >
+      {pageValue()}
+      <ReaderTooltipButton
+        label={navigationMenuLabel}
+        tooltip={false}
+        ref={(element) => { navigationAnchorRef.current = element; }}
+        type="button"
+        className="reader-chrome__page-disclosure reader-chrome__stat"
+        aria-label={navigationMenuLabel}
+        aria-haspopup="menu"
+        aria-expanded={activeTopBarMenu === 'navigation'}
+        aria-controls={navigationMenuId}
+        disabled={!navigationMenuAvailable}
+        onClick={(event) => activateMenu('navigation', event)}
+      ><span aria-hidden="true">/ {viewerState.pageReady ? viewerState.totalPages : '—'}</span></ReaderTooltipButton>
+    </span>
+      {copyLink === undefined ? null : <div className="reader-chrome__link" data-reader-copy-link><CopyLinkControl {...copyLink} /></div>}
+    {/* Back and Forward keep fixed slots, greyed out when unavailable. */}
+    {compactHistory ? null : <>{mainHistoryControl('back')}{mainHistoryControl('forward')}</>}
+    <TopBarMenu hoverOpen={topBarMenuHoverOpen} hoverRegionRef={navigationHoverRef} open={activeTopBarMenu === 'navigation'} menuId={navigationMenuId} label="Page navigation" openerRef={navigationAnchorRef} focusOnOpen={topBarMenuKeyboardOpenRef.current} onDismiss={() => requestTopBarMenu('navigation', false)}>
+      <div className="reader-chrome__control-cluster reader-chrome__page-menu" role="group" aria-label="Page navigation controls">
+        {compactHistory ? <>{mainHistoryControl('back', true)}{mainHistoryControl('forward', true)}</> : null}
+        <ReaderTooltipButton label="Previous page" type="button" role="menuitem" className="reader-chrome__icon-control" data-reader-page-step="previous" disabled={!viewerState.pageReady || viewerState.currentPage <= 1} onPointerDown={preparePageStep} onPointerUp={clearPageStepIntent} onPointerCancel={clearPageStepIntent} onClick={(event) => runPageStep(event.currentTarget, () => controls?.previousPage())}><ReaderIcon name="chevron-up" /></ReaderTooltipButton>
+        <ReaderTooltipButton label="Next page" type="button" role="menuitem" className="reader-chrome__icon-control" data-reader-page-step="next" disabled={!viewerState.pageReady || viewerState.currentPage >= viewerState.totalPages} onPointerDown={preparePageStep} onPointerUp={clearPageStepIntent} onPointerCancel={clearPageStepIntent} onClick={(event) => runPageStep(event.currentTarget, () => controls?.nextPage())}><ReaderIcon name="chevron-down" /></ReaderTooltipButton>
+      </div>
+    </TopBarMenu>
+  </span>;
+
+  const zoomControls = <span
+    ref={zoomHoverRef}
+    onPointerEnter={(event) => openHoverMenu('zoom', event.pointerType)}
+    data-reader-chrome-group="zoom"
+    className="reader-chrome__control-cluster reader-chrome__zoom-cluster"
+    role="group"
+    aria-label="PDF zoom"
+  >
+    {/* Like the page group's "/ 33", the fixed "%" suffix opens the menu. */}
+    <span className="reader-chrome__zoom-value">{zoomValue()}</span>
+    <ReaderTooltipButton
+      label="Open zoom controls"
+      tooltip={false}
+      ref={(element) => { zoomAnchorRef.current = element; }}
+      type="button"
+      className="reader-chrome__zoom-disclosure"
+      aria-label="Open zoom controls"
+      aria-haspopup="menu"
+      aria-expanded={activeTopBarMenu === 'zoom'}
+      aria-controls={zoomMenuId}
+      disabled={!viewerState.zoomReady}
+      onClick={(event) => activateMenu('zoom', event)}
+    ><span aria-hidden="true" className="reader-chrome__zoom-suffix">%</span></ReaderTooltipButton>
+    <TopBarMenu hoverOpen={topBarMenuHoverOpen} hoverRegionRef={zoomHoverRef} open={activeTopBarMenu === 'zoom'} menuId={zoomMenuId} label="PDF zoom" openerRef={zoomAnchorRef} focusOnOpen={topBarMenuKeyboardOpenRef.current} onDismiss={() => requestTopBarMenu('zoom', false)}>
+      <div className="reader-chrome__control-cluster" role="group" aria-label="Zoom controls">
+        {horizontalScrollAvailable ? <ReaderTooltipButton
+          label="Horizontal lock"
+          tooltip={horizontalScrollLocked ? 'Unlock horizontal scrolling' : 'Lock horizontal scrolling'}
+          type="button"
+          role="menuitemcheckbox"
+          aria-checked={horizontalScrollLocked}
+          className="reader-chrome__icon-control"
+          data-reader-horizontal-lock
+          disabled={!viewerState.zoomReady || onToggleHorizontalScrollLock === undefined}
+          onClick={onToggleHorizontalScrollLock}
+        ><ReaderIcon name={horizontalScrollLocked ? 'lock' : 'unlock'} /></ReaderTooltipButton> : null}
+        <ReaderTooltipButton
+          ref={fitButtonRef}
+          label={fitLabel}
+          tooltip={onFitMode ? false : 'Fit width'}
+          type="button"
+          role="menuitem"
+          className="reader-chrome__icon-control reader-chrome__fit-width"
+          data-reader-zoom-action="fit-width"
+          data-fit-width-current={fitWidthCurrent ? 'true' : undefined}
+          data-fit-active={fitActive ? 'true' : 'false'}
+          data-fit-mode={selectedFit}
+          aria-haspopup={onFitMode ? 'menu' : undefined}
+          aria-expanded={onFitMode ? fitOptionsOpen : undefined}
+          aria-controls={onFitMode ? fitOptionsId : undefined}
+          aria-busy={fitPending ? 'true' : 'false'}
+          aria-describedby={zoomUnavailable ?? (!fitWidthReady ? fitWidthUnavailableId : undefined)}
+          disabled={!viewerState.zoomReady || !fitWidthReady}
+          onPointerEnter={(event) => {
+            if (!onFitMode || event.pointerType !== 'mouse') return;
+            cancelFitOptionsDismiss();
+            setFitOptionsOpen(true);
+          }}
+          onPointerLeave={leaveFitOptions}
+          onKeyDown={(event) => {
+            if (!onFitMode || !['ArrowDown', 'ArrowUp'].includes(event.key)) return;
+            event.preventDefault();
+            event.stopPropagation();
+            fitOptionsKeyboardOpenRef.current = true;
+            cancelFitOptionsDismiss();
+            const focus = event.key === 'ArrowUp' ? 'last' : 'first';
+            if (fitOptionsOpen) {
+              focusFitChoice(focus);
+            } else {
+              fitChoiceFocusRef.current = focus;
+              setFitOptionsOpen(true);
+            }
+          }}
+          onPointerDown={prepareZoomAction}
+          onPointerUp={clearZoomActionIntent}
+          onPointerCancel={clearZoomActionIntent}
+          onClick={(event) => runFit(event.currentTarget, fitAction)}
+        ><ReaderIcon name={FIT_ICONS[fitActive ? fitState?.effectiveMode ?? selectedFit : selectedFit]} /></ReaderTooltipButton>
+        <ReaderTooltipButton label="Zoom out" type="button" role="menuitem" className="reader-chrome__icon-control" data-reader-zoom-action="out" aria-describedby={zoomUnavailable} disabled={!viewerState.zoomReady} onPointerDown={prepareZoomAction} onPointerUp={clearZoomActionIntent} onPointerCancel={clearZoomActionIntent} onClick={(event) => runZoomAction(event.currentTarget, () => controls?.zoomOut())}><ReaderIcon name="minus" /></ReaderTooltipButton>
+        <ReaderTooltipButton label="Zoom in" type="button" role="menuitem" className="reader-chrome__icon-control" data-reader-zoom-action="in" aria-describedby={zoomUnavailable} disabled={!viewerState.zoomReady} onPointerDown={prepareZoomAction} onPointerUp={clearZoomActionIntent} onPointerCancel={clearZoomActionIntent} onClick={(event) => runZoomAction(event.currentTarget, () => controls?.zoomIn())}><ReaderIcon name="plus" /></ReaderTooltipButton>
+      </div>
+      {onFitMode && fitOptionsOpen ? <div
+        ref={fitOptionsRef}
+        id={fitOptionsId}
+        className="reader-chrome__fit-options"
+        role="menu"
+        aria-label="PDF fit modes"
+        onPointerEnter={cancelFitOptionsDismiss}
+        onPointerLeave={leaveFitOptions}
+        onKeyDown={() => {
+          fitOptionsKeyboardOpenRef.current = true;
+          cancelFitOptionsDismiss();
+        }}
+        onBlur={(event) => {
+          const next = event.relatedTarget;
+          if (next instanceof Node && !event.currentTarget.contains(next) && !fitButtonRef.current?.contains(next)) {
+            setFitOptionsOpen(false);
+          }
+        }}
+      >
+        {FIT_MODES.map((mode) => <button
+          key={mode}
+          type="button"
+          title={FIT_LABELS[mode]}
+          role="menuitemradio"
+          aria-checked={fitActive && (fitState?.effectiveMode ?? 'width') === mode}
+          className="reader-chrome__fit-option"
+          disabled={!viewerState.zoomReady || !fitWidthReady}
+          onPointerDown={prepareZoomAction}
+          onPointerUp={clearZoomActionIntent}
+          onPointerCancel={clearZoomActionIntent}
+          onClick={(event) => {
+            runFit(fitButtonRef.current ?? event.currentTarget, mode);
+            setFitOptionsOpen(false);
+          }}
+        ><ReaderIcon name={FIT_ICONS[mode]} /><span>{FIT_LABELS[mode]}</span></button>)}
+      </div> : null}
+    </TopBarMenu>
+  </span>;
+
+  const controlsForPresentation = (_candidate: ReaderChromePresentation): ReactNode => <>
+    {historyControls}
+    {zoomControls}
+  </>;
+
+  const sizingCluster = (_candidate: ReaderChromePresentation): ReactNode => <div className="reader-chrome__viewer-controls" style={{ display: 'inline-flex', gridColumn: 'auto', gridRow: 'auto', flexWrap: 'nowrap' }}>
+    <span className="reader-chrome__control-cluster reader-chrome__edit-cluster"><button type="button" title={compactHistory ? 'Open edit history' : 'Undo'} className="reader-chrome__icon-control">{compactHistory ? <span className="reader-chrome__paired-icon"><ReaderIcon name="undo" /><ReaderIcon name="redo" /></span> : <ReaderIcon name="undo" />}</button>{compactHistory ? null : <button type="button" title="Redo" className="reader-chrome__icon-control"><ReaderIcon name="redo" /></button>}</span>
+    <span className="reader-chrome__control-cluster reader-chrome__navigation-cluster">{compactHistory ? null : <><button type="button" title="Back in document history" data-main-history="back" className="reader-chrome__icon-control"><ReaderIcon name="arrow-left" /></button><button type="button" title="Forward in document history" data-main-history="forward" className="reader-chrome__icon-control"><ReaderIcon name="arrow-right" /></button></>}<span className="reader-chrome__stat">{viewerState.pageReady ? `${viewerState.currentPage} / ${viewerState.totalPages}` : '— / —'}</span></span>
+    <span className="reader-chrome__control-cluster"><span className="reader-chrome__stat">{viewerState.zoomReady ? `${viewerState.zoomPercent}%` : '—%'}</span></span>
+    {copyLink === undefined ? null : <div className="reader-chrome__link"><button type="button" title="Copy link to current location" className="reader-chrome__icon-control"><ReaderIcon name="link" /></button></div>}
+  </div>;
+
+  const contextControl = documentContext !== undefined ? <DocumentContextButton {...documentContext} />
+    : codexContext === undefined ? null : <CodexContextStatus status={codexContext} />;
+  const contextSlotClass = documentContext === undefined
+    ? 'reader-chrome__context'
+    : 'reader-chrome__context reader-chrome__context--document';
+  const sizingIdentity = <div className="reader-chrome__identity">
+    {documentActions !== undefined ? <div className="document-actions"><button type="button" className="reader-chrome__save-identity document-actions__trigger" title="Open document actions"><ReaderIcon name="file" size={16} /><span className="reader-chrome__filename">{displayTitle}</span>{!showSaveStatusDot || savePhase === 'clean' ? null : <span className="reader-chrome__save-dot" data-save-phase={savePhase} />}</button></div> : saveOptionsAvailable ? <button type="button" className="reader-chrome__save-identity" title="Open automatic save options"><ReaderIcon name="file" size={16} /><span className="reader-chrome__filename">{displayTitle}</span>{!showSaveStatusDot || savePhase === 'clean' ? null : <span className="reader-chrome__save-dot" data-save-phase={savePhase} />}</button> : <div className="reader-chrome__save-identity"><ReaderIcon name="file" size={16} /><span className="reader-chrome__filename">{displayTitle}</span>{!showSaveStatusDot || savePhase === 'clean' ? null : <span className="reader-chrome__save-dot" data-save-phase={savePhase} />}</div>}
+    {contextControl === null ? null :
+      <div className={contextSlotClass}><div className="codex-context-status"><ReaderIcon name="agent" size={16} /></div></div>}
+  </div>;
+
+  return <header
+    ref={chromeRef}
+    className="reader-chrome"
+    data-reader-chrome
+    data-reader-chrome-presentation={presentation}
+    data-reader-chrome-title={titlePresentation}
+    data-reader-chrome-touch-compact={compactTouch ? 'true' : undefined}
+    data-top-bar-menu-open={activeTopBarMenu ?? undefined}
+  >
+    <div className="reader-chrome__identity">
+      {documentActions !== undefined ? <DocumentActionsMenu
+        {...documentActions}
+        documentTitle={documentTitle}
+        displayTitle={displayTitle}
+        savedLabel={showSaveStatusDot ? saveStatusDisplay : savedLabel}
+        savePhase={savePhase}
+        showSaveStatusDot={showSaveStatusDot}
+        open={activeTopBarMenu === 'document'}
+        onOpenChange={(open) => requestTopBarMenu('document', open)}
+        onPendingChange={(pending) => {
+          setDocumentMenuPending(pending);
+          if (pending) setActiveTopBarMenu('document');
+        }}
+      /> : saveOptionsAvailable ? <ReaderTooltipButton ref={saveTriggerRef} label={saveControlLabel} tooltip={documentTitle} type="button" className="reader-chrome__save-identity" aria-haspopup="dialog" aria-expanded={saveOptionsOpen} onClick={onSaveOptions}>
+        <ReaderIcon name="file" size={16} />
+        <span className="reader-chrome__filename">{displayTitle}</span>
+        {!showSaveStatusDot || savePhase === 'clean' ? null : <span className="reader-chrome__save-dot" data-save-phase={savePhase} aria-hidden="true" />}
+        <span className="sr-only" data-reader-saved-status>{saveStatusDisplay}</span>
+      </ReaderTooltipButton> : <div className="reader-chrome__save-identity" aria-label={`${identityLabel}, ${saveStatusText}`} title={documentTitle} tabIndex={0}>
+        <ReaderIcon name="file" size={16} />
+        <span className="reader-chrome__filename">{displayTitle}</span>
+        {!showSaveStatusDot || savePhase === 'clean' ? null : <span className="reader-chrome__save-dot" data-save-phase={savePhase} aria-hidden="true" />}
+        <span className="sr-only" data-reader-saved-status>{saveStatusDisplay}</span>
+      </div>}
+      {contextControl === null ? null : <div className={contextSlotClass} data-reader-context-status>{contextControl}</div>}
+    </div>
+    <div className="reader-chrome__left-controls" role="group" aria-label="PDF navigation and links">
+      {navigationControls}
+    </div>
+    <div className="reader-chrome__viewer-controls" role="group" aria-label="PDF editing and zoom">
+      {controlsForPresentation(presentation)}
+    </div>
+    {hasWorkspaceTrayToggles ? <div
+      className="reader-chrome__tray-controls"
+      role="group"
+      aria-label="Workspace trays"
+      inert={saveOptionsOpen}
+      aria-hidden={saveOptionsOpen || undefined}
+    >
+      {workspaceTrayToggles.map(({ surface, target, open, controls: trayControls, buttonRef, onToggle }) => {
+        const label = `${open ? 'Hide' : 'Show'} ${target}`;
+        const hint = showReferencesShortcut && target === 'References' && !open;
+        return <ReaderTooltipButton
+          key={surface}
+          ref={buttonRef}
+          label={label}
+          tooltip={hint ? `${label} ${referencesShortcutLabel}` : label}
+          type="button"
+          className="reader-chrome__icon-control reader-chrome__tray-toggle"
+          data-workspace-tray-toggle={surface}
+          aria-expanded={open}
+          aria-controls={trayControls}
+          aria-keyshortcuts={hint ? referencesShortcutKeys : undefined}
+          onClick={onToggle}
+        >
+          <ReaderIcon name={surface === 'right' ? 'panel-right' : 'panel-bottom'}>
+            {open ? <path
+              d={surface === 'right' ? 'M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4Z' : 'M3 15h18v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z'}
+              fill="currentColor"
+              fillOpacity={0.5}
+              stroke="none"
+            /> : null}
+          </ReaderIcon>
+        </ReaderTooltipButton>;
+      })}
+    </div> : null}
+    <div
+      ref={sizingRackRef}
+      data-reader-chrome-sizing-rack
+      aria-hidden="true"
+      inert
+      style={{ position: 'absolute', width: 'max-content', height: 0, overflow: 'hidden', visibility: 'hidden', pointerEvents: 'none' }}
+    >
+      {READER_CHROME_PRESENTATIONS.map((candidate) => <div
+        key={candidate}
+        className="reader-chrome reader-chrome__sizing-candidate"
+        data-reader-chrome-candidate={candidate}
+        data-reader-chrome-title={titlePresentation}
+        data-reader-chrome-touch-compact={compactTouch ? 'true' : undefined}
+        style={{
+          position: 'absolute',
+          display: 'inline-grid',
+          gridTemplateColumns: hasWorkspaceTrayToggles
+            ? 'max-content max-content max-content' : 'max-content max-content',
+          gridTemplateRows: 'max-content',
+          width: 'max-content',
+          height: 'var(--reader-chrome-height)',
+        }}
+      >
+        {sizingIdentity}
+        {sizingCluster(candidate)}
+        {hasWorkspaceTrayToggles ? <div className="reader-chrome__tray-controls">
+          {workspaceTrayToggles.map(({ surface }) => (
+            <button key={surface} type="button" className="reader-chrome__icon-control reader-chrome__tray-toggle" />
+          ))}
+        </div> : null}
+      </div>)}
+    </div>
+    {!viewerState.pageReady ? <p id={pageUnavailableId} className="sr-only">{viewerState.pageUnavailableReason}</p> : null}
+    {!viewerState.zoomReady ? <p id={zoomUnavailableId} className="sr-only">{viewerState.zoomUnavailableReason}</p> : null}
+    {viewerState.zoomReady && !fitWidthReady ? <p id={fitWidthUnavailableId} className="sr-only">Fit Width becomes available when PDF navigation is ready.</p> : null}
+  </header>;
+}

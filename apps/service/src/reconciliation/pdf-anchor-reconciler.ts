@@ -7,8 +7,8 @@ import {
   type DocumentAnchorEvidenceV1,
   type Annotation,
   type DocumentState,
-} from "../../../../packages/core/src/review-model.js";
-import { assertDocumentAnchorEvidence } from "../../../../packages/core/src/review-reducer.js";
+} from "../../../../packages/core/src/document-model.js";
+import { assertDocumentAnchorEvidence } from "../../../../packages/core/src/document-reducer.js";
 
 export interface PdfAnchorPage {
   readonly pageIndex: number;

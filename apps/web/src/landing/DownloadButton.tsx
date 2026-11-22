@@ -1,6 +1,6 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { RELEASE_REPOSITORY, type DesktopTarget } from '../../../../packages/core/src/desktop-release.js';
-import { ReaderIcon } from '../review/ReviewIcon.js';
+import { ReaderIcon } from '../reader/ReaderIcon.js';
 import type { Downloads } from './downloads.js';
 
 const PLATFORM_LABELS: Record<DesktopTarget, string> = {

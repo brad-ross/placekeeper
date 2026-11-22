@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   createTrailingTaskScheduler,
   waitForDocumentNavigationReady,
-} from '../src/review/main-location-refresh.js';
+} from '../src/reader/main-location-refresh.js';
 
 afterEach(() => vi.useRealTimers());
 

@@ -1,7 +1,7 @@
 import { externalWebUrl } from '../../../../packages/core/src/external-web-url.js';
 import type { ElectronShellBridge, ElectronShellIdentity } from '../../../../packages/core/src/electron-shell-protocol.js';
 import { decodePlacekeeperLink, type PlacekeeperLinkLocation } from '../../../../packages/core/src/placekeeper-link.js';
-import { MemoryDocumentLocationHistory } from '../review/review-location-history.js';
+import { MemoryDocumentLocationHistory } from '../reader/document-location-history.js';
 import { createRpcHostRuntime } from './vscode-runtime.js';
 export function createElectronHostRuntime(bridge: ElectronShellBridge, identity: ElectronShellIdentity) {
     const listeners = new Set<(value: unknown) => void>();
