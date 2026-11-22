@@ -236,8 +236,9 @@ export function ReviewChrome({
     presentation: ReviewChromeTitlePresentation;
     narrow: boolean;
     roomBeforeCombining: number | null;
+    widthBeforeCombining: number | null;
     savings: number | null;
-  }>({ presentation: 'title', narrow: false, roomBeforeCombining: null, savings: null });
+  }>({ presentation: 'title', narrow: false, roomBeforeCombining: null, widthBeforeCombining: null, savings: null });
   // Undo/Redo share one menu button and Back/Forward move into the page menu.
   const compactHistory = compactTouch || narrowHistory;
   const [activeTopBarMenu, setActiveTopBarMenu] = useState<TopBarMenuId | null>(null);
@@ -492,8 +493,13 @@ export function ReviewChrome({
       const titleRoom = measureReviewChromeTitleRoom(chrome);
       const showsCombined = chrome.querySelector('.review-chrome__history-trigger') !== null;
       if (measurement.narrow && measurement.roomBeforeCombining !== null && showsCombined) {
-        measurement.savings = titleRoom - measurement.roomBeforeCombining;
+        // Count only the room the combined controls freed. If the bar also
+        // resized before this frame, that change in width is not savings;
+        // counting it could keep the controls combined at any width.
+        const widthChange = chrome.clientWidth - (measurement.widthBeforeCombining ?? chrome.clientWidth);
+        measurement.savings = titleRoom - measurement.roomBeforeCombining - widthChange;
         measurement.roomBeforeCombining = null;
+        measurement.widthBeforeCombining = null;
       }
       const nextNarrow = chooseReviewChromeHistoryCompact({
         titleRoom, compact: measurement.narrow, savings: measurement.savings,
@@ -502,6 +508,7 @@ export function ReviewChrome({
         measurement.narrow = nextNarrow;
         // Record the room before combining so we can measure what it frees.
         measurement.roomBeforeCombining = nextNarrow && !showsCombined ? titleRoom : null;
+        measurement.widthBeforeCombining = nextNarrow && !showsCombined ? chrome.clientWidth : null;
         // Already combined (touch layout): nothing to free, so no runway owed.
         measurement.savings = nextNarrow && showsCombined ? 0 : null;
         if (chrome.dataset.reviewChromeTouchCompact !== 'true') prepareHistoryLayoutChange();
