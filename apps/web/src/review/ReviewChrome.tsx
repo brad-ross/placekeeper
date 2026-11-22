@@ -371,10 +371,12 @@ export function ReviewChrome({
     const focusedGroup = document.activeElement instanceof HTMLElement
       ? document.activeElement.closest<HTMLElement>('[data-review-chrome-group]')?.dataset.reviewChromeGroup
       : undefined;
-    const documentPending = documentMenuPendingRef.current && activeTopBarMenuRef.current === 'document';
-    compactHistoryFocusRef.current = documentPending ? null : activeTopBarMenuRef.current
+    // Combining history controls leaves the identity slot in place, so an
+    // open document menu survives with its focus and confirmation.
+    const documentMenuOpen = activeTopBarMenuRef.current === 'document';
+    compactHistoryFocusRef.current = documentMenuOpen ? null : activeTopBarMenuRef.current
       ?? (focusedGroup as TopBarMenuId | undefined) ?? null;
-    if (!documentPending) setActiveTopBarMenu(null);
+    if (!documentMenuOpen) setActiveTopBarMenu(null);
   }, []);
 
   useLayoutEffect(() => {
@@ -445,12 +447,15 @@ export function ReviewChrome({
       const focusedGroup = activeElement
         ?.closest<HTMLElement>('[data-review-chrome-group]')
         ?.dataset.reviewChromeGroup as TopBarMenuId | undefined;
-      pendingTransitionFocusRef.current = activeTopBarMenuRef.current ?? focusedGroup ?? null;
+      // The document menu belongs to the identity slot, which every
+      // presentation keeps, so it stays open (with any stale-export
+      // confirmation) and keeps its own focus. Menus anchored to recomposed
+      // control groups close and return focus to their trigger.
+      const documentMenuOpen = activeTopBarMenuRef.current === 'document';
+      pendingTransitionFocusRef.current = documentMenuOpen ? null : activeTopBarMenuRef.current ?? focusedGroup ?? null;
       setEditingPage(false);
       setEditingZoom(false);
-      if (!(documentMenuPendingRef.current && activeTopBarMenuRef.current === 'document')) {
-        setActiveTopBarMenu(null);
-      }
+      if (!documentMenuOpen) setActiveTopBarMenu(null);
       setPresentation(nextPresentation);
       presentationRef.current = nextPresentation;
     };
