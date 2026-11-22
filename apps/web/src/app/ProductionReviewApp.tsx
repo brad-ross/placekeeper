@@ -6,6 +6,7 @@ import { pdfNavigationTargetFromPlacekeeperLocation, type PdfNavigationTarget } 
 import { ExternalLinkRecovery } from '../review/ExternalLinkRecovery.js';
 import { externalWebUrl } from '../../../../packages/core/src/external-web-url.js';
 import { useContext, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { withImportedMarkedText } from '../review/annotation-content.js';
 import type { PluginRegistry } from "@embedpdf/core";
 import type { PdfDocumentObject, PdfEngine } from '@embedpdf/models';
 import { SelectionPlugin } from "@embedpdf/plugin-selection";
@@ -2744,6 +2745,15 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
   const onCommitMainFramingPositionChange = useCallback((commit: (() => void) | null) => {
     commitMainFramingPositionRef.current = commit ?? (() => undefined);
   }, []);
+  const importedMarkedText = existingAnnotations.status === 'loading' || existingAnnotations.status === 'error'
+    ? undefined
+    : existingAnnotations.importedMarkedText;
+  // Imported PDF highlights show the words they mark; commands and saves keep
+  // using the canonical state.
+  const displayedState = useMemo(() => {
+    const items = withImportedMarkedText(state.items, importedMarkedText);
+    return items === state.items ? state : { ...state, items };
+  }, [importedMarkedText, state]);
   return (
     <main
       data-production-review
@@ -2789,7 +2799,7 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
           },
         })}
         {...(addContext === undefined || !agentReady ? {} : { onAddAnnotationContext: openContextComposer })}
-        state={state}
+        state={displayedState}
         {...(props.activeAuthoringDraftIds === undefined ? {} : {
           activeAuthoringDraftIds: props.activeAuthoringDraftIds,
         })}

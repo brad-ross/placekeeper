@@ -1,5 +1,5 @@
 import { nativePdfAnnotationSubtype, canEditPdfAnnotationComment, canDeletePdfAnnotation } from '../../../../packages/core/src/native-pdf-annotation.js';
-import { annotationContent as annotationListContent, type AnnotationContent as AnnotationListContent } from './annotation-content.js';
+import { annotationContent as annotationListContent, existingAnnotationContent, type AnnotationContent as AnnotationListContent } from './annotation-content.js';
 export { annotationContent as annotationListContent } from './annotation-content.js';
 export type { AnnotationContent as AnnotationListContent } from './annotation-content.js';
 import { useLayoutEffect, useMemo, useRef, type ReactElement, type ReactNode } from 'react';
@@ -422,7 +422,7 @@ export function AnnotationList({
                   payload: { comment: annotation.contents },
                   createdAt: '', updatedAt: '',
                 }}
-                presentation={{ content: annotation.contents }}
+                presentation={existingAnnotationContent(annotation)}
                 kind={annotation.subtype}
                 pageNumber={annotation.pageIndex + 1}
                 {...(sectionLabel ? { sectionLabel } : {})}
