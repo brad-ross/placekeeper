@@ -1430,6 +1430,8 @@ test.describe('canonical review workflow', () => {
     const rightControls = bar.locator(':scope > .review-chrome__viewer-controls');
     const expectToolbarRevealed = async () => {
       await expect(rightControls).toHaveCSS('opacity', '1');
+      // Tray toggles reveal with the rest of the bar, including over its menus.
+      await expect(bar.getByRole('group', { name: 'Workspace trays' })).toHaveCSS('opacity', '1');
       for (const control of await bar.locator('[data-review-copy-link], [data-main-history]').all()) {
         // Unavailable history keeps its slot, greyed out.
         await expect(control).toHaveCSS('opacity', await control.isDisabled() ? '0.35' : '1');
