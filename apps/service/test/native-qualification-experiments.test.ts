@@ -213,7 +213,7 @@ it("replays only an explicitly recorded issued public receipt, one fresh run onc
 it("genuine hook parser retains actual task/receipt and always sends normal attestation after one bounded delay", async () => {
   const f = fixture("genuine-attestation-delay"), controls = new NativeQualificationExperiments(f.root);
   await controls.publicResult(receipt(1), f.invocation(1), a);
-  const event = { session_id: "actual-trusted-task", hook_event_name: "PostToolUse", tool_name: "mcp__placekeeper__display_review", tool_input: { handoff: "h".repeat(43) }, tool_response: { structuredContent: receipt(1) } };
+  const event = { session_id: "actual-trusted-task", hook_event_name: "PostToolUse", tool_name: "mcp__placekeeper__display_document", tool_input: { handoff: "h".repeat(43) }, tool_response: { structuredContent: receipt(1) } };
   const source = `import ${JSON.stringify(resolve("apps/service/src/cli/context-command.ts"))};
 import {runHookCommand} from ${JSON.stringify(resolve("apps/service/src/cli/hook-command.ts"))};
 const input=${JSON.stringify(JSON.stringify(event))}; const calls=[];const start=performance.now();
@@ -387,7 +387,7 @@ it.each(["missing-expiry", "aged", "cancelled", "hostile-marker", "deadline", "b
 });
 it.each(["ready", "cancelled", "hostile"])("real genuine parsed hook readiness %s still sends unchanged normal attestation", async mode => {
   const f = readinessFixture(1500), controls = new NativeQualificationExperiments(f.root);
-  const event = { session_id: "actual-trusted-task", hook_event_name: "PostToolUse", tool_name: "mcp__placekeeper__display_review", tool_input: { handoff: "h".repeat(43) }, tool_response: { structuredContent: receipt(1) } };
+  const event = { session_id: "actual-trusted-task", hook_event_name: "PostToolUse", tool_name: "mcp__placekeeper__display_document", tool_input: { handoff: "h".repeat(43) }, tool_response: { structuredContent: receipt(1) } };
   const source = `import ${JSON.stringify(resolve("apps/service/src/cli/context-command.ts"))};
 import {runHookCommand} from ${JSON.stringify(resolve("apps/service/src/cli/hook-command.ts"))};
 const selected = new Promise(resolve => process.once('message', resolve));

@@ -28,7 +28,7 @@ it.skipIf(process.platform === 'win32')('initializes the actual server through a
     try {
       await client.connect(transport);
       expect(client.getServerVersion(), errors).toEqual({ name: 'placekeeper', version: '1.0.0' });
-      expect((await client.listTools()).tools.map(tool => tool.name)).toContain('display_review');
+      expect((await client.listTools()).tools.map(tool => tool.name)).toContain('display_document');
       expect((await client.listResources()).resources.map(resource => resource.uri)).toEqual([`ui://placekeeper/review-v1-${createHash('sha256').update('<html>entrypoint fixture</html>').digest('hex')}.html`]);
       expect(errors).toBe('');
     } finally { await client.close(); }

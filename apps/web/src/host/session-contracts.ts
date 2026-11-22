@@ -90,7 +90,7 @@ export interface ProductionSessionApi extends Partial<DocumentInteractionTranspo
   retrySave(): Promise<SaveStatus>;
   locateSave(): Promise<SaveStatus>;
   resolveReadingLocation?(input: ReadingLocationResolutionRequestV1): Promise<ReadingLocationResolutionV1>;
-  exportReviewedCopy?(confirmPossiblyStale?: true, fence?: DocumentExportFence): Promise<ProductionExportResult>;
+  exportAnnotatedCopy?(confirmPossiblyStale?: true, fence?: DocumentExportFence): Promise<ProductionExportResult>;
   createLink?(location: PlacekeeperLinkLocation): Promise<string>;
   scope(signal?: AbortSignal): Promise<ProductionScope>;
 }

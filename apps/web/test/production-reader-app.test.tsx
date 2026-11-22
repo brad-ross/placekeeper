@@ -1129,7 +1129,7 @@ describe("one production review tree", () => {
         api={{
           command: vi.fn(), saveStatus: vi.fn(), saveProposal: vi.fn(), chooseCopy: vi.fn(),
           chooseFolder: vi.fn(), chooseOriginal: vi.fn(), retrySave: vi.fn(), locateSave: vi.fn(),
-          exportReviewedCopy: vi.fn(), scope: vi.fn(),
+          exportAnnotatedCopy: vi.fn(), scope: vi.fn(),
         }}
         viewer={<div>Generation 8 viewer</div>}
       />,
@@ -1709,7 +1709,7 @@ describe("one production review tree", () => {
         capabilities: { localDocumentRefresh: true, ...(download === false ? { reviewedCopyExport: false } : {}) },
         command: vi.fn(), saveStatus: vi.fn(), saveProposal: vi.fn(), chooseCopy: vi.fn(),
         chooseFolder: vi.fn(), chooseOriginal: vi.fn(), retrySave: vi.fn(), locateSave: vi.fn(),
-        exportReviewedCopy: vi.fn(), scope: vi.fn(),
+        exportAnnotatedCopy: vi.fn(), scope: vi.fn(),
       }}
       viewer={<div>Host PDF reader</div>}
     />);

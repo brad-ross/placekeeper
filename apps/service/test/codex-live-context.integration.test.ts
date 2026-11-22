@@ -517,7 +517,7 @@ describe("native prompt context through packaged hooks", () => {
     await runHookCommand(["hook", "--event"], JSON.stringify({ session_id: taskSessionId, hook_event_name: "PostToolUse", tool_name: "Bash", tool_input: { command: `${CODEX_INSTALLED_LAUNCHER_COMMAND} open --json --surface codex-native --pdf '${pdf}' --source-root '${root}' --generated-output` }, tool_response: JSON.stringify(launch) }), control, write);
     const displayed = await control({ kind: "codex-display", request: { handoff: launch.handoff.token } });
     if (displayed.kind !== "codex-display") throw new Error("Native display required");
-    await runHookCommand(["hook", "--event"], JSON.stringify({ session_id: taskSessionId, hook_event_name: "PostToolUse", tool_name: "mcp__placekeeper__display_review", tool_input: { handoff: launch.handoff.token }, tool_response: { structuredContent: displayed.receipt } }), control, write);
+    await runHookCommand(["hook", "--event"], JSON.stringify({ session_id: taskSessionId, hook_event_name: "PostToolUse", tool_name: "mcp__placekeeper__display_document", tool_input: { handoff: launch.handoff.token }, tool_response: { structuredContent: displayed.receipt } }), control, write);
     const p = displayed.pending;
     const ready = await control({ kind: "codex-app", request: { protocolVersion: 1, runtimeId: p.runtimeId, attemptId: p.attemptId, generation: p.generation, requestId: "ready-context", capability: p.pendingCapability, authority: "pending", method: "ready", payload: {} } });
     if (ready.kind !== "codex-app" || ready.response.status !== "active") throw new Error("Native promotion required");

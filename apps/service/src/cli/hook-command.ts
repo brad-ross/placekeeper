@@ -1,7 +1,7 @@
 import { NativeQualificationExperiments } from "../codex/native-qualification-experiments.js";
 import { NativeQualificationObserver } from "../codex/native-qualification.js";
 import {
-  CODEX_DISPLAY_TOOL,
+  isCodexDisplayTool,
   parseCodexDisplayRequest,
   parseCodexDisplayReceipt,
   parseCodexNativeLaunchSuccess,
@@ -217,7 +217,7 @@ export function inspectHookEvent(value: unknown): HookLifecycleEvent {
   const taskSessionId = taskIdentity(value);
   if (taskSessionId === undefined) return { kind: "ignored" };
   if (value.hook_event_name === "PostToolUse") {
-    if (value.tool_name === CODEX_DISPLAY_TOOL) {
+    if (isCodexDisplayTool(value.tool_name)) {
       if (parseCodexDisplayRequest(value.tool_input) === undefined || !isObject(value.tool_response)) return { kind: "ignored" };
       const receipt = parseCodexDisplayReceipt(value.tool_response.structuredContent);
       return receipt === undefined ? { kind: "ignored" } : { kind: "attest", taskSessionId, receipt };

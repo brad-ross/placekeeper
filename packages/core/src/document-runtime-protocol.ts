@@ -1,7 +1,10 @@
 import { isUpgradeDocumentSettlement, upgradeDocumentStatus } from "./upgrade-document-protocol.js";
 import { nativeSyncTexRequest, nativeSyncTexResponse } from "./native-synctex-protocol.js";
 import type { DocumentAnchorEvidenceV1, SaveDestinationConfirmation } from "./document-model.js";
-export const DOCUMENT_RUNTIME_PROTOCOL = "placekeeper.review-runtime" as const;
+/** In-bundle envelope tag between a reader web bundle and its own host shell
+ * (VS Code extension host, Chrome extension, Electron main, Codex shell). It
+ * never crosses an independently upgraded boundary, so it has no legacy alias. */
+export const DOCUMENT_RUNTIME_PROTOCOL = "placekeeper.document-runtime" as const;
 export const DOCUMENT_RUNTIME_VERSION = 4 as const;
 
 export const DOCUMENT_RUNTIME_HOSTS = ["vscode", "chrome", "macos", "electron", "codex"] as const;
@@ -119,6 +122,38 @@ export function isDocumentRuntimeMethod(value: unknown): value is DocumentRuntim
   return typeof value === "string" && DOCUMENT_RUNTIME_METHOD_SET.has(value);
 }
 
+/**
+ * Renamed runtime method spellings accepted from peers that upgrade
+ * independently of this build (Chrome extension vs native service, Electron or
+ * Codex shell vs a still-running daemon). Wire parsers normalize an alias to
+ * the method this build sends, so dispatch, echoes and forwarding keep using
+ * one spelling.
+ *
+ * TODO(0.4.0): flip the canonical spelling to "exportAnnotatedCopy" (keeping
+ * "exportReviewedCopy" here as the alias) once the oldest supported Chrome
+ * extension, VS Code extension, Codex plugin and service are 0.3.3 or later,
+ * the first release that accepts both.
+ */
+export const DOCUMENT_RUNTIME_METHOD_ALIASES: Readonly<Record<string, DocumentRuntimeMethod>> = Object.freeze({
+  exportAnnotatedCopy: "exportReviewedCopy",
+});
+
+/** The canonical method for a known method or one of its renamed aliases. */
+export function canonicalDocumentRuntimeMethod(value: unknown): DocumentRuntimeMethod | undefined {
+  if (isDocumentRuntimeMethod(value)) return value;
+  return typeof value === "string" && Object.hasOwn(DOCUMENT_RUNTIME_METHOD_ALIASES, value)
+    ? DOCUMENT_RUNTIME_METHOD_ALIASES[value] : undefined;
+}
+
+/** Like isDocumentRuntimeMethodForHost, but for a method received from another process. */
+export function canonicalDocumentRuntimeMethodForHost(
+  host: DocumentRuntimeHost,
+  value: unknown,
+): DocumentRuntimeMethod | undefined {
+  const method = canonicalDocumentRuntimeMethod(value);
+  return isDocumentRuntimeMethodForHost(host, method) ? method : undefined;
+}
+
 export function isDocumentRuntimeMethodForHost(
   host: DocumentRuntimeHost,
   value: unknown,
@@ -147,6 +182,20 @@ const SAVE_FAILURE_REASONS = new Set([
   "verification-failed",
   "write-failed",
 ]);
+/**
+ * Export result kind. The service sends it to independently upgraded hosts
+ * (Chrome and VS Code extensions, Codex shell) whose parsers match it exactly,
+ * so the legacy spelling stays on the wire and the renamed one is only accepted.
+ *
+ * TODO(0.4.0): send ANNOTATED_COPY_EXPORT_KIND once the oldest supported Chrome
+ * extension, VS Code extension and Codex plugin are 0.3.3 or later.
+ */
+export const LEGACY_ANNOTATED_COPY_EXPORT_KIND = "reviewed-copy" as const;
+export const ANNOTATED_COPY_EXPORT_KIND = "annotated-copy" as const;
+export function isAnnotatedCopyExportKind(value: unknown): value is typeof LEGACY_ANNOTATED_COPY_EXPORT_KIND | typeof ANNOTATED_COPY_EXPORT_KIND {
+  return value === LEGACY_ANNOTATED_COPY_EXPORT_KIND || value === ANNOTATED_COPY_EXPORT_KIND;
+}
+/** Matched exactly across processes (see LEGACY_ANNOTATED_COPY_EXPORT_KIND), so its text is frozen. */
 const COMMITTED_ANNOTATED_COPY_WARNING =
   "The reviewed copy was created, but final durability bookkeeping was interrupted. Verify the saved artifact before closing the review.";
 
@@ -565,11 +614,12 @@ export function sanitizeChromeDocumentRuntimeResponse(
     };
   }
   if (method === "exportReviewedCopy") {
-    if (!record(value) || value.kind !== "reviewed-copy" || !safeInteger(value.revision) ||
+    if (!record(value) || !isAnnotatedCopyExportKind(value.kind) || !safeInteger(value.revision) ||
       typeof value.digest !== "string" || !SHA256.test(value.digest) ||
       (value.warning !== undefined && value.warning !== COMMITTED_ANNOTATED_COPY_WARNING)) return undefined;
     return {
-      kind: "reviewed-copy",
+      // Normalized to the spelling this build sends; the service forwards it.
+      kind: LEGACY_ANNOTATED_COPY_EXPORT_KIND,
       path: "Annotated Document",
       revision: value.revision,
       digest: value.digest,
@@ -620,7 +670,7 @@ export function isDocumentExportFence(value: unknown): value is DocumentExportFe
 export class DocumentExportConflictError extends Error {
   constructor() {
     super("Document changed. Confirm the annotation name again to export the latest version.");
-    this.name = "ReviewExportConflictError";
+    this.name = "DocumentExportConflictError";
   }
 }
 

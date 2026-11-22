@@ -5,6 +5,7 @@ import {
   CHROME_RUNTIME_PROTOCOL,
   CHROME_RUNTIME_PROTOCOL_VERSION,
   CHROME_RUNTIME_RESOURCE_CHUNK_BYTES,
+  chromeRuntimeHandshakeDocumentVersion,
   chromeRuntimeProjectionChangeReason,
   parseChromeRuntimeExtensionMessage,
   sanitizeChromeRuntimeProjection,
@@ -360,7 +361,7 @@ export class ChromeRuntimeConnection {
     const rawRecord = typeof raw === "object" && raw !== null && !Array.isArray(raw)
       ? raw as Record<string, unknown> : undefined;
     if (rawRecord?.protocolVersion !== CHROME_RUNTIME_PROTOCOL_VERSION ||
-      (rawRecord.type === "hello" && rawRecord.reviewRuntimeVersion !== DOCUMENT_RUNTIME_VERSION)) {
+      (rawRecord.type === "hello" && chromeRuntimeHandshakeDocumentVersion(rawRecord) !== DOCUMENT_RUNTIME_VERSION)) {
       return this.#versionFailure(typeof rawRecord?.requestId === "string" ? rawRecord.requestId : undefined);
     }
     const message = parseChromeRuntimeExtensionMessage(raw);
@@ -424,6 +425,7 @@ export class ChromeRuntimeConnection {
     this.#connectionId = message.connectionId;
     this.#phase = "acquiring";
     this.#armIdleDeadline();
+    // Legacy handshake key: see CHROME_RUNTIME_LEGACY_DOCUMENT_VERSION_KEY for when it can flip.
     return { type: "hello-ack", reviewRuntimeVersion: DOCUMENT_RUNTIME_VERSION, protocol: CHROME_RUNTIME_PROTOCOL, protocolVersion: 2, connectionId: message.connectionId, leaseMs: this.#idleLeaseMs };
   }
 

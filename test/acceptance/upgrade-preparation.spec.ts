@@ -69,8 +69,8 @@ for (const mode of ['browser', 'electron', 'failed']) test(`actual composer upgr
     // settlement and cancellation must still run through the runtime poll loop.
     await Promise.all([page, peer].map(p => p.evaluate(() => { window.requestAnimationFrame = () => 1; })));
     await input.fill('final DOM value immediately before preparation');
-    const original = host.broker.protectChromeReview.bind(host.broker);
-    if (failPersistence) host.broker.protectChromeReview = async () => { throw new Error('Injected durable persistence failure'); };
+    const original = host.broker.protectChromeDocument.bind(host.broker);
+    if (failPersistence) host.broker.protectChromeDocument = async () => { throw new Error('Injected durable persistence failure'); };
     host.upgradeParticipants.refresh();
     const attempt = host.upgradePreparation.preview('development', { daemonIdentity: 'a'.repeat(64), installArtifactIdentity: 'b'.repeat(64) });
     expect(attempt.participants.length).toBeGreaterThanOrEqual(2);
@@ -78,7 +78,7 @@ for (const mode of ['browser', 'electron', 'failed']) test(`actual composer upgr
     host.upgradePreparation.begin(attempt, true);
     await host.prepareUpgradeTasks();
     await expect.poll(() => { const status = host.upgradePreparation.status(attempt); return status.phase === 'canceled' && !failPersistence ? status.reason : status.phase; }, { timeout: 10000 }).toBe(failPersistence ? 'canceled' : 'ready');
-    host.broker.protectChromeReview = original;
+    host.broker.protectChromeDocument = original;
     if (failPersistence) {
       for (const editor of [input, peerInput]) {
         await expect.poll(() => editor.evaluate(e => e.closest('[inert]') === null)).toBe(true);

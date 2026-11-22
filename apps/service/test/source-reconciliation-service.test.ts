@@ -66,7 +66,7 @@ async function fixture(
     portableReader: async () => [],
     rewriteAssessor: async () => ({ eligible: true }),
   });
-  const opened = await broker.openReview({ pdfPath, sourceRootPath: directory, surface: "codex" });
+  const opened = await broker.openDocument({ pdfPath, sourceRootPath: directory, surface: "codex" });
   if (opened.kind !== "opened" || opened.launch.bindProof === undefined) {
     throw new Error("Expected a bindable Codex launch");
   }

@@ -223,7 +223,7 @@ describe("Chrome daemon handoff", () => {
       choices: ["resume", "discard", "fork"],
     });
     if (offered.kind !== "recovery-offered") throw new Error("Expected protected recovery");
-    const resumed = await host.broker.openReview({
+    const resumed = await host.broker.openDocument({
       pdfPath: join(recoveryRoot, offered.recoverySessionId, "source.pdf"),
       surface: "chrome",
       recoveryDecision: "resume",

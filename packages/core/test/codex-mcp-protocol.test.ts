@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseCodexAppRequest, parseCodexDisplayRequest, parseCodexDisplayReceipt, CODEX_RESOURCE_CHUNK_BYTES, parseCodexAppResponse, parseCodexResourceChunk, parseCodexResourceDescriptor } from "../src/codex-mcp-protocol.js";
+import { CODEX_DISPLAY_TOOL, CODEX_LEGACY_DISPLAY_TOOL, isCodexDisplayTool, isCodexDisplayToolName, parseCodexAppRequest, parseCodexDisplayRequest, parseCodexDisplayReceipt, CODEX_RESOURCE_CHUNK_BYTES, parseCodexAppResponse, parseCodexResourceChunk, parseCodexResourceDescriptor } from "../src/codex-mcp-protocol.js";
 const id = "abcdefgh_1234";
 const capability = "c".repeat(43);
 const base = { protocolVersion: 1, runtimeId: id, attemptId: id, requestId: id, generation: 1 };
@@ -76,4 +76,21 @@ it("admits continuation only as an empty resume request and validates its privat
   const response = { status: "active", runtimeId: id, attemptId: id, generation: 1, presentationCapability: capability, reconnectTicket: capability, continuationCapability: capability };
   expect(parseCodexAppResponse(response)).toEqual(response);
   expect(parseCodexAppResponse({ ...response, continuationCapability: "bad" })).toBeUndefined();
+});
+
+describe("renamed Codex wire names", () => {
+  it("names display_document as the display tool and keeps display_review as its alias", () => {
+    expect(CODEX_DISPLAY_TOOL).toBe("mcp__placekeeper__display_document");
+    expect(CODEX_LEGACY_DISPLAY_TOOL).toBe("mcp__placekeeper__display_review");
+    for (const name of ["mcp__placekeeper__display_document", "mcp__placekeeper__display_review"]) expect(isCodexDisplayTool(name)).toBe(true);
+    for (const name of ["mcp__other__display_document", "display_document", "mcp__placekeeper__review_app"]) expect(isCodexDisplayTool(name)).toBe(false);
+    for (const name of ["display_document", "display_review"]) expect(isCodexDisplayToolName(name)).toBe(true);
+    expect(isCodexDisplayToolName("mcp__placekeeper__display_document")).toBe(false);
+  });
+  it("accepts the renamed export method from a newer shell and forwards the legacy spelling", () => {
+    const request = { ...base, authority: "presentation", capability, payload: {} };
+    expect(parseCodexAppRequest({ ...request, method: "exportReviewedCopy" })).toMatchObject({ method: "exportReviewedCopy" });
+    expect(parseCodexAppRequest({ ...request, method: "exportAnnotatedCopy" })).toMatchObject({ method: "exportReviewedCopy" });
+    expect(parseCodexAppRequest({ ...request, method: "exportAnnotatedDocument" })).toBeUndefined();
+  });
 });

@@ -18,22 +18,34 @@ const request = { protocolVersion: 1, runtimeId: pending.runtimeId, attemptId: p
 function fixture(): NativeServiceClient { return { display: vi.fn(async () => ({ receipt, pending })), app: vi.fn(async () => ({ status: "active" as const, runtimeId: pending.runtimeId, attemptId: pending.attemptId, generation: 1, presentationCapability: "a".repeat(43), reconnectTicket: "r".repeat(43) })) }; }
 describe("packaged native MCP transport", () => {
   it("returns exact model receipt and invocation-private pending credentials without waiting for hooks", async () => {
-    const result = await callNativeTool(fixture(), "display_review", { handoff: "h".repeat(43) });
+    const result = await callNativeTool(fixture(), "display_document", { handoff: "h".repeat(43) });
     expect(result.structuredContent).toEqual(receipt); expect(result._meta?.[PENDING_META_KEY]).toEqual(pending);
     expect(JSON.stringify({ content: result.content, structuredContent: result.structuredContent })).not.toContain(pending.pendingCapability);
+  });
+  it("keeps display_review registered as a deprecated alias of display_document", async () => {
+    const primary = nativeTools.find(tool => tool.name === "display_document");
+    const alias = nativeTools.find(tool => tool.name === "display_review");
+    expect(alias?.description).toMatch(/^Deprecated alias of display_document\./u);
+    expect(alias?.inputSchema).toEqual(primary?.inputSchema);
+    expect(alias?._meta).toEqual(primary?._meta);
+    const client = fixture();
+    const legacy = await callNativeTool(client, "display_review", { handoff: "h".repeat(43) });
+    expect(legacy).toEqual(await callNativeTool(client, "display_document", { handoff: "h".repeat(43) }));
+    expect(legacy.structuredContent).toEqual(receipt);
+    expect(client.display).toHaveBeenCalledTimes(2);
   });
   it("private app replies never expose credentials or byte payloads in model surfaces", async () => {
     const result = await callNativeTool(fixture(), APP_TOOL, { request });
     expect(result.content).toEqual([]); expect(result.structuredContent).toBeUndefined(); expect(result._meta?.[RESPONSE_META_KEY]).toMatchObject({ status: "active" });
-    expect(nativeTools[1]?._meta).toEqual({ ui: { visibility: ["app"] } });
-    expect(nativeTools[1]?._meta).not.toHaveProperty("ui.resourceUri");
+    expect(nativeTools.find(tool => tool.name === APP_TOOL)?._meta).toEqual({ ui: { visibility: ["app"] } });
+    expect(nativeTools.find(tool => tool.name === APP_TOOL)?._meta).not.toHaveProperty("ui.resourceUri");
   });
   it("rejects malformed requests before service admission and sanitizes transport failures", async () => {
     const client = fixture();
     expect((await callNativeTool(client, APP_TOOL, { request: { ...request, taskSessionId: "forged" } })).isError).toBe(true);
     expect(client.app).not.toHaveBeenCalled();
     client.display = async () => { throw new Error(`private socket ${pending.pendingCapability}`); };
-    expect(JSON.stringify(await callNativeTool(client, "display_review", { handoff: "h".repeat(43) }))).not.toContain(pending.pendingCapability);
+    expect(JSON.stringify(await callNativeTool(client, "display_document", { handoff: "h".repeat(43) }))).not.toContain(pending.pendingCapability);
   });
   it("bounds app result encoding", async () => {
     const client = fixture(); client.app = async () => ({ status: "ok", payload: "x".repeat(1024 * 1024) });
@@ -44,7 +56,7 @@ describe("packaged native MCP transport", () => {
     const client = new Client({ name: "unsupported", version: "1" });
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
     await server.connect(serverTransport); await client.connect(clientTransport);
-    try { expect((await client.callTool({ name: "display_review", arguments: { handoff: "h".repeat(43) } })).isError).toBe(true); expect(service.display).not.toHaveBeenCalled(); }
+    try { expect((await client.callTool({ name: "display_document", arguments: { handoff: "h".repeat(43) } })).isError).toBe(true); expect(service.display).not.toHaveBeenCalled(); }
     finally { await client.close(); await server.close(); }
   });
   it("uses the installed candidate name for file and thread menu entries", async () => {
@@ -69,7 +81,7 @@ describe("packaged native MCP transport", () => {
       const uri = `ui://placekeeper/review-v1-${createHash("sha256").update("<html>credential-free</html>").digest("hex")}.html`;
       expect((await client.listResources()).resources.map((resource) => resource.uri)).toEqual([uri]);
       expect((await client.listTools()).tools.map(tool => tool.name).sort()).toEqual([
-        "display_review", "extension_app", "open_pdf", "open_placekeeper", "review_app",
+        "display_document", "display_review", "extension_app", "open_pdf", "open_placekeeper", "review_app",
       ]);
       expect(client.getServerCapabilities()).not.toHaveProperty("extensions");
       expect(client.getServerCapabilities()).not.toHaveProperty("experimental");
@@ -77,7 +89,7 @@ describe("packaged native MCP transport", () => {
       const resource = await client.readResource({ uri });
       expect(resource.contents[0]).toMatchObject({ uri, text: "<html>credential-free</html>" });
       expect(JSON.stringify(resource)).not.toContain(pending.pendingCapability);
-      const result = await client.callTool({ name: "display_review", arguments: { handoff: "h".repeat(43) } });
+      const result = await client.callTool({ name: "display_document", arguments: { handoff: "h".repeat(43) } });
       expect(result.structuredContent).toEqual(receipt);
       expect((await client.callTool({ name: APP_TOOL, arguments: { request } })).structuredContent).toBeUndefined();
     } finally { await client.close(); await server.close(); }
@@ -101,8 +113,8 @@ describe("packaged native MCP transport", () => {
       for (const [client, shell, uri] of [[first, oldShell, firstUri], [updated, newShell, updatedUri]] as const) {
         expect(uri).toBe(`ui://placekeeper/review-v1-${createHash("sha256").update(shell).digest("hex")}.html`);
         const tools = (await client.listTools()).tools;
-        const launches = tools.filter(tool => ["display_review", "open_pdf", "open_placekeeper"].includes(tool.name));
-        expect(launches).toHaveLength(3);
+        const launches = tools.filter(tool => ["display_document", "display_review", "open_pdf", "open_placekeeper"].includes(tool.name));
+        expect(launches).toHaveLength(4);
         for (const tool of launches) expect(tool._meta).toHaveProperty("ui.resourceUri", uri);
         for (const tool of tools.filter(tool => !launches.includes(tool))) expect(tool._meta ?? {}).not.toHaveProperty("ui.resourceUri");
         expect((await client.readResource({ uri })).contents[0]).toMatchObject({ uri, text: shell });
@@ -162,8 +174,8 @@ it("qualification metadata is fresh and private while app replies add no UI reso
     await writeFile(join(root, "native-qualification.json"), JSON.stringify({ version: 1, runId: "c".repeat(32), salt: "s".repeat(43), observe: true, createdAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 60_000).toISOString() }), { mode: 0o600 });
     const { NativeQualificationObserver } = await import("../../service/src/codex/native-qualification.js");
     const observer = new NativeQualificationObserver(root, "server");
-    const a = await callNativeTool(fixture(), "display_review", { handoff: "h".repeat(43) }, { qualification: observer });
-    const b = await callNativeTool(fixture(), "display_review", { handoff: "h".repeat(43) }, { qualification: observer });
+    const a = await callNativeTool(fixture(), "display_document", { handoff: "h".repeat(43) }, { qualification: observer });
+    const b = await callNativeTool(fixture(), "display_document", { handoff: "h".repeat(43) }, { qualification: observer });
     expect(a._meta?.["placekeeper/qualification"]).toBeDefined();
     expect(a._meta?.["placekeeper/qualification"]).not.toEqual(b._meta?.["placekeeper/qualification"]);
     expect(a.content).toEqual(b.content); expect(a.structuredContent).toEqual(receipt);
@@ -177,14 +189,14 @@ it("disabled, expired and failed observation sinks preserve exact normal public 
   try {
     const { NativeQualificationObserver } = await import("../../service/src/codex/native-qualification.js");
     const args = { handoff: "h".repeat(43) };
-    const expected = await callNativeTool(fixture(), "display_review", args);
-    expect(await callNativeTool(fixture(), "display_review", args, { qualification: new NativeQualificationObserver(root, "server") })).toEqual(expected);
+    const expected = await callNativeTool(fixture(), "display_document", args);
+    expect(await callNativeTool(fixture(), "display_document", args, { qualification: new NativeQualificationObserver(root, "server") })).toEqual(expected);
     const descriptor = { version: 1, runId: "c".repeat(32), salt: "s".repeat(43), observe: true, createdAt: new Date(Date.now() - 1000).toISOString(), expiresAt: new Date(Date.now() - 1).toISOString() };
     await writeFile(join(root, "native-qualification.json"), JSON.stringify(descriptor), { mode: 0o600 });
-    expect(await callNativeTool(fixture(), "display_review", args, { qualification: new NativeQualificationObserver(root, "server") })).toEqual(expected);
+    expect(await callNativeTool(fixture(), "display_document", args, { qualification: new NativeQualificationObserver(root, "server") })).toEqual(expected);
     descriptor.expiresAt = new Date(Date.now() + 60_000).toISOString(); await writeFile(join(root, "native-qualification.json"), JSON.stringify(descriptor));
     await writeFile(join(root, "native-qualification"), "occupied");
-    expect(await callNativeTool(fixture(), "display_review", args, { qualification: new NativeQualificationObserver(root, "server") })).toEqual(expected);
+    expect(await callNativeTool(fixture(), "display_document", args, { qualification: new NativeQualificationObserver(root, "server") })).toEqual(expected);
     expect(await callNativeTool(fixture(), APP_TOOL, { request }, { qualification: new NativeQualificationObserver(root, "server") })).toEqual(await callNativeTool(fixture(), APP_TOOL, { request }));
   } finally { await rm(root, { recursive: true, force: true }); }
 });
@@ -198,7 +210,7 @@ it("grants a selected own shell action only on a normal successful authenticated
     const expiry = new Date(Date.now() + 60_000).toISOString();
     await writeFile(join(root, "native-qualification.json"), JSON.stringify({ version: 1, runId: "c".repeat(32), salt: "s".repeat(43), observe: true, createdAt: new Date().toISOString(), expiresAt: expiry }), { mode: 0o600 });
     const observer = new NativeQualificationObserver(root, "server"), controls = new NativeQualificationControls(root), service = fixture();
-    const display = await callNativeTool(service, "display_review", { handoff: "h".repeat(43) }, { qualification: observer, controls });
+    const display = await callNativeTool(service, "display_document", { handoff: "h".repeat(43) }, { qualification: observer, controls });
     const correlation = display._meta?.["placekeeper/qualification"] as { runId: string; invocationNonce: string };
     expect(Object.keys(correlation).sort()).toEqual(["expiresAt", "invocationNonce", "runId"]);
     const descriptor = { version: 1, actionId: "d".repeat(32), action: "bridge-close", createdAt: new Date().toISOString(), expiresAt: expiry, budget: 1, target: { ...correlation, processNonce: observer.processNonce, runtimeId: pending.runtimeId, attemptId: pending.attemptId } };
@@ -229,8 +241,8 @@ it("preserves successful ordinary display and app replies when qualification con
     const service = fixture(), observer = new NativeQualificationObserver(root, "server"), controls = new NativeQualificationControls(root);
     vi.spyOn(controls, "remember").mockImplementation(() => { throw new Error("private control failure"); });
     vi.spyOn(controls, "shellGrant").mockImplementation(() => { throw new Error("private control failure"); });
-    const normalDisplay = await callNativeTool(service, "display_review", { handoff: "h".repeat(43) });
-    expect(await callNativeTool(service, "display_review", { handoff: "h".repeat(43) }, { qualification: observer, controls })).toEqual(normalDisplay);
+    const normalDisplay = await callNativeTool(service, "display_document", { handoff: "h".repeat(43) });
+    expect(await callNativeTool(service, "display_document", { handoff: "h".repeat(43) }, { qualification: observer, controls })).toEqual(normalDisplay);
     const normalApp = await callNativeTool(service, APP_TOOL, { request });
     expect(await callNativeTool(service, APP_TOOL, { request }, { qualification: observer, controls })).toEqual(normalApp);
   } finally { await rm(root, { recursive: true, force: true }); }
@@ -246,7 +258,7 @@ it("paired experiment replaces only closed public receipt and retains each origi
     await writeFile(join(root, "native-qualification-experiments.json"), JSON.stringify({ version: 1, actionId: "7".repeat(32), action: "paired-public-result-exchange", createdAt, expiresAt, budget: 1, targets: [{ runId, processNonce: one.processNonce }, { runId, processNonce: two.processNonce }], rendezvousMs: 1000 }), { mode: 0o600 });
     const ownA = pending, ownB = { ...pending, receiptId: "receipt-2", attemptId: "attempt-2", runtimeId: "runtime-2", pendingCapability: "z".repeat(43) }, receiptB = { ...receipt, receiptId: ownB.receiptId, attemptId: ownB.attemptId };
     const serviceB = fixture(); serviceB.display = async () => ({ receipt: receiptB, pending: ownB });
-    const results = await Promise.all([callNativeTool(fixture(), "display_review", { handoff: "h".repeat(43) }, { qualification: one, experiments: new NativeQualificationExperiments(root) }), callNativeTool(serviceB, "display_review", { handoff: "j".repeat(43) }, { qualification: two, experiments: new NativeQualificationExperiments(root) })]);
+    const results = await Promise.all([callNativeTool(fixture(), "display_document", { handoff: "h".repeat(43) }, { qualification: one, experiments: new NativeQualificationExperiments(root) }), callNativeTool(serviceB, "display_document", { handoff: "j".repeat(43) }, { qualification: two, experiments: new NativeQualificationExperiments(root) })]);
     expect(results.map(r => r.structuredContent)).toEqual([receiptB, receipt]);
     expect(results.map(r => r._meta?.[PENDING_META_KEY])).toEqual([ownA, ownB]);
     for (const r of results) {

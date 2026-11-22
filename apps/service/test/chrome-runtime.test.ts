@@ -397,6 +397,15 @@ describe("Chrome least-authority native runtime", () => {
     await expect(preflight.handle({ type: "hello", reviewRuntimeVersion: 4, protocol: "placekeeper.chrome-runtime", protocolVersion: 1, connectionId }))
       .resolves.toMatchObject({ type: "failure", reason: "protocol-mismatch" });
 
+    const renamed = new ChromeRuntimeConnection({ callerOrigin: origin, backend: backend() });
+    await expect(renamed.handle({ type: "hello", documentRuntimeVersion: 4, protocol: "placekeeper.chrome-runtime", protocolVersion: 2, connectionId }))
+      .resolves.toEqual(expect.objectContaining({ type: "hello-ack", reviewRuntimeVersion: 4, connectionId }));
+    await renamed.disconnect();
+    const renamedSkew = new ChromeRuntimeConnection({ callerOrigin: origin, backend: backend() });
+    await expect(renamedSkew.handle({ type: "hello", documentRuntimeVersion: 3, protocol: "placekeeper.chrome-runtime", protocolVersion: 2, connectionId }))
+      .resolves.toMatchObject({ type: "failure", reason: "protocol-mismatch" });
+    await renamedSkew.disconnect();
+
     for (const documentRuntimeVersion of [undefined, 1, 2, 3]) {
       const mixed = new ChromeRuntimeConnection({ callerOrigin: origin, backend: backend() });
       await expect(mixed.handle({ type: "hello", protocol: "placekeeper.chrome-runtime", protocolVersion: 2,

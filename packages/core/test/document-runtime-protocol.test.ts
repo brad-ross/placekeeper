@@ -6,6 +6,10 @@ import {
   DOCUMENT_RUNTIME_METHODS,
   DOCUMENT_RUNTIME_PROTOCOL,
   DOCUMENT_RUNTIME_VERSION,
+  DOCUMENT_RUNTIME_METHOD_ALIASES,
+  canonicalDocumentRuntimeMethod,
+  canonicalDocumentRuntimeMethodForHost,
+  isAnnotatedCopyExportKind,
   isDocumentRuntimeMethodForHost,
   isDocumentPanelKey,
   isDocumentRuntimeMethod,
@@ -130,7 +134,7 @@ describe("shared review runtime protocol", () => {
   });
 
   it("defines the complete versioned method vocabulary for both hosts", () => {
-    expect(DOCUMENT_RUNTIME_PROTOCOL).toBe("placekeeper.review-runtime");
+    expect(DOCUMENT_RUNTIME_PROTOCOL).toBe("placekeeper.document-runtime");
     expect(DOCUMENT_RUNTIME_VERSION).toBe(4);
     expect(DOCUMENT_RUNTIME_METHODS).toEqual([
       "upgradePoll",
@@ -484,4 +488,31 @@ it('keeps upgrade settlement credentials and durability authority off renderer t
   expect(sanitizeChromeDocumentRuntimeRequest('upgradeSettle', { ...request, reviewRevisionDurable: true })).toBeUndefined();
   expect(sanitizeChromeDocumentRuntimeRequest('upgradeSettle', { ...request, participantToken: 'b'.repeat(43) })).toBeUndefined();
   expect(sanitizeChromeDocumentRuntimeRequest('upgradePoll', { token: 'b'.repeat(43) })).toBeUndefined();
+});
+
+describe("renamed runtime wire values", () => {
+  it("accepts exportAnnotatedCopy as an alias of the exportReviewedCopy wire method", () => {
+    expect(DOCUMENT_RUNTIME_METHOD_ALIASES).toEqual({ exportAnnotatedCopy: "exportReviewedCopy" });
+    expect(canonicalDocumentRuntimeMethod("exportReviewedCopy")).toBe("exportReviewedCopy");
+    expect(canonicalDocumentRuntimeMethod("exportAnnotatedCopy")).toBe("exportReviewedCopy");
+    expect(canonicalDocumentRuntimeMethod("constructor")).toBeUndefined();
+    expect(canonicalDocumentRuntimeMethod("exportAnnotatedDocument")).toBeUndefined();
+    for (const host of DOCUMENT_RUNTIME_HOSTS) {
+      expect(canonicalDocumentRuntimeMethodForHost(host, "exportAnnotatedCopy")).toBe("exportReviewedCopy");
+    }
+    expect(canonicalDocumentRuntimeMethodForHost("chrome", "forwardSyncTex")).toBeUndefined();
+    // In-bundle checks stay on the one canonical spelling.
+    expect(isDocumentRuntimeMethod("exportAnnotatedCopy")).toBe(false);
+  });
+
+  it("accepts the annotated-copy export kind and forwards the legacy reviewed-copy kind", () => {
+    expect(isAnnotatedCopyExportKind("reviewed-copy")).toBe(true);
+    expect(isAnnotatedCopyExportKind("annotated-copy")).toBe(true);
+    expect(isAnnotatedCopyExportKind("original-replacement")).toBe(false);
+    for (const kind of ["reviewed-copy", "annotated-copy"]) {
+      expect(sanitizeChromeDocumentRuntimeResponse("exportReviewedCopy", {
+        kind, path: "/private/result.pdf", revision: 3, digest: "c".repeat(64),
+      })).toEqual({ kind: "reviewed-copy", path: "Annotated Document", revision: 3, digest: "c".repeat(64) });
+    }
+  });
 });

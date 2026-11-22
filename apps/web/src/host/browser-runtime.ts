@@ -259,8 +259,8 @@ export function createBrowserHostRuntime(session: ProductionSession): HostRuntim
       if (resolve === undefined) throw new Error("Reading location resolution is unavailable.");
       return resolve(input);
     },
-    async exportReviewedCopy(confirmPossiblyStale?: true, fence?: DocumentExportFence): Promise<ProductionExportResult> {
-      const method = (await ensureLoaded()).api.exportReviewedCopy;
+    async exportAnnotatedCopy(confirmPossiblyStale?: true, fence?: DocumentExportFence): Promise<ProductionExportResult> {
+      const method = (await ensureLoaded()).api.exportAnnotatedCopy;
       if (method === undefined) throw new Error("Annotated Document export is unavailable.");
       return method(confirmPossiblyStale, fence);
     },

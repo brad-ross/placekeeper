@@ -81,8 +81,8 @@ describe("one-use document-scoped session credentials", () => {
       portableReader: async () => [],
       rewriteAssessor: async () => ({ eligible: true }),
     });
-    const codex = await broker.openReview({ pdfPath: pdf, surface: "codex" });
-    const finder = await broker.openReview({ pdfPath: pdf, surface: "finder" });
+    const codex = await broker.openDocument({ pdfPath: pdf, surface: "codex" });
+    const finder = await broker.openDocument({ pdfPath: pdf, surface: "finder" });
     if (codex.kind !== "opened" || finder.kind !== "focused") throw new Error("Expected dual launch");
     const codexCapability = new URLSearchParams(codex.launch.fragment.slice(1)).get("cap");
     const finderCapability = new URLSearchParams(finder.launch.fragment.slice(1)).get("cap");
@@ -320,7 +320,7 @@ async function openBroker(options: {
   await writeFile(join(assets, "app.js"), "export function start() {}\n");
   await writeFile(pdf, "%PDF-1.7\nprivate document text\n%%EOF");
   const broker = new SessionBroker({ recoveryRoot: join(directory, "recovery") });
-  const opened = await broker.openReview({
+  const opened = await broker.openDocument({
     pdfPath: pdf,
     surface: options.surface ?? "browser",
     ...(options.generatedOutput ? { workflowMode: "generated-output" as const } : {}),
@@ -444,7 +444,7 @@ describe("loopback HTTP boundary", () => {
 
     const foreignPdf = join(directory, "foreign.pdf");
     await writeFile(foreignPdf, "%PDF-1.7\nforeign document text\n%%EOF");
-    const foreign = await broker.openReview({ pdfPath: foreignPdf, surface: "browser" });
+    const foreign = await broker.openDocument({ pdfPath: foreignPdf, surface: "browser" });
     if (foreign.kind !== "opened") throw new Error("Expected a foreign review session");
     const foreignExchange = await postJson(
       `${server.origin}/s/${foreign.launch.sessionId}/exchange`,
@@ -642,9 +642,9 @@ describe("loopback HTTP boundary", () => {
     await broker.quiesceForShutdown();
 
     const restarted = new SessionBroker({ recoveryRoot: join(directory, "recovery") });
-    const offered = await restarted.openReview({ pdfPath: pdf, surface: "browser" });
+    const offered = await restarted.openDocument({ pdfPath: pdf, surface: "browser" });
     if (offered.kind !== "recovery-offered") throw new Error("Expected durable receipt recovery offer");
-    const resumed = await restarted.openReview({
+    const resumed = await restarted.openDocument({
       pdfPath: pdf,
       surface: "browser",
       recoveryDecision: "resume",
@@ -721,7 +721,7 @@ describe("loopback HTTP boundary", () => {
       line: 1,
     }, { authorization: `Bearer ${credential}` });
     expect(forward.status).toBe(403);
-    const editor = await broker.openReview({ pdfPath: pdf, surface: "vscode", workflowMode: "generated-output" });
+    const editor = await broker.openDocument({ pdfPath: pdf, surface: "vscode", workflowMode: "generated-output" });
     if (editor.kind !== "focused") throw new Error("Expected existing review");
     const editorExchange = await postJson(`${server.origin}/s/${launch.sessionId}/exchange`, {
       capability: editor.launch.fragment.slice("#cap=".length),
@@ -768,7 +768,7 @@ describe("loopback HTTP boundary", () => {
     const broker = new SessionBroker({ recoveryRoot: join(directory, "recovery") });
     const approvePdf = vi.spyOn(broker.capabilities, "approvePdf");
     const recoverDraft = vi.spyOn(DraftSnapshotStore.prototype, "recover");
-    const openDocument = vi.spyOn(broker, "openReview");
+    const openDocument = vi.spyOn(broker, "openDocument");
     const stageReconnect = vi.spyOn(broker, "stageRestartReconnect");
     const issueBootstrap = vi.spyOn(broker.credentials, "issueBootstrap");
     const server = await startHttpServer(broker, { webAssets: { root: assets } });
@@ -1065,7 +1065,7 @@ describe("loopback HTTP boundary", () => {
       { headers: { cookie: "placekeeper_view=stale-successor-cookie" } },
     )).status).toBe(404);
 
-    const reopened = await broker.openReview({ pdfPath: pdf, surface: "browser" });
+    const reopened = await broker.openDocument({ pdfPath: pdf, surface: "browser" });
     if (reopened.kind !== "focused") throw new Error("Expected another live view");
     const endedExchange = await postJson(
       `${server.origin}/s/${reopened.launch.sessionId}/exchange`,

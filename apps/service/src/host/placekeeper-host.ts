@@ -497,7 +497,7 @@ export class PlacekeeperHost {
       request.fork === true ? "fork" : request.recovery;
     try {
       const surface = request.desktop === "electron" ? "codex-native" : trustedSurface(request.surface);
-      const opened = await this.broker.openReview({
+      const opened = await this.broker.openDocument({
         pdfPath: request.pdfPath,
         ...(request.sourceRootPath === undefined
           ? {}

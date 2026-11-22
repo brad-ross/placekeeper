@@ -531,7 +531,7 @@ export async function createStaticHostRuntime(
     async locateSave() {
       return notSavedStatus(state, eligibility, lastExportedRevision);
     },
-    async exportReviewedCopy(_confirmPossiblyStale?: true, fence?: DocumentExportFence): Promise<ProductionExportResult> {
+    async exportAnnotatedCopy(_confirmPossiblyStale?: true, fence?: DocumentExportFence): Promise<ProductionExportResult> {
       if (disposed) throw new Error("This document is closed.");
       if (fence && (fence.expectedRevision !== state.revision || fence.documentGeneration !== state.workflow.documentGeneration)) {
         throw new DocumentExportConflictError();

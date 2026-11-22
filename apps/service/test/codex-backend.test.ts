@@ -32,7 +32,7 @@ async function fixture(generated = true, imported = false) {
   let time = 1000;
   const manager = new CodexRuntimeManager(broker, { backend, now: () => new Date(time), panelLeaseMs: 100 });
   cleanups.push(async () => { await manager.close(); await saving.drain(); await broker.quiesceForShutdown(); await rm(root, { recursive: true, force: true }); });
-  const opened = await broker.openReview({ pdfPath, surface: "codex-native", ...(generated ? { workflowMode: "generated-output" as const } : {}) });
+  const opened = await broker.openDocument({ pdfPath, surface: "codex-native", ...(generated ? { workflowMode: "generated-output" as const } : {}) });
   if (opened.kind === "recovery-offered") throw new Error("recovery");
   const sessionId = opened.launch.sessionId;
   // Build the closed pending envelope explicitly, keeping metadata out of requests.
@@ -404,7 +404,7 @@ describe("active native service backend", () => {
     const reached = Promise.withResolvers<void>();
     const original = f.broker.freezeDelivery.bind(f.broker);
     vi.spyOn(f.broker, "freezeDelivery").mockImplementationOnce(async (...args) => { reached.resolve(); await gate.promise; return original(...args); });
-    const exportCopy = vi.spyOn(f.exporting, "exportReviewedCopy");
+    const exportCopy = vi.spyOn(f.exporting, "exportAnnotatedCopy");
     const pending = f.manager.handle(request(a, "exportReviewedCopy", { fence: { expectedRevision: 1, documentGeneration: 2 } }));
     await reached.promise;
     await writeFile(f.pdfPath, "%PDF-1.7\nreplacement before export snapshot\n%%EOF");
@@ -452,9 +452,9 @@ describe("active native service backend", () => {
     expect(f.broker.taskBindings.nativeReconnectForTask("task-native")).toBeUndefined();
     const broker = new SessionBroker({ recoveryRoot: f.broker.recoveryRoot, portableReader: async () => [] });
     await broker.initialize();
-    const offered = await broker.openReview({ pdfPath: relocated, surface: "codex-native" });
+    const offered = await broker.openDocument({ pdfPath: relocated, surface: "codex-native" });
     if (offered.kind !== "recovery-offered") throw new Error("Expected protected relocation recovery");
-    const recovered = await broker.openReview({ pdfPath: relocated, surface: "codex-native", recoveryDecision: "resume", recoveryOffer: offered.recoveryOffer, recoveryOperationId: "relocation_recovery" });
+    const recovered = await broker.openDocument({ pdfPath: relocated, surface: "codex-native", recoveryDecision: "resume", recoveryOffer: offered.recoveryOffer, recoveryOperationId: "relocation_recovery" });
     if (recovered.kind === "recovery-offered") throw new Error("Expected recovered relocation");
     expect(recovered.launch.sessionId).toBe(f.sessionId);
     const reopened = new CodexRuntimeManager(broker);
@@ -520,7 +520,7 @@ it("preserves native export conflicts from real revision fences and denies detac
   await f.broker.acceptMutation(f.sessionId, setAnnotationName(f.broker.state(f.sessionId)!, "Reviewer"));
   const fence = { expectedRevision: f.broker.state(f.sessionId)!.revision, documentGeneration: 1 };
   await f.broker.acceptMutation(f.sessionId, setAnnotationName(f.broker.state(f.sessionId)!, "Other window"));
-  const exportCopy = vi.spyOn(f.exporting, "exportReviewedCopy");
+  const exportCopy = vi.spyOn(f.exporting, "exportAnnotatedCopy");
   expect(await f.manager.handle(request(active, "exportReviewedCopy", { fence }, "conflict_request"))).toEqual({ status: "operation-error", reason: "export-conflict" });
   expect(exportCopy).not.toHaveBeenCalled();
   const gate = Promise.withResolvers<void>(), reached = Promise.withResolvers<void>();

@@ -49,8 +49,8 @@ export async function runStandaloneChooser(chooser: StandaloneChooser, preload: 
             const contents = window.webContents;
             const identity = { windowId: randomUUID(), attemptId: randomUUID(), sourceEndpointToken: randomUUID() };
             const verify = (event: Electron.IpcMainInvokeEvent) => { if (event.sender !== contents || event.senderFrame !== contents.mainFrame) throw new Error('Unauthorized chooser'); };
-            ipcMain.handle('review:identity', event => { verify(event); return identity; });
-            ipcMain.handle('review:source-endpoint', (event, id, token, endpoint) => {
+            ipcMain.handle('document:identity', event => { verify(event); return identity; });
+            ipcMain.handle('document:source-endpoint', (event, id, token, endpoint) => {
                 verify(event);
                 if (!acceptsStandaloneEndpoint({ frame: contents.mainFrame, windowId: identity.windowId, attemptId: identity.attemptId, token: identity.sourceEndpointToken }, event.senderFrame, id, token, endpoint)) throw new Error('Invalid chooser response');
                 selection.resolve(endpoint);
@@ -67,7 +67,7 @@ export async function runStandaloneChooser(chooser: StandaloneChooser, preload: 
         await new Promise<void>((resolve, reject) => process.stdout.write(JSON.stringify({ selected }) + '\n', error => error ? reject(error) : resolve()));
     } finally {
         clearTimeout(timer);
-        ipcMain.removeHandler('review:identity'); ipcMain.removeHandler('review:source-endpoint');
+        ipcMain.removeHandler('document:identity'); ipcMain.removeHandler('document:source-endpoint');
         window?.destroy();
         app.quit();
     }

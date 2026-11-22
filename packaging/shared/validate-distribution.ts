@@ -446,7 +446,8 @@ const CODEX_HOOK_SPECS = {
       timeout: 55,
       additionalContextLimit: 131072,
       statusMessage: "Verifying Placekeeper native presentation",
-      matcher: "^mcp__placekeeper__display_review$",
+      // display_review is the deprecated alias of display_document; both are attested.
+      matcher: "^mcp__placekeeper__display_(document|review)$",
     },
   ],
   UserPromptSubmit: [{
@@ -612,7 +613,7 @@ async function validateSkillContract(pluginRoot: string): Promise<void> {
     "context source complete --handle",
     "A failed refresh blocks completion.",
     "Do not print, summarize, save, or copy the handoff, bind proof, or any private capability elsewhere.",
-    "mcp__placekeeper__display_review",
+    "mcp__placekeeper__display_document",
     "trusted display",
     "Do not claim successful native activation or current context",
     "Do not bypass ordinary permission prompts",
@@ -708,6 +709,8 @@ async function validateVscodeIdentity(
     "placekeeper.forwardSyncTex",
     "placekeeper.goToSource",
     "placekeeper.reattach",
+    "placekeeper.exportAnnotatedDocument",
+    // Deprecated alias, still contributed for user keybindings.
     "placekeeper.exportReviewedPdf",
     "placekeeper.configureLatexWorkshop",
     "placekeeper.restoreLatexWorkshop",

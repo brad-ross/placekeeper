@@ -121,7 +121,7 @@ it("releases recovered Electron admission without leaking browser presence", asy
   const seed = new SessionBroker({ recoveryRoot });
   let sessionId = "";
   try {
-    const opened = await seed.openReview({ pdfPath: sourcePath, surface: "codex-native" });
+    const opened = await seed.openDocument({ pdfPath: sourcePath, surface: "codex-native" });
     if (opened.kind !== "opened") throw new Error("Expected disposable review");
     sessionId = opened.launch.sessionId;
     await seed.acceptMutation(sessionId, { type: "set-annotation-name", expectedRevision: 0, annotationName: "Acknowledged before native recovery" });

@@ -15,3 +15,17 @@ it('retains the ordinary socket deadline for non-picker extension calls', async 
     expect(await createServiceClient('/test.sock').extension!({ action: 'recent-list' })).toEqual({ status: 'recent-reviews', items: [] });
     expect(control.mock.calls.at(-1)?.[2]).not.toHaveProperty('timeoutMs');
 });
+
+it('accepts the renamed recent-documents status from a newer daemon and keeps the legacy spelling', async () => {
+    const items = [{ id: 'a'.repeat(32), title: 'Paper.pdf', updatedAt: '2026-11-05T12:00:00.000Z' }];
+    for (const status of ['recent-reviews', 'recent-documents']) {
+        control.mockResolvedValueOnce({ kind: 'extension-app', response: { status, items } });
+        expect(await createServiceClient('/test.sock').extension!({ action: 'recent-list' })).toEqual({ status: 'recent-reviews', items });
+    }
+});
+
+it('forwards a renamed export method from a newer shell to the daemon in the legacy spelling', async () => {
+    const envelope = { protocolVersion: 1 as const, authority: 'presentation' as const, runtimeId: 'runtime_123', attemptId: 'attempt_123', generation: 1, capability: 'a'.repeat(43), requestId: 'request_123', payload: {} };
+    await createServiceClient('/test.sock').extension!({ action: 'app', request: { ...envelope, method: 'exportAnnotatedCopy' as 'exportReviewedCopy' } });
+    expect(control).toHaveBeenLastCalledWith('/test.sock', { kind: 'extension-app', request: { action: 'app', request: { ...envelope, method: 'exportReviewedCopy' } } }, expect.anything());
+});

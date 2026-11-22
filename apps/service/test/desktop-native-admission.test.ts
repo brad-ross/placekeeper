@@ -33,8 +33,8 @@ it('admits, activates, and durably protects native authoring through the private
             try { const result = await canonicalize.call(this, url); stages.push('canonicalize-local-complete'); return result; }
             catch (error) { stages.push(lifecycleDiagnostic('canonicalize-local', error)); throw error; }
         });
-        const openDocument = daemon.host.broker.openReview.bind(daemon.host.broker);
-        vi.spyOn(daemon.host.broker, 'openReview').mockImplementation(async request => {
+        const openDocument = daemon.host.broker.openDocument.bind(daemon.host.broker);
+        vi.spyOn(daemon.host.broker, 'openDocument').mockImplementation(async request => {
             stages.push('open-review');
             try { const result = await openDocument(request); stages.push('open-review-complete'); return result; }
             catch (error) { stages.push(lifecycleDiagnostic('open-review', error)); throw error; }
@@ -51,8 +51,8 @@ it('admits, activates, and durably protects native authoring through the private
             try { const result = await commit.apply(this, args); stages.push('operation-journal-complete'); return result; }
             catch (error) { stages.push(lifecycleDiagnostic('operation-journal', error)); throw error; }
         });
-        const protect = daemon.host.broker.protectChromeReview.bind(daemon.host.broker);
-        vi.spyOn(daemon.host.broker, 'protectChromeReview').mockImplementation(async sessionId => {
+        const protect = daemon.host.broker.protectChromeDocument.bind(daemon.host.broker);
+        vi.spyOn(daemon.host.broker, 'protectChromeDocument').mockImplementation(async sessionId => {
             stages.push('protect-review');
             try { await protect(sessionId); stages.push('protect-review-complete'); }
             catch (error) { stages.push(lifecycleDiagnostic('protect-review', error)); throw error; }

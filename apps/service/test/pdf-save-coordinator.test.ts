@@ -127,7 +127,7 @@ async function setup(
     ...(options.inspectGeneration === undefined ? {} : { inspectGeneration: options.inspectGeneration }),
     ...(options.snapshotHooks === undefined ? {} : { snapshotHooks: options.snapshotHooks }),
   }));
-  const opened = await broker.openReview({
+  const opened = await broker.openDocument({
     pdfPath: source,
     ...(options.workflowMode === undefined ? {} : { workflowMode: options.workflowMode }),
   });
@@ -336,7 +336,7 @@ describe("coalescing PDF autosave", () => {
       },
     }));
 
-    await expect(broker.openReview({ pdfPath: source }))
+    await expect(broker.openDocument({ pdfPath: source }))
       .rejects.toMatchObject({ code: "invalid-portable-annotation" });
     expect(broker.activity()).toEqual({
       reviewPresence: 0,
@@ -651,9 +651,9 @@ describe("coalescing PDF autosave", () => {
       recoveryRoot: join(root, "recovery"),
       portableReader: async () => [],
     }));
-    const offered = await restarted.openReview({ pdfPath: source });
+    const offered = await restarted.openDocument({ pdfPath: source });
     if (offered.kind !== "recovery-offered") throw new Error("Expected recovery offer");
-    const resumed = await restarted.openReview({
+    const resumed = await restarted.openDocument({
       pdfPath: source,
       recoveryDecision: "resume",
       recoveryOffer: offered.recoveryOffer,
@@ -700,9 +700,9 @@ describe("coalescing PDF autosave", () => {
       recoveryRoot: join(root, "recovery"),
       portableReader: async () => [],
     }));
-    const offered = await restarted.openReview({ pdfPath: source });
+    const offered = await restarted.openDocument({ pdfPath: source });
     if (offered.kind !== "recovery-offered") throw new Error("Expected recovery offer");
-    const resumed = await restarted.openReview({
+    const resumed = await restarted.openDocument({
       pdfPath: source,
       recoveryDecision: "resume",
       recoveryOffer: offered.recoveryOffer,
@@ -745,9 +745,9 @@ describe("coalescing PDF autosave", () => {
       recoveryRoot: join(root, "recovery"),
       portableReader: async () => [],
     }));
-    const offered = await restarted.openReview({ pdfPath: source });
+    const offered = await restarted.openDocument({ pdfPath: source });
     if (offered.kind !== "recovery-offered") throw new Error("Expected recovery offer");
-    const resumed = await restarted.openReview({
+    const resumed = await restarted.openDocument({
       pdfPath: source,
       recoveryDecision: "resume",
       recoveryOffer: offered.recoveryOffer,
@@ -1018,7 +1018,7 @@ describe("coalescing PDF autosave", () => {
 
     const attachment = broker.replaceInteractionAttachment(sessionId, "attachment-a");
     const interactionToken = "interaction_draft_only_save";
-    await broker.beginReviewInteraction({
+    await broker.beginDocumentInteraction({
       sessionId, attachment, generation: 1, interactionToken, order: 1,
     });
     const draftId = randomUUID();

@@ -92,7 +92,7 @@ test("a Windows sharing lock preserves original bytes and accepted recovery, the
     holder = undefined;
   }
   try {
-    const opened = await broker.openReview({ pdfPath: target });
+    const opened = await broker.openDocument({ pdfPath: target });
     if (opened.kind !== "opened") throw new Error("Expected fresh review");
     const sessionId = opened.launch.sessionId;
     const writer = fixtureWriter(original, annotated, writerCalls);

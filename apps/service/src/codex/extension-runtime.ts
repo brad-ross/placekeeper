@@ -71,6 +71,7 @@ export class ExtensionRuntimeManager {
   #serial<T>(work:()=>Promise<T>):Promise<T>{const result=this.#tail.then(work,work);this.#tail=result.catch(()=>undefined);return result;}
   async dispatch(raw:unknown):Promise<ExtensionResult|CodexAppResponse>{
     const r=parseExtensionRequest(raw);if(!r||this.#closing)return unavailable();
+    // Legacy wire status: see LEGACY_RECENT_DOCUMENTS_STATUS for when it can flip.
     if(r.action==='recent-list')return {status:'recent-reviews',items:(await this.#recent.list()).map(({id,title,updatedAt,page})=>({id,title,updatedAt,...(page===undefined?{}:{page})}))};
     if(r.action==='recent-open')return this.#serial(()=>this.#openRecent(r.id)).catch(()=>unavailable());
     if(r.action==='reading-position')return this.#serial<ExtensionResult>(async()=>{
@@ -156,7 +157,7 @@ export class ExtensionRuntimeManager {
     const path=input.pdfPath??await this.#pick?.();
     if(!path)return {status:this.#pick?'cancelled':'chooser'};
     if(this.#closing)return unavailable();
-    const opened=await this.broker.openReview({pdfPath:path,surface:'codex-native'});
+    const opened=await this.broker.openDocument({pdfPath:path,surface:'codex-native'});
     if(this.#closing)return unavailable();
     if(opened.kind==='focused'||opened.kind==='recovery-offered') {
       const releasedLocalSessionId = opened.kind === 'focused' && this.#canResumeReleasedLocal(opened.launch.sessionId) ? opened.launch.sessionId : undefined;
@@ -201,7 +202,7 @@ export class ExtensionRuntimeManager {
       if (input.choice === 'resume' && !offer.recoveryOffer && !offer.resumeLiveHostReview && !offer.releasedLocalSessionId) return unavailable();
       hostSessionId = offer.hostSessionId;
       if(input.choice==='fork'&&!hostSessionId&&!offer.recoveryOffer&&offer.targetSessionId){
-        const exact=await this.broker.openReview({pdfPath:offer.path,surface:'codex-native',recoveryTargetSessionId:offer.targetSessionId});
+        const exact=await this.broker.openDocument({pdfPath:offer.path,surface:'codex-native',recoveryTargetSessionId:offer.targetSessionId});
         if(exact.kind!=='recovery-offered'||exact.recoverySessionId!==offer.targetSessionId)return unavailable();
         offer.recoveryOffer=exact.recoveryOffer;
       }
@@ -215,7 +216,7 @@ export class ExtensionRuntimeManager {
         ? await this.#host.fork(hostSessionId)
         : hostSessionId && offer.resumeLiveHostReview
           ? await this.#resumeMatchingCopy(hostSessionId, input.operationId)
-          : await this.broker.openReview({pdfPath:offer.path,surface:'codex-native',recoveryDecision:input.choice,...(offer.targetSessionId?{recoveryTargetSessionId:offer.targetSessionId}:{}),...(offer.recoveryOffer?{recoveryOffer:offer.recoveryOffer,recoveryOperationId:input.operationId}:{})});
+          : await this.broker.openDocument({pdfPath:offer.path,surface:'codex-native',recoveryDecision:input.choice,...(offer.targetSessionId?{recoveryTargetSessionId:offer.targetSessionId}:{}),...(offer.recoveryOffer?{recoveryOffer:offer.recoveryOffer,recoveryOperationId:input.operationId}:{})});
     }
     if(this.#closing||!result||result.kind==='recovery-offered')return unavailable();
     if (input.choice === 'resume' && offer.live &&
@@ -245,7 +246,7 @@ export class ExtensionRuntimeManager {
         ...(disconnected?{disconnected}:{})});
       return {status:'busy',recoveryToken:token,canResume:unowned,...(disconnected?{canRecover:true}:{})};
     }
-    const opened=await this.broker.openReview({pdfPath:path,surface:'codex-native',recoveryTargetSessionId:entry.sessionId});
+    const opened=await this.broker.openDocument({pdfPath:path,surface:'codex-native',recoveryTargetSessionId:entry.sessionId});
     if(opened.kind!=='recovery-offered'||opened.recoverySessionId!==entry.sessionId)return unavailable();
     const token=secret();this.#offers.set(digestSecretHex(token),{path,expires:this.#now()+60000,targetSessionId:entry.sessionId,recoveryOffer:opened.recoveryOffer,
       ...(hostFile?{hostSessionId:entry.sessionId,hostFile}:{})});
@@ -327,9 +328,9 @@ export class ExtensionRuntimeManager {
     }
     const path = await this.broker.importedRecoveryPath(sessionId);
     if (!path) return;
-    const offered = await this.broker.openReview({ pdfPath: path, surface: 'codex-native' });
+    const offered = await this.broker.openDocument({ pdfPath: path, surface: 'codex-native' });
     if (offered.kind !== 'recovery-offered' || offered.recoverySessionId !== sessionId) return;
-    return this.broker.openReview({
+    return this.broker.openDocument({
       pdfPath: path, surface: 'codex-native', recoveryDecision: 'resume',
       recoveryOffer: offered.recoveryOffer, recoveryOperationId: operationId,
     });
@@ -379,7 +380,7 @@ export class ExtensionRuntimeManager {
     const sourceScope=await this.broker.sessionScope(record.sessionId);
     const hostFile=this.#hostFiles.get(record.sessionId);
     if(sourceScope && (!this.#hostSessions.has(record.sessionId)||hostFile)){
-      await this.broker.protectChromeReview(record.sessionId);
+      await this.broker.protectChromeDocument(record.sessionId);
       const recent=await this.#recent.remember({sessionId:record.sessionId,title:sourceScope.sourceDisplayName,
         source:hostFile?{kind:'host',file:hostFile}:{kind:'local',path:current.canonicalSourcePath}}).catch(()=>undefined);
       // Reopen hints are optional; durable review protection above is not.

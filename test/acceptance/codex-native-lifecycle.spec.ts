@@ -91,7 +91,7 @@ test('test MCP bridge composes protected work, delayed save, peer replacement, r
     // A separate recovery root cannot reuse this session's journal/snapshot.
     const portableBroker = new SessionBroker({ recoveryRoot: join(bridge.root, 'portable-recovery') });
     try {
-      const portable = await portableBroker.openReview({ pdfPath: join(bridge.root, 'reviewed.pdf'), surface: 'codex-native' });
+      const portable = await portableBroker.openDocument({ pdfPath: join(bridge.root, 'reviewed.pdf'), surface: 'codex-native' });
       if (portable.kind === 'recovery-offered') throw new Error('Portable PDF unexpectedly needed this review recovery');
       expect(portableBroker.state(portable.launch.sessionId)?.items[0]).toMatchObject({ id: itemId, payload: { comment: 'Recover this unsaved comment' } });
       expect(portableBroker.state(portable.launch.sessionId)?.pendingDrafts).toEqual([]);
@@ -108,7 +108,7 @@ test('test MCP bridge isolates two chats, pending-save observations and obsolete
     const first = await bridge.panel();
     const otherPath = join(bridge.root, 'other.pdf');
     await writeFile(otherPath, await readFile('test/fixtures/pdfs/reference-navigation.pdf'));
-    const opened = await bridge.broker.openReview({ pdfPath: otherPath, surface: 'codex-native' });
+    const opened = await bridge.broker.openDocument({ pdfPath: otherPath, surface: 'codex-native' });
     if (opened.kind === 'recovery-offered') throw new Error('Unexpected recovery');
     const otherTask = `other-${randomUUID()}`;
     const second = await bridge.panel(undefined, { sessionId: opened.launch.sessionId, task: otherTask });

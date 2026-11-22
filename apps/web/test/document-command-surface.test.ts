@@ -6,7 +6,7 @@ describe("shared semantic review command surface", () => {
   it("publishes only primitive presentation state and invokes one authorized handler", () => {
     const undo = vi.fn();
     const surface = createDocumentCommandSurface({
-      focusContext: "review",
+      focusContext: "reader",
       canUndo: true,
       canRedo: false,
       canNavigateBack: true,
@@ -19,7 +19,7 @@ describe("shared semantic review command surface", () => {
       handlers: { undo },
     });
     expect({ ...surface.snapshot, commands: surface.snapshot.commands.slice(0, 2) }).toMatchObject({
-      focusContext: "review",
+      focusContext: "reader",
       commands: [
         { id: "undo", enabled: true },
         { id: "redo", enabled: false },
@@ -57,7 +57,7 @@ describe("shared semantic review command surface", () => {
   });
 });
 
-it.each(["review", "editable", "dialog"] as const)("gates PDF zoom with readiness and dialog policy in %s focus", (focusContext) => {
+it.each(["reader", "editable", "dialog"] as const)("gates PDF zoom with readiness and dialog policy in %s focus", (focusContext) => {
   for (const ready of [false, true]) {
     const zoomIn = vi.fn();
     const zoomOut = vi.fn();

@@ -28,7 +28,7 @@ describe("presentation navigation admission", () => {
         await mkdir(path);
         await writeFile(join(path, "paper.tex"), "Source text");
       }));
-      const original = broker.openReview({ pdfPath, sourceRootPath: roots[0], surface: "vscode", workflowMode: "generated-output" });
+      const original = broker.openDocument({ pdfPath, sourceRootPath: roots[0], surface: "vscode", workflowMode: "generated-output" });
       await admissionEntered.promise;
       const waitingHashes = Promise.withResolvers<void>();
       const hashFile = fileCapabilities.hashFile;
@@ -46,7 +46,7 @@ describe("presentation navigation admission", () => {
         await releaseObservation.promise;
         return undefined;
       });
-      const requests = roots.map(sourceRootPath => broker.openReview({ pdfPath, sourceRootPath, surface: "vscode", workflowMode: "generated-output" }));
+      const requests = roots.map(sourceRootPath => broker.openDocument({ pdfPath, sourceRootPath, surface: "vscode", workflowMode: "generated-output" }));
       await waitingHashes.promise;
       await new Promise(resolve => setImmediate(resolve));
       releaseAdmission.resolve();

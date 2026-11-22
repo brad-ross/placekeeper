@@ -364,7 +364,7 @@ async function dispatch(
         response: await host.sourceWorkflow.complete(request),
       };
     }
-    if (request.kind === "retrieve-review-items-by-handle") {
+    if (request.kind === "retrieve-review-items-by-handle" || request.kind === "retrieve-annotations-by-handle") {
       const result = host.context.evidence.retrieveAnnotationsWithHandle(request);
       return result.status === "ok"
         ? {
@@ -378,7 +378,7 @@ async function dispatch(
           }
         : { kind: "evidence", result };
     }
-    if (request.kind === "retrieve-review-changes-by-handle") {
+    if (request.kind === "retrieve-review-changes-by-handle" || request.kind === "retrieve-annotation-changes-by-handle") {
       const result = host.context.evidence.retrieveDocumentChangesWithHandle(request);
       return result.status === "ok"
         ? {

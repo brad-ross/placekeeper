@@ -314,7 +314,7 @@ export interface LocalHttpServerOptions {
     PdfSaveCoordinator,
     "proposal" | "chooseCopyFilename" | "chooseFolder" | "chooseOriginal" | "requestSave" | "retry" | "locate"
   >;
-  readonly exporting?: Pick<ExportCoordinator, "exportReviewedCopy">;
+  readonly exporting?: Pick<ExportCoordinator, "exportAnnotatedCopy">;
   readonly lifecycle?: Pick<DaemonLifecycleCoordinator, "enterActivity" | "admissionAllowed">;
 }
 
@@ -806,7 +806,7 @@ export async function startHttpServer(
           return;
         }
         const frozen = await broker.freezeDelivery(exportMatch[1]!, body.fence);
-        const result = await options.exporting.exportReviewedCopy({
+        const result = await options.exporting.exportAnnotatedCopy({
           ...frozen,
           ...(body.confirmPossiblyStale === true ? { staleConfirmed: true as const } : {}),
         });
@@ -939,7 +939,7 @@ export async function startHttpServer(
             send(response, 400, "Invalid authoring draft identity");
             return;
           }
-          sendJson(response, 200, await broker.beginReviewInteraction({ ...common, generation: body.generation as number,
+          sendJson(response, 200, await broker.beginDocumentInteraction({ ...common, generation: body.generation as number,
             ...(typeof body.draftId === "string" ? { draftId: body.draftId } : {}) }));
           return;
         }
@@ -1058,11 +1058,16 @@ export async function startHttpServer(
       } else if (error instanceof DocumentConflictError || error instanceof DocumentDraftConflictError) {
         sendJson(response, 409, {
           ok: false,
-          error: { kind: "review-revision-conflict" },
+          // No client matches this kind (clients key on the 409 status), so it is renamed outright.
+          error: { kind: "annotation-revision-conflict" },
         });
       } else if (error instanceof InvalidDocumentCommandError) {
         sendJson(response, 422, {
           ok: false,
+          // Legacy wire kind: a reader page loaded from an older service build can
+          // stay open across a service upgrade and matches this kind exactly.
+          // TODO(0.4.0): send "invalid-document-command" once no 0.3.2-or-older
+          // reader page can still be connected (0.3.3 readers accept both).
           error: { kind: "invalid-review-command", message: error.message },
         });
       } else if (error instanceof RangeError) {

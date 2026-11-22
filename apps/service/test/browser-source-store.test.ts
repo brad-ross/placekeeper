@@ -167,7 +167,7 @@ describe("temporary browser source ownership", () => {
     const opened = await broker.openChromeBrowserSource(await chromeRequest(), value.store);
     if (opened.kind !== "opened") throw new Error("Expected open");
 
-    await broker.protectChromeReview(opened.launch.sessionId);
+    await broker.protectChromeDocument(opened.launch.sessionId);
     expect(broker.chromeProtected(opened.launch.sessionId)).toBe(true);
     await broker.quiesceForShutdown();
 

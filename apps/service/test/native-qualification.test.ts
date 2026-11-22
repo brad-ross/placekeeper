@@ -297,7 +297,7 @@ it("old-attempt definite prior consumption stops repeated opens across retained 
 it("only the genuine async display hook receives the readiness scheduling host budget", () => {
   const config = JSON.parse(readFileSync("integrations/codex-plugin/hooks/hooks.json", "utf8"));
   const post = config.hooks.PostToolUse;
-  const display = post.find((entry: { matcher: string }) => entry.matcher === "^mcp__placekeeper__display_review$").hooks[0];
+  const display = post.find((entry: { matcher: string }) => entry.matcher === "^mcp__placekeeper__display_(document|review)$").hooks[0];
   expect(display.async).toBe(true); expect(display.timeout).toBe(55);
   expect(post.find((entry: { matcher: string }) => entry.matcher === "^Bash$").hooks[0].timeout).toBe(8);
   expect(config.hooks.UserPromptSubmit[0].hooks[0].timeout).toBe(8);

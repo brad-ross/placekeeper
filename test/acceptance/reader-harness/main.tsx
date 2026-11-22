@@ -1421,7 +1421,7 @@ function DeferredHostHistoryPreview() {
         scope: async () => scope, saveStatus: async () => saveStatus,
         command: unavailable, saveProposal: unavailable, chooseCopy: unavailable,
         chooseFolder: unavailable, chooseOriginal: unavailable, retrySave: unavailable,
-        locateSave: unavailable, exportReviewedCopy: unavailable, forwardSyncTex: unavailable,
+        locateSave: unavailable, exportAnnotatedCopy: unavailable, forwardSyncTex: unavailable,
         reverseSyncTex: unavailable, dispose: () => undefined,
       },
     };

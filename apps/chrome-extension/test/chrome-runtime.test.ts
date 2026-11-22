@@ -497,7 +497,7 @@ describe("embedded Chrome review runtime", () => {
     const responses: unknown[] = [];
     session.runtimePort.subscribe((message) => responses.push(message));
     session.runtimePort.postMessage({
-      protocol: "placekeeper.review-runtime",
+      protocol: "placekeeper.document-runtime",
       version: 4,
       kind: "request",
       runtimeId: connectionId,
@@ -662,7 +662,7 @@ describe("embedded Chrome review runtime", () => {
     const messages: Array<Record<string, unknown>> = [];
     session.runtimePort.subscribe((message) => messages.push(message as Record<string, unknown>));
     session.runtimePort.postMessage({
-      protocol: "placekeeper.review-runtime",
+      protocol: "placekeeper.document-runtime",
       version: 4,
       kind: "request",
       runtimeId: connectionId,
@@ -701,7 +701,7 @@ describe("embedded Chrome review runtime", () => {
     expect(revokeObjectURL).not.toHaveBeenCalled();
 
     session.runtimePort.postMessage({
-      protocol: "placekeeper.review-runtime",
+      protocol: "placekeeper.document-runtime",
       version: 4,
       kind: "request",
       runtimeId: connectionId,
@@ -936,7 +936,7 @@ describe("embedded Chrome review runtime", () => {
       expect(port.sent.filter(({ type }) => type === "refresh")).toHaveLength(1);
 
       session.runtimePort.postMessage({
-        protocol: "placekeeper.review-runtime", version: 4, kind: "request",
+        protocol: "placekeeper.document-runtime", version: 4, kind: "request",
         runtimeId: connectionId, requestId: "review-finalize-queued", sessionId,
         generation: 1, revision: 0, method: "finalizeInteraction",
         payload: {
@@ -1171,7 +1171,7 @@ describe("embedded Chrome review runtime", () => {
     expect(revokeObjectURL).toHaveBeenCalledExactlyOnceWith(`blob:${extensionOrigin}/document-1`);
 
     session.runtimePort.postMessage({
-      protocol: "placekeeper.review-runtime", version: 4, kind: "request",
+      protocol: "placekeeper.document-runtime", version: 4, kind: "request",
       runtimeId: connectionId, requestId: "review-bootstrap-generation-3",
       method: "bootstrap", payload: {},
     });
@@ -1217,7 +1217,7 @@ describe("embedded Chrome review runtime", () => {
     })));
     expect(createObjectURL).toHaveBeenCalledOnce();
     session.runtimePort.postMessage({
-      protocol: "placekeeper.review-runtime", version: 4, kind: "request",
+      protocol: "placekeeper.document-runtime", version: 4, kind: "request",
       runtimeId: connectionId, requestId: "review-bootstrap-presence",
       method: "bootstrap", payload: {},
     });
@@ -1237,7 +1237,7 @@ describe("embedded Chrome review runtime", () => {
     const responses: Array<Record<string, unknown>> = [];
     session.runtimePort.subscribe((message) => responses.push(message as Record<string, unknown>));
     session.runtimePort.postMessage({
-      protocol: "placekeeper.review-runtime",
+      protocol: "placekeeper.document-runtime",
       version: 4,
       kind: "request",
       runtimeId: connectionId,
@@ -1265,7 +1265,7 @@ describe("embedded Chrome review runtime", () => {
     const responses: Array<Record<string, unknown>> = [];
     session.runtimePort.subscribe((message) => responses.push(message as Record<string, unknown>));
     const send = (requestId: string) => session.runtimePort.postMessage({
-      protocol: "placekeeper.review-runtime", version: 4, kind: "request",
+      protocol: "placekeeper.document-runtime", version: 4, kind: "request",
       runtimeId: connectionId, requestId, sessionId, generation: 1, revision: 0,
       method: "exportReviewedCopy", payload: {},
     });
@@ -1308,7 +1308,7 @@ describe("embedded Chrome review runtime", () => {
     const messages: Array<Record<string, unknown>> = [];
     session.runtimePort.subscribe((message) => messages.push(message as Record<string, unknown>));
     session.runtimePort.postMessage({
-      protocol: "placekeeper.review-runtime", version: 4, kind: "request",
+      protocol: "placekeeper.document-runtime", version: 4, kind: "request",
       runtimeId: connectionId, requestId: `review-${method}`, sessionId,
       generation: 1, revision: 0, method, payload,
     });

@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { parseElectronDocumentHelperMessage } from "../src/electron-helper-protocol.js";
+import { parseElectronDocumentHelperMessage, validElectronDocumentHelperResponse } from "../src/electron-helper-protocol.js";
 import { sanitizeNativeDocumentRuntimeResponse } from "../src/document-runtime-protocol.js";
 const base = { protocolVersion: 1, windowId: "window_12345678", attemptId: "attempt_12345678", requestId: "request_12345678" };
 
@@ -68,4 +68,15 @@ it("admits pathless Electron SyncTeX requests", () => {
   expect(parseElectronDocumentHelperMessage({ ...invoke, method: "forwardSyncTex", payload: { action: "poll" } })).toBeDefined();
   expect(parseElectronDocumentHelperMessage({ ...invoke, method: "reverseSyncTex", payload: { pageIndex: 0, point: { x: 5, y: 6 } } })).toBeDefined();
   expect(parseElectronDocumentHelperMessage({ ...invoke, method: "forwardSyncTex", payload: { action: "poll", sourcePath: "/private/main.tex" } })).toBeUndefined();
+});
+
+it("accepts the renamed exportAnnotatedCopy method from a newer peer and keeps the legacy spelling", () => {
+  const invoke = { ...base, type: "invoke", generation: 1, revision: 0, payload: {} };
+  expect(parseElectronDocumentHelperMessage({ ...invoke, method: "exportReviewedCopy" })).toMatchObject({ method: "exportReviewedCopy" });
+  expect(parseElectronDocumentHelperMessage({ ...invoke, method: "exportAnnotatedCopy" })).toMatchObject({ method: "exportReviewedCopy" });
+  const exported = { kind: "reviewed-copy", path: "/private/result.pdf", revision: 0, digest: "d".repeat(64) };
+  for (const method of ["exportReviewedCopy", "exportAnnotatedCopy"]) {
+    expect(validElectronDocumentHelperResponse({ ...base, type: "result", method, payload: exported })).toBe(true);
+    expect(validElectronDocumentHelperResponse({ ...base, type: "result", method, payload: { ...exported, kind: "annotated-copy" } })).toBe(true);
+  }
 });

@@ -27,7 +27,7 @@ export async function startLocalService(
 ): Promise<RunningLocalService> {
   const broker = new SessionBroker({ recoveryRoot });
   await broker.initialize();
-  const opened = await broker.openReview(request);
+  const opened = await broker.openDocument(request);
   if (opened.kind === "recovery-offered") {
     throw new Error("A recovery decision is required before launching the review");
   }

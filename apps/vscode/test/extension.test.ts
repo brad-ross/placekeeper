@@ -72,6 +72,56 @@ describe("VS Code local host adapter", () => {
     expect(commands).toContain("placekeeper.goToSource");
   });
 
+  it("registers the deprecated export command id as an alias and restores the unchanged panel type", async () => {
+    const disposable = () => ({ dispose() {} });
+    const commands = new Map<string, (...args: unknown[]) => Promise<unknown>>();
+    const serializers: string[] = [];
+    const info = vi.fn(async () => undefined);
+    const vscode = {
+      ThemeColor: class {}, RelativePattern: class {}, UIKind: { Desktop: 1 }, env: { uiKind: 1 },
+      Uri: { file: (fsPath: string) => ({ fsPath }) },
+      commands: { registerCommand(name: string, command: (...args: unknown[]) => Promise<unknown>) {
+        commands.set(name, command); return disposable();
+      } },
+      workspace: {
+        isTrusted: true, workspaceFolders: [],
+        getConfiguration: () => ({ get: () => undefined }),
+        onDidSaveTextDocument: disposable, onDidChangeConfiguration: disposable,
+        createFileSystemWatcher: () => ({ dispose() {}, onDidCreate: disposable, onDidChange: disposable, onDidDelete: disposable }),
+      },
+      window: {
+        showInformationMessage: info,
+        createTextEditorDecorationType: disposable, registerUriHandler: disposable,
+        registerWebviewPanelSerializer(type: string) { serializers.push(type); return disposable(); },
+      },
+    };
+    const subscriptions: Array<{ dispose(): unknown }> = [];
+    const context = {
+      subscriptions, globalStorageUri: { fsPath: resolve(tmpdir(), "placekeeper-command-alias") },
+      globalState: { get: () => ({}), update: async () => undefined },
+      asAbsolutePath: (path: string) => resolve("apps/vscode", path),
+    };
+    const require = createRequire(import.meta.url);
+    const module = { exports: {} as { activate(context: unknown): void } };
+    try {
+      runInNewContext(await readFile(resolve("apps/vscode/dist/extension.cjs"), "utf8"), {
+        module, exports: module.exports, Buffer, process, URL, URLSearchParams, AbortController, AbortSignal,
+        setTimeout, clearTimeout, setInterval, clearInterval,
+        require: (id: string) => id === "vscode" ? vscode : require(id),
+      });
+      module.exports.activate(context);
+      expect(serializers).toEqual(["placekeeper.review"]);
+      const current = commands.get("placekeeper.exportAnnotatedDocument");
+      const legacy = commands.get("placekeeper.exportReviewedPdf");
+      expect(current).toBeTypeOf("function");
+      expect(legacy).toBe(current);
+      await legacy!();
+      expect(info).toHaveBeenCalledWith("Open a generated PDF in Placekeeper first.");
+    } finally {
+      for (const subscription of subscriptions) subscription.dispose();
+    }
+  });
+
   it("validates a restored panel before its webview starts without needing another focus event", async () => {
     const directory = await realpath(await mkdtemp(resolve(tmpdir(), "placekeeper-restored-panel-")));
     const outputPath = resolve(directory, "paper.pdf");
@@ -441,6 +491,7 @@ describe("VS Code local host adapter", () => {
           expect.objectContaining({ command: "placekeeper.forwardSyncTex" }),
           expect.objectContaining({ command: "placekeeper.goToSource" }),
           expect.objectContaining({ command: "placekeeper.reattach" }),
+          expect.objectContaining({ command: "placekeeper.exportAnnotatedDocument", title: "Placekeeper: Export Annotated Document" }),
           expect.objectContaining({ command: "placekeeper.exportReviewedPdf" }),
           expect.objectContaining({ command: "placekeeper.configureLatexWorkshop" }),
         ]),
@@ -455,6 +506,21 @@ describe("VS Code local host adapter", () => {
       },
     });
     expect(manifest.description).toContain("Placekeeper");
+    // The pre-rename export id stays contributed and activatable for user
+    // keybindings, but is hidden from the Command Palette.
+    const legacyManifest = manifest as unknown as {
+      activationEvents: string[];
+      contributes: { menus: Record<string, Array<{ command: string; when?: string }>> };
+    };
+    expect(legacyManifest.activationEvents).toEqual(expect.arrayContaining([
+      "onCommand:placekeeper.exportAnnotatedDocument",
+      "onCommand:placekeeper.exportReviewedPdf",
+    ]));
+    expect(legacyManifest.contributes.menus.commandPalette).toEqual([
+      { command: "placekeeper.exportReviewedPdf", when: "false" },
+    ]);
+    expect(legacyManifest.contributes.menus["webview/context"]?.map(({ command }) => command))
+      .toEqual(["placekeeper.goToSource", "placekeeper.exportAnnotatedDocument"]);
     const viewPdf = manifest.contributes.commands.find(({ command }) => command === "placekeeper.viewPdf");
     expect(viewPdf?.icon).toEqual({
       light: "assets/placekeeper-light.svg",
@@ -1252,7 +1318,7 @@ describe("VS Code local host adapter", () => {
         rewriteAssessor: async () => ({ eligible: true }),
         inspectGeneration: async () => ({ pageCount: 1, pages: [{ pageIndex: 0, text: "successor" }] }),
       });
-      const opened = await broker.openReview({
+      const opened = await broker.openDocument({
         pdfPath,
         surface: "vscode",
         workflowMode: "generated-output",

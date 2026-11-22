@@ -45,7 +45,7 @@ async function generatedOutputFixture(
   }
   const broker = new SessionBroker({ recoveryRoot: join(root, "recovery") });
   brokers.push(broker);
-  const opened = await broker.openReview({
+  const opened = await broker.openDocument({
     pdfPath,
     sourceRootPath: root,
     surface: "vscode",
@@ -656,7 +656,7 @@ describe("generation-bound SyncTeX navigation", () => {
     const credential = value.broker.exchangeBootstrap(value.launch.sessionId, capability)!;
     const attachment = value.broker.navigationAttachmentForCredential(value.launch.sessionId, credential)!;
     const otherRoot = await fixture();
-    await value.broker.openReview({ pdfPath: value.pdfPath, sourceRootPath: otherRoot,
+    await value.broker.openDocument({ pdfPath: value.pdfPath, sourceRootPath: otherRoot,
       surface: "vscode", workflowMode: "generated-output" });
     const result = await value.broker.forwardSyncTex({
       sessionId: value.launch.sessionId, navigationAttachmentId: attachment,

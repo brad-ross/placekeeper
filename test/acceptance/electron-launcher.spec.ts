@@ -90,7 +90,7 @@ test('bundled independent Node serves MCP tools and the packaged review resource
     transport.stderr!.on('data', chunk => { stderr += String(chunk); });
     await client.connect(transport, { timeout: 10_000 });
     const tools = await client.listTools(undefined, { timeout: 10_000 });
-    expect(tools.tools.map(tool => tool.name).sort()).toEqual(['display_review', 'extension_app', 'open_pdf', 'open_placekeeper', 'review_app']);
+    expect(tools.tools.map(tool => tool.name).sort()).toEqual(['display_document', 'display_review', 'extension_app', 'open_pdf', 'open_placekeeper', 'review_app']);
     const html = await readFile(join(resources, 'codex-mcp/review-v1.html'), 'utf8');
     const uri = `ui://placekeeper/review-v1-${createHash('sha256').update(html).digest('hex')}.html`;
     const listing = await client.listResources(undefined, { timeout: 10_000 });
@@ -98,7 +98,7 @@ test('bundled independent Node serves MCP tools and the packaged review resource
     const resource = await client.readResource({ uri }, { timeout: 10_000 });
     expect(resource.contents).toHaveLength(1);
     expect(resource.contents[0]).toMatchObject({ uri, mimeType: RESOURCE_MIME_TYPE, text: html });
-    for (const name of ['display_review', 'open_pdf', 'open_placekeeper']) {
+    for (const name of ['display_document', 'display_review', 'open_pdf', 'open_placekeeper']) {
       expect(tools.tools.find(tool => tool.name === name)?._meta).toHaveProperty('ui.resourceUri', uri);
     }
     const legacy = await client.readResource({ uri: CODEX_DOCUMENT_UI_RESOURCE }, { timeout: 10_000 });
