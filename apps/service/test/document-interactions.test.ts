@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { DocumentInteractions } from "../src/sessions/document-interactions.js";
+import { DocumentInteractions, toWireInteractionResult } from "../src/sessions/document-interactions.js";
 
 describe("broker-owned review interactions", () => {
   it("retires disconnected owner indexes without losing reconnect receipts or newer incarnations", async () => {
@@ -13,7 +13,7 @@ describe("broker-owned review interactions", () => {
     const first = interactions.register("review-a", "native-panel");
     await interactions.begin({ ...first, generation: 1, interactionToken: "finalize_token", order: 1 });
     const receipt = await interactions.finalize({ ...first, interactionToken: "finalize_token", order: 2,
-      outcome: "applied", draftId: "draft_1234", commit: async () => ({ reviewRevision: 1, persist: async () => {} }) });
+      outcome: "applied", draftId: "draft_1234", commit: async () => ({ annotationRevision: 1, persist: async () => {} }) });
     interactions.disconnect(first.attachmentId, first.incarnationId);
     const next = interactions.register("review-a", "native-panel");
     expect(next.attachmentId).toBe(first.attachmentId);
@@ -106,7 +106,7 @@ describe("broker-owned review interactions", () => {
       outcome: "applied",
       draftId: "draft_finalize_1234",
       commit: async () => ({
-        reviewRevision: 2,
+        annotationRevision: 2,
         persist: async () => { canonicalDraftPresent = false; },
       }),
     });
@@ -131,12 +131,12 @@ describe("broker-owned review interactions", () => {
       order: 2,
       outcome: "applied",
       draftId: "draft_adopted_later_1234",
-      reviewRevision: 3,
+      annotationRevision: 3,
     });
     expect(finalized).toMatchObject({
       status: "finalized",
       draftId: "draft_adopted_later_1234",
-      reviewRevision: 3,
+      annotationRevision: 3,
     });
 
     const replacement = interactions.register("review-a", "legacy-reconciliation-view");
@@ -263,9 +263,9 @@ describe("broker-owned review interactions", () => {
       order: 2,
       outcome: "applied",
       draftId: "draft_first_1234",
-      reviewRevision: 4,
+      annotationRevision: 4,
     });
-    expect(finalized).toMatchObject({ status: "finalized", outcome: "applied", reviewRevision: 4 });
+    expect(finalized).toMatchObject({ status: "finalized", outcome: "applied", annotationRevision: 4 });
     expect(persisted).toHaveLength(1);
     expect(interactions.held("review-a")).toBe(false);
 
@@ -276,7 +276,7 @@ describe("broker-owned review interactions", () => {
       order: 1,
       outcome: "applied",
       draftId: "draft_first_1234",
-      reviewRevision: 999,
+      annotationRevision: 999,
     })).resolves.toEqual(finalized);
     await expect(interactions.finalize({
       ...reconnect,
@@ -284,7 +284,7 @@ describe("broker-owned review interactions", () => {
       order: 2,
       outcome: "applied",
       draftId: "draft_rebound_1234",
-      reviewRevision: 999,
+      annotationRevision: 999,
     })).resolves.toMatchObject({ status: "unauthorized" });
 
     const restarted = new DocumentInteractions({ currentGeneration: () => 2 });
@@ -296,7 +296,7 @@ describe("broker-owned review interactions", () => {
       order: 1,
       outcome: "applied",
       draftId: "draft_first_1234",
-      reviewRevision: 999,
+      annotationRevision: 999,
     })).resolves.toEqual(finalized);
 
     await interactions.begin({ ...reconnect, generation: 1, interactionToken: "interaction_second_1", order: 2,
@@ -307,7 +307,7 @@ describe("broker-owned review interactions", () => {
       order: 3,
       outcome: "discarded",
       draftId: "draft_second_1234",
-      reviewRevision: 4,
+      annotationRevision: 4,
     })).resolves.toMatchObject({ status: "backpressure" });
     expect(interactions.held("review-a")).toBe(true);
     await expect(interactions.acknowledge({
@@ -321,7 +321,7 @@ describe("broker-owned review interactions", () => {
       order: 3,
       outcome: "discarded",
       draftId: "draft_second_1234",
-      reviewRevision: 4,
+      annotationRevision: 4,
     })).resolves.toMatchObject({ status: "finalized", outcome: "discarded" });
   });
 
@@ -337,7 +337,7 @@ describe("broker-owned review interactions", () => {
       outcome: "applied",
       draftId: "draft_failure_1234",
       commit: async () => ({
-        reviewRevision: 1,
+        annotationRevision: 1,
         persist: async () => { throw new Error("disk-failure"); },
       }),
     })).rejects.toThrow("disk-failure");
@@ -366,7 +366,18 @@ describe("broker-owned review interactions", () => {
       outcome: "applied",
       draftId: "draft_ordered_1234",
       commit: async () => 1,
-    })).resolves.toMatchObject({ status: "finalized", reviewRevision: 1 });
+    })).resolves.toMatchObject({ status: "finalized", annotationRevision: 1 });
     expect(interactions.held("review-a")).toBe(false);
+  });
+});
+
+describe("interaction result wire form", () => {
+  it("sends finalized receipts with the frozen reviewRevision key and leaves other results unchanged", () => {
+    const receipt = { status: "finalized", sessionId: "review-a", attachmentId: "a", interactionToken: "t", generation: 1, outcome: "applied", annotationRevision: 3 };
+    const sent = toWireInteractionResult(receipt) as Record<string, unknown>;
+    expect(sent).toMatchObject({ status: "finalized", reviewRevision: 3 });
+    expect(sent).not.toHaveProperty("annotationRevision");
+    const accepted = { status: "accepted", generation: 1, ownerViewId: "view" };
+    expect(toWireInteractionResult(accepted)).toBe(accepted);
   });
 });

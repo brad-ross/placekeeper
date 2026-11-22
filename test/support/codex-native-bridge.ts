@@ -39,7 +39,7 @@ export async function nativeBridge(fixture: string, options: { workflowMode?: "g
     const sessionId = target.sessionId, task = target.task;
     const generation = broker.state(sessionId)!.workflow.documentGeneration;
     const launch = manager.stageLaunch({ sessionId, kind: 'opened' })!;
-    expect(manager.claimLaunch({ bindProof: launch.bindProof, reviewSessionId: sessionId, documentGeneration: generation, taskSessionId: task })).toBe(true);
+    expect(manager.claimLaunch({ bindProof: launch.bindProof, documentSessionId: sessionId, documentGeneration: generation, taskSessionId: task })).toBe(true);
     const display = manager.display(launch.handoff.token)!;
     expect(manager.attestDisplay(display.receipt, task)).toBe(true);
     const ready = await manager.pending({ protocolVersion: 1, runtimeId: display.privateMeta.runtimeId,

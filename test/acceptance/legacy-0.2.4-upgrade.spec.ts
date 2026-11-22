@@ -78,7 +78,7 @@ test('actual public AppKit service work survives the exact guarded DMG migration
   await documentPage.goto('about:blank');
   const afterBrowserNavigation=await boundary('after-browser-navigation');
   await expect.poll(async()=>{
-   const current=await status();return current.activity.reviewPresence+current.activity.codexTasks+current.activity.transientWork;
+   const current=await status();return current.activity.documentPresence+current.activity.codexTasks+current.activity.transientWork;
   },{timeout:20_000}).toBe(0);
   console.log('Legacy view released; exact candidate must refuse unsafe legacy retirement');
   await execute('/usr/bin/hdiutil',['attach','-readonly','-nobrowse','-mountpoint',mount,resolve(artifact!)]);mounted=true;

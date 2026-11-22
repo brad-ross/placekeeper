@@ -39,7 +39,7 @@ function fixture(contextOwner?: 'app', annotatedCopyExport?: boolean) {
   const revokeObjectURL = vi.fn();
   let urlIndex = 0;
   const created: string[] = [];
-  const runtime = createCodexHostRuntime({ runtimeId: 'runtime_identifier_1234', ...(annotatedCopyExport === undefined ? {} : { reviewedCopyExport: annotatedCopyExport }), ...(contextOwner === undefined ? {} : { contextOwner }), call, subscribeInvalidations: listener => { invalidate = listener; return () => { invalidate = undefined; }; } }, { digest: async bytes => String.fromCharCode(bytes[0]!).repeat(64), createObjectURL: () => { const url = `blob:https://native/${++urlIndex}`; created.push(url); return url; }, revokeObjectURL });
+  const runtime = createCodexHostRuntime({ runtimeId: 'runtime_identifier_1234', ...(annotatedCopyExport === undefined ? {} : { annotatedCopyExport: annotatedCopyExport }), ...(contextOwner === undefined ? {} : { contextOwner }), call, subscribeInvalidations: listener => { invalidate = listener; return () => { invalidate = undefined; }; } }, { digest: async bytes => String.fromCharCode(bytes[0]!).repeat(64), createObjectURL: () => { const url = `blob:https://native/${++urlIndex}`; created.push(url); return url; }, revokeObjectURL });
   return { runtime, call, revokeObjectURL, created, replace() { generation++; invalidate?.({ sessionId, generation, revision, reason: "generation" }); }, changeEngine(digest: string) { engineDigest = digest; }, failWorker() { failResource = 'worker'; }, changeDocument(digest = 'b') { documentDigest = digest; nextHandle = `document_handle_${digest.repeat(8)}`; }, fail() { failResource = true; }, recover() { failResource = false; } };
 }
 
@@ -47,9 +47,9 @@ describe('admitted Codex production runtime', () => {
   it('keeps unsupported host downloads disabled through bootstrap', async () => {
     const f = fixture('app', false);
     try {
-      expect(f.runtime.capabilities?.reviewedCopyExport).toBe(false);
+      expect(f.runtime.capabilities?.annotatedCopyExport).toBe(false);
       await f.runtime.bootstrap();
-      expect(f.runtime.capabilities?.reviewedCopyExport).toBe(false);
+      expect(f.runtime.capabilities?.annotatedCopyExport).toBe(false);
       expect(f.runtime.capabilities?.interactionLifecycleVersion).toBe(1);
     } finally { f.runtime.dispose(); }
   });

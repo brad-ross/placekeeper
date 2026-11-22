@@ -1,5 +1,5 @@
 import { externalWebUrl } from "../../../../packages/core/src/external-web-url.js";
-import type { DocumentExportFence } from "../../../../packages/core/src/document-runtime-protocol.js";
+import { wireAnnotationRevision, type DocumentExportFence } from "../../../../packages/core/src/document-runtime-protocol.js";
 import type { SaveStatus } from "../../../../packages/core/src/save-status.js";
 import type { DocumentCommand, DocumentStateView, SaveDestinationConfirmation } from "../../../../packages/core/src/document-model.js";
 import type {
@@ -120,7 +120,6 @@ export function createBrowserHostRuntime(session: ProductionSession): HostRuntim
           kind?: unknown;
           previousGeneration?: unknown;
           documentGeneration?: unknown;
-          reviewRevision?: unknown;
           reason?: unknown;
         };
         if (value.kind === "interaction-attachment") {
@@ -128,20 +127,22 @@ export function createBrowserHostRuntime(session: ProductionSession): HostRuntim
           attachmentReady.resolve(interactionAttachment);
           return;
         }
+        // Either revision spelling; see LEGACY_ANNOTATION_REVISION_KEY.
+        const annotationRevision = wireAnnotationRevision(value);
         const successor = value.kind === "document-successor" &&
           Number.isSafeInteger(value.previousGeneration) &&
           Number.isSafeInteger(value.documentGeneration) &&
-          Number.isSafeInteger(value.reviewRevision);
+          annotationRevision !== undefined;
         const sameGeneration = value.kind === "session-invalidated" &&
           Number.isSafeInteger(value.documentGeneration) &&
-          Number.isSafeInteger(value.reviewRevision) &&
+          annotationRevision !== undefined &&
           (value.reason === "revision" || value.reason === "freshness" || value.reason === "presence");
         if (!successor && !sameGeneration) return;
         loaded = undefined;
         const next: HostRuntimeInvalidation = {
           sessionId: session.sessionId,
           generation: value.documentGeneration as number,
-          revision: value.reviewRevision as number,
+          revision: annotationRevision!,
           reason: successor ? "generation" : value.reason as "revision" | "freshness" | "presence",
           ...(successor ? { previousGeneration: value.previousGeneration as number } : {}),
         };

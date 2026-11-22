@@ -133,7 +133,7 @@ export type LiveDocumentReplacementResult =
       readonly previousGeneration: number;
       readonly documentGeneration: number;
       readonly digest: string;
-      readonly reviewRevision: number;
+      readonly annotationRevision: number;
       readonly migratedTaskSessionId?: string;
     }
   | {
@@ -148,7 +148,7 @@ export interface DocumentGenerationEvent {
   readonly sessionId: string;
   readonly previousGeneration: number;
   readonly documentGeneration: number;
-  readonly reviewRevision: number;
+  readonly annotationRevision: number;
   readonly migratedTaskSessionId?: string;
 }
 

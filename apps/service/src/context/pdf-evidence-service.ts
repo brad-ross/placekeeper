@@ -18,7 +18,7 @@ import {
 const DEFAULT_HANDLE_TTL_MS = 5 * 60_000;
 const DEFAULT_MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
 const MAX_ANNOTATION_PAGE_SIZE = 1_000;
-const MAX_REVIEW_ITEM_PAGE_SIZE = 256;
+const MAX_ANNOTATION_ITEM_PAGE_SIZE = 256;
 const MAX_EVIDENCE_RECORDS = 256;
 const DEFAULT_MAX_RETAINED_PAYLOAD_BYTES = 32 * 1024 * 1024;
 const DEFAULT_MAX_INSPECTION_CACHE_BYTES = 64 * 1024 * 1024;
@@ -91,8 +91,8 @@ interface EvidencePayload {
   references: number;
   readonly byteLength: number;
   readonly existingAnnotations: readonly ExistingPdfAnnotation[];
-  readonly reviewItems: readonly StructuredAnnotation[];
-  readonly reviewChanges: AnnotationChanges;
+  readonly annotations: readonly StructuredAnnotation[];
+  readonly annotationChanges: AnnotationChanges;
 }
 
 interface EvidenceCacheEntry {
@@ -181,14 +181,14 @@ export class PdfEvidenceService {
     readonly pageCount: number;
     readonly sourceByteLength: number;
     readonly existingAnnotations: readonly ExistingPdfAnnotation[];
-    readonly reviewItems: readonly StructuredAnnotation[];
-    readonly reviewChanges?: AnnotationChanges;
+    readonly annotations: readonly StructuredAnnotation[];
+    readonly annotationChanges?: AnnotationChanges;
   }): PdfEvidenceCatalog {
     this.#sweep();
     const binding = this.#bindings.bindingForTask(input.taskSessionId);
     if (
       binding === undefined ||
-      binding.reviewSessionId !== input.identity.placekeeperSessionId ||
+      binding.documentSessionId !== input.identity.placekeeperSessionId ||
       binding.documentGeneration !== input.identity.documentGeneration
     ) {
       throw new Error("The task does not own this PDF evidence scope");
@@ -203,27 +203,27 @@ export class PdfEvidenceService {
     const value = this.#randomHandle();
     const recordKey = digest(value);
     const expiresAtMs = this.#now().getTime() + this.#handleTtlMs;
-    const documentChanges: AnnotationChanges = input.reviewChanges ?? {
+    const documentChanges: AnnotationChanges = input.annotationChanges ?? {
       mode: "full",
       reason: "initial",
       cursor: "evidence-only",
       revision: input.identity.reviewRevision,
       semanticDigest: input.identity.stateDigest,
-      itemCount: input.reviewItems.length,
-      items: input.reviewItems,
+      itemCount: input.annotations.length,
+      items: input.annotations,
     };
     const payloadKey = [
       input.taskSessionId,
       input.identity.placekeeperSessionId,
       input.identity.documentGeneration,
       input.identity.stateDigest,
-      digest(JSON.stringify([input.existingAnnotations, input.reviewItems, documentChanges])),
+      digest(JSON.stringify([input.existingAnnotations, input.annotations, documentChanges])),
     ].join("\0");
     let payload = this.#payloads.get(payloadKey);
     if (payload === undefined) {
       const byteLength = Buffer.byteLength(JSON.stringify([
         input.existingAnnotations,
-        input.reviewItems,
+        input.annotations,
         documentChanges,
       ]));
       if (byteLength > this.#maxRetainedPayloadBytes) {
@@ -233,8 +233,8 @@ export class PdfEvidenceService {
         references: 0,
         byteLength,
         existingAnnotations: structuredClone(input.existingAnnotations),
-        reviewItems: structuredClone(input.reviewItems),
-        reviewChanges: structuredClone(documentChanges),
+        annotations: structuredClone(input.annotations),
+        annotationChanges: structuredClone(documentChanges),
       };
       this.#payloads.set(payloadKey, payload);
       this.#retainedPayloadBytes += byteLength;
@@ -314,7 +314,7 @@ export class PdfEvidenceService {
     const binding = this.#bindings.bindingForTask(record.taskSessionId);
     if (
       binding === undefined ||
-      binding.reviewSessionId !== record.identity.placekeeperSessionId ||
+      binding.documentSessionId !== record.identity.placekeeperSessionId ||
       binding.documentGeneration !== record.identity.documentGeneration ||
       binding.lastVerified?.stateDigest !== record.identity.stateDigest
     ) {
@@ -356,14 +356,14 @@ export class PdfEvidenceService {
     const maxBytes = input.maxBytes ?? Math.min(record.maxBytes, 1024 * 1024);
     if (
       !Number.isSafeInteger(offset) || offset < 0 ||
-      !validPositiveInteger(limit) || limit > MAX_REVIEW_ITEM_PAGE_SIZE ||
+      !validPositiveInteger(limit) || limit > MAX_ANNOTATION_ITEM_PAGE_SIZE ||
       !validPositiveInteger(maxBytes) || maxBytes > record.maxBytes ||
       (input.pageIndex !== undefined && (!Number.isSafeInteger(input.pageIndex) || input.pageIndex < 0))
     ) return unavailable("invalid_request");
-    const reviewItems = this.#payload(record).reviewItems;
+    const annotations = this.#payload(record).annotations;
     const filtered = input.pageIndex === undefined
-      ? reviewItems
-      : reviewItems.filter(({ pageIndex }) => pageIndex === input.pageIndex);
+      ? annotations
+      : annotations.filter(({ pageIndex }) => pageIndex === input.pageIndex);
     const items = filtered.slice(offset, offset + limit);
     const nextOffset = offset + items.length < filtered.length ? offset + items.length : undefined;
     const bytes = Buffer.from(JSON.stringify({
@@ -392,10 +392,10 @@ export class PdfEvidenceService {
     const maxBytes = input.maxBytes ?? Math.min(record.maxBytes, 1024 * 1024);
     if (
       !Number.isSafeInteger(offset) || offset < 0 ||
-      !validPositiveInteger(limit) || limit > MAX_REVIEW_ITEM_PAGE_SIZE ||
+      !validPositiveInteger(limit) || limit > MAX_ANNOTATION_ITEM_PAGE_SIZE ||
       !validPositiveInteger(maxBytes) || maxBytes > record.maxBytes
     ) return unavailable("invalid_request");
-    const changes = this.#payload(record).reviewChanges;
+    const changes = this.#payload(record).annotationChanges;
     const entries = changes.mode === "delta"
       ? [
           ...changes.added.map((item) => ({ change: "added" as const, item })),
@@ -437,7 +437,7 @@ export class PdfEvidenceService {
     const binding = this.#bindings.bindingForTask(input.taskSessionId);
     if (
       binding === undefined ||
-      binding.reviewSessionId !== record.identity.placekeeperSessionId ||
+      binding.documentSessionId !== record.identity.placekeeperSessionId ||
       binding.documentGeneration !== record.identity.documentGeneration ||
       binding.lastVerified?.stateDigest !== record.identity.stateDigest
     ) {
@@ -482,7 +482,7 @@ export class PdfEvidenceService {
     if (
       source === undefined ||
       source.documentGeneration !== record.identity.documentGeneration ||
-      currentBinding?.reviewSessionId !== record.identity.placekeeperSessionId ||
+      currentBinding?.documentSessionId !== record.identity.placekeeperSessionId ||
       currentBinding.documentGeneration !== record.identity.documentGeneration ||
       currentBinding.lastVerified?.stateDigest !== record.identity.stateDigest
     ) return unavailable("stale_generation");

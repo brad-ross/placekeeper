@@ -13,7 +13,7 @@ const nonce = () => randomBytes(16).toString("hex");
 type Event = typeof EVENTS[number];
 export interface QualificationFields {
   readonly taskSessionId?: string | undefined;
-  readonly reviewSessionId?: string;
+  readonly documentSessionId?: string;
   readonly runtimeId?: string;
   readonly attemptId?: string;
   readonly receiptId?: string;
@@ -104,7 +104,9 @@ export class NativeQualificationObserver {
       if (writer.sequence >= 256) return false;
       const out: Record<string, unknown> = { version: 1, runId: d.runId, source: this.#source, processNonce: this.#processNonce, sequence: writer.sequence + 1, at: new Date().toISOString(), event };
       const hash = (domain: string, value: string) => createHmac("sha256", d.salt).update(domain + "\0" + value).digest("hex");
-      for (const [key, domain, value] of [["taskHash", "task", fields.taskSessionId], ["reviewHash", "review", fields.reviewSessionId], ["envelopeHash", "envelope", fields.envelope]] as const) {
+      // Persisted record format: the `reviewHash` key and its "review" HMAC
+      // domain are frozen so qualification runs stay comparable across releases.
+      for (const [key, domain, value] of [["taskHash", "task", fields.taskSessionId], ["reviewHash", "review", fields.documentSessionId], ["envelopeHash", "envelope", fields.envelope]] as const) {
         if (typeof value === "string" && value.length > 0 && value.length <= 2048) out[key] = hash(domain, value);
       }
       for (const key of ["runtimeId", "attemptId", "receiptId", "invocationNonce"] as const) {

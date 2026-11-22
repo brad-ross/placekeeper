@@ -88,7 +88,7 @@ export interface RuntimeOperation {
   readonly idempotencyKey?: string;
   readonly payloadDigest: string;
   readonly expectedDocumentGeneration?: number;
-  readonly expectedReviewRevision?: number;
+  readonly expectedAnnotationRevision?: number;
   readonly trustedDestinationSelection?: { readonly selectedPath: string | null };
   readonly assertAuthority?: () => void;
 }

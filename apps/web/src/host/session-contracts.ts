@@ -72,7 +72,7 @@ export interface ProductionSessionApi extends Partial<DocumentInteractionTranspo
   readonly capabilities?: {
     readonly localDocumentRefresh: boolean;
     readonly interactionLifecycleVersion?: 1;
-    readonly reviewedCopyExport?: boolean;
+    readonly annotatedCopyExport?: boolean;
   };
   subscribeInteractionReconnect?(
     listener: (identity: { readonly generation: number; readonly revision: number }) => Promise<void>,

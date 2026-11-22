@@ -544,7 +544,7 @@ async function writeOwnedWithEmbedPdf(request: PdfWriteRequest): Promise<PdfWrit
           requestedPortable.status !== 'owned' ||
           !requestedPortableIndexes.has(index)
         ) return [];
-        const item = requestedItemById.get(annotation.reviewItemId ?? annotation.id);
+        const item = requestedItemById.get(annotation.annotationItemId ?? annotation.id);
         return item === undefined ? [] : [[
           pdfAnnotationIdentity(annotation.pageIndex, annotation.id), item,
         ] as const];

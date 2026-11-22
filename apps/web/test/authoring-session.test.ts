@@ -90,7 +90,7 @@ describe('authoring save authority', () => {
       interactionToken: 'terminal-successor',
       generation: 7,
       outcome: 'applied' as const,
-      reviewRevision: 4,
+      annotationRevision: 4,
     };
 
     expect(canonicalStateForFinalizedInteraction(
@@ -480,7 +480,7 @@ describe('frozen authoring-session contract', () => {
       interactionToken: 'reacquired-interaction',
       generation: 7,
       outcome: 'applied',
-      reviewRevision: 4,
+      annotationRevision: 4,
     });
     expect(beginRequests).toEqual([
       { interactionToken: 'reacquired-interaction', order: 5, generation: 7 },
@@ -761,15 +761,15 @@ describe('frozen authoring-session contract', () => {
     expect(authoringPreviewAnnotations(
       session,
       kind === 'replace' ? 'replacement' : 'comment',
-    ).map(({ id, reviewItemId: annotationId, pageIndex }) => ({ id, reviewItemId: annotationId, pageIndex }))).toEqual([
+    ).map(({ id, annotationItemId: annotationId, pageIndex }) => ({ id, annotationItemId: annotationId, pageIndex }))).toEqual([
       {
         id: 'authoring-preview:1:projection:1',
-        reviewItemId: 'authoring-preview:1',
+        annotationItemId: 'authoring-preview:1',
         pageIndex: 2,
       },
       {
         id: 'authoring-preview:1:projection:2',
-        reviewItemId: 'authoring-preview:1',
+        annotationItemId: 'authoring-preview:1',
         pageIndex: 3,
       },
     ]);
@@ -1004,5 +1004,25 @@ describe('pending Save Destination authoring handoff', () => {
       ...state,
       source: { ...state.source, digest: 'b'.repeat(64) },
     }, 7)).toBe(false);
+  });
+});
+
+describe('finalized receipt revision alias', () => {
+  it.each([
+    ['legacy reviewRevision', { reviewRevision: 5 }],
+    ['annotationRevision', { annotationRevision: 5 }],
+  ])('normalizes a receipt sent with %s', async (_name, revision) => {
+    const transport = {
+      beginInteraction: async (input: { generation: number }) => ({ status: 'accepted', generation: input.generation, ownerViewId: 'view' }),
+      finalizeInteraction: async (input: { interactionToken: string; outcome: 'applied' | 'discarded' }) => ({
+        status: 'finalized', interactionToken: input.interactionToken, generation: 3, outcome: input.outcome, ...revision,
+      }),
+      releaseInteraction: async () => ({ status: 'released' }),
+      acknowledgeInteraction: async () => ({ status: 'released' }),
+    };
+    const handle = await beginDocumentInteraction(transport, 3, 'alias-token');
+    const receipt = await handle.finalize('applied', 'draft_1234', 1) as unknown as Record<string, unknown>;
+    expect(receipt).toMatchObject({ status: 'finalized', annotationRevision: 5 });
+    expect(receipt).not.toHaveProperty('reviewRevision');
   });
 });

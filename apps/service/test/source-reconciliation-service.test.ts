@@ -83,7 +83,7 @@ async function fixture(
   expect(broker.taskBindings.claim({
     bindProof: opened.launch.bindProof,
     taskSessionId: "task-a",
-    reviewSessionId: opened.launch.sessionId,
+    documentSessionId: opened.launch.sessionId,
     documentGeneration: opened.launch.documentGeneration,
   }).status).toBe("pending");
   expect(broker.exchangeBootstrap(opened.launch.sessionId, capability)).toBeTypeOf("string");

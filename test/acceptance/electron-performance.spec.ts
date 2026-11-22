@@ -237,7 +237,7 @@ test('macOS isolated packaged idle CPU and twelve normal document close/reopen c
       expect(candidate.pages().filter(candidatePage => !candidatePage.isClosed())).toHaveLength(0);
       // macOS keeps one resident app registration after its last window closes.
       // That registration protects service switching; document participants add to it.
-      expect(status).toMatchObject({ kind: 'management', operation: 'status', status: { activity: { reviewPresence: 1, codexTasks: 0, transientWork: 0 } } });
+      expect(status).toMatchObject({ kind: 'management', operation: 'status', status: { activity: { documentPresence: 1, codexTasks: 0, transientWork: 0 } } });
       report.postClose.push(await footprint(app, daemon));
       if (cycle + 1 < budget.memoryCloseReopenCycles) {
         await candidate.open(candidate.source);

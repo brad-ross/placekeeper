@@ -148,7 +148,7 @@ describe("persistent launch host", () => {
       path: missing,
       confirmationRequired: true,
     });
-    expect(host.broker.activity()).toEqual({ reviewPresence: 0, codexTasks: 0, transientWork: 0 });
+    expect(host.broker.activity()).toEqual({ documentPresence: 0, codexTasks: 0, transientWork: 0 });
     await expect(host.openLink({ link, confirmed: true })).resolves.toMatchObject({
       ok: false,
       error: { kind: "input-unavailable", message: expect.stringContaining("“Long Unicode ⌘ missing.pdf” is missing") },
@@ -297,7 +297,7 @@ describe("persistent launch host", () => {
     const browser = await host.open({ pdfPath: pdf, surface: "browser" });
     if (!browser.ok || browser.kind === "recovery-offered") throw new Error("Expected browser launch");
     expect(host.broker.activity()).toEqual({
-      reviewPresence: 1,
+      documentPresence: 1,
       codexTasks: 0,
       transientWork: 0,
     });
@@ -307,13 +307,13 @@ describe("persistent launch host", () => {
       throw new Error("Expected Codex launch");
     }
     expect(host.broker.activity()).toEqual({
-      reviewPresence: 2,
+      documentPresence: 2,
       codexTasks: 1,
       transientWork: 0,
     });
     now += 1_001;
     expect(host.broker.activity()).toEqual({
-      reviewPresence: 2,
+      documentPresence: 2,
       codexTasks: 0,
       transientWork: 0,
     });
@@ -384,7 +384,7 @@ describe("persistent launch host", () => {
     expect(host.broker.taskBindings.claim({
       bindProof: launched.bindProof,
       taskSessionId: "codex-task-a",
-      reviewSessionId: launched.sessionId,
+      documentSessionId: launched.sessionId,
       documentGeneration: 1,
     })).toMatchObject({ status: "pending" });
     expect(host.broker.taskBindings.bindingForTask("codex-task-a")).toBeUndefined();
@@ -403,7 +403,7 @@ describe("persistent launch host", () => {
     });
     const { credential } = await exchanged.json() as { credential: string };
     expect(host.broker.taskBindings.bindingForTask("codex-task-a")).toMatchObject({
-      reviewSessionId: launched.sessionId,
+      documentSessionId: launched.sessionId,
       documentGeneration: 1,
     });
     const runtimeStateResponse = await fetch(`${launch.origin}/s/${launched.sessionId}/runtime-state`, {
@@ -453,7 +453,7 @@ describe("persistent launch host", () => {
     expect(taskBindings.claim({
       bindProof: launched.bindProof,
       taskSessionId: "codex-task-heartbeat",
-      reviewSessionId: launched.sessionId,
+      documentSessionId: launched.sessionId,
       documentGeneration: launched.documentGeneration,
     })).toMatchObject({ status: "pending" });
     const exchanged = await fetch(`${launch.origin}/s/${launched.sessionId}/exchange`, {

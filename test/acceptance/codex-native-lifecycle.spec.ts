@@ -122,7 +122,7 @@ test('test MCP bridge isolates two chats, pending-save observations and obsolete
     const handle = initial.evidence.handle.value;
     expect(await bridge.liveContext.evidence.retrieve({ taskSessionId: otherTask, handle, request: { kind: 'page-text', pageIndex: 0 } })).toMatchObject({ status: 'unavailable' });
     const conflict = bridge.manager.stageLaunch({ sessionId: bridge.sessionId, kind: 'opened' })!;
-    expect(bridge.manager.claimLaunch({ bindProof: conflict.bindProof, reviewSessionId: bridge.sessionId, documentGeneration: 1, taskSessionId: otherTask })).toBe(false);
+    expect(bridge.manager.claimLaunch({ bindProof: conflict.bindProof, documentSessionId: bridge.sessionId, documentGeneration: 1, taskSessionId: otherTask })).toBe(false);
     await first.call('chooseCopy', { filename: 'chat-copy.pdf' }); await bridge.saving.drain();
     const gate = Promise.withResolvers<void>(), reached = Promise.withResolvers<void>(); unblock = gate.resolve;
     bridge.setBeforeWrite(async () => { reached.resolve(); await gate.promise; });

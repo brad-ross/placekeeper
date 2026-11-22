@@ -339,7 +339,7 @@ describe("coalescing PDF autosave", () => {
     await expect(broker.openDocument({ pdfPath: source }))
       .rejects.toMatchObject({ code: "invalid-portable-annotation" });
     expect(broker.activity()).toEqual({
-      reviewPresence: 0,
+      documentPresence: 0,
       codexTasks: 0,
       transientWork: 0,
     });
@@ -768,7 +768,7 @@ describe("coalescing PDF autosave", () => {
     const { root, broker, coordinator, sessionId } = await setup();
     const observed: { reason: string; phase: string; revision: number }[] = [];
     const unsubscribe = broker.onStateInvalidation((event) => {
-      observed.push({ reason: event.reason, phase: broker.saveStatus(sessionId)!.sync.phase, revision: event.reviewRevision });
+      observed.push({ reason: event.reason, phase: broker.saveStatus(sessionId)!.sync.phase, revision: event.annotationRevision });
     });
     const target = join(root, "paper-annotated.pdf");
     await coordinator.chooseCopy(sessionId, target);
@@ -1055,7 +1055,7 @@ describe("coalescing PDF autosave", () => {
       sessionId, attachment, interactionToken, order: 2,
       outcome: "discarded", draftId, expectedDraftRevision: 0,
     });
-    expect(receipt).toMatchObject({ status: "finalized", outcome: "discarded", reviewRevision: 3 });
+    expect(receipt).toMatchObject({ status: "finalized", outcome: "discarded", annotationRevision: 3 });
     expect(broker.state(sessionId)).toMatchObject({ revision: 3, pendingDrafts: [] });
     expect(broker.saveStatus(sessionId)?.sync).toMatchObject({
       phase: "clean", desiredRevision: 3, savedRevision: 3,

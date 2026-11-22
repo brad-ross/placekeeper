@@ -3,7 +3,7 @@ import type { DocumentExportFence, DocumentRuntimeBrokerMethod } from "../../../
 import type { ExportCoordinator } from "../export/export-coordinator.js";
 import { rejectedDestinationName, type PdfSaveCoordinator } from "../saving/pdf-save-coordinator.js";
 import type { SessionBroker } from "../sessions/session-broker.js";
-import type { DocumentInteractionAttachment } from "../sessions/document-interactions.js";
+import { toWireInteractionResult, type DocumentInteractionAttachment } from "../sessions/document-interactions.js";
 
 const documentSideEffectMethods = new Set<DocumentRuntimeBrokerMethod>([
   "command", "chooseCopy", "chooseFolder", "chooseOriginal", "retrySave", "locateSave", "exportReviewedCopy",
@@ -121,11 +121,11 @@ export class LocalDocumentBackend {
       order: value.order as number,
     };
     if (action === "begin") {
-      return this.#broker.beginDocumentInteraction({ ...common, generation: value.generation as number,
-        ...(typeof value.draftId === "string" ? { draftId: value.draftId } : {}) });
+      return toWireInteractionResult(await this.#broker.beginDocumentInteraction({ ...common, generation: value.generation as number,
+        ...(typeof value.draftId === "string" ? { draftId: value.draftId } : {}) }));
     }
-    if (action === "release") return this.#broker.releaseDocumentInteraction(common);
-    if (action === "acknowledge") return this.#broker.acknowledgeDocumentInteraction(common);
+    if (action === "release") return toWireInteractionResult(await this.#broker.releaseDocumentInteraction(common));
+    if (action === "acknowledge") return toWireInteractionResult(await this.#broker.acknowledgeDocumentInteraction(common));
     const result = await this.#broker.finalizeDocumentInteraction({
       ...common,
       outcome: value.outcome as "applied" | "discarded",
@@ -140,7 +140,7 @@ export class LocalDocumentBackend {
       "outcome" in result && result.outcome === "applied" && this.#broker.saveStatus(sessionId)?.destination.phase === "active") {
       void this.#saving.requestSave(sessionId);
     }
-    return result;
+    return toWireInteractionResult(result);
   }
 
 }

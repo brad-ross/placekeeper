@@ -23,7 +23,7 @@ function receipt(interactionToken: string): DocumentInteractionReceipt {
     interactionToken,
     generation: 4,
     outcome: 'applied',
-    reviewRevision: 8,
+    annotationRevision: 8,
   };
 }
 
@@ -54,7 +54,7 @@ function documentState(documentGeneration: number, sessionId = 'canonical-sessio
 describe('authoring interaction lifecycle ownership', () => {
   it('keeps finalized authoring open until the canonical state reaches its receipt revision', () => {
     const finalized = receipt('canonical-state-gate');
-    const state = { ...documentState(finalized.generation), revision: finalized.reviewRevision - 1 };
+    const state = { ...documentState(finalized.generation), revision: finalized.annotationRevision - 1 };
     const authority = authoringAuthorityFor(state, finalized.generation);
 
     expect(canonicalStateForFinalizedInteraction(
@@ -63,7 +63,7 @@ describe('authoring interaction lifecycle ownership', () => {
       finalized,
       authority,
     )).toBeUndefined();
-    const canonical = { ...state, revision: finalized.reviewRevision };
+    const canonical = { ...state, revision: finalized.annotationRevision };
     expect(canonicalStateForFinalizedInteraction(
       canonical,
       finalized.generation,
@@ -128,7 +128,7 @@ describe('authoring interaction lifecycle ownership', () => {
 
   it('never consumes replaced source state at the receipt generation', () => {
     const finalized = receipt('replaced-source-gate');
-    const source = { ...documentState(finalized.generation), revision: finalized.reviewRevision };
+    const source = { ...documentState(finalized.generation), revision: finalized.annotationRevision };
     const replaced = createDocumentState({
       sessionId: source.sessionId,
       source: { fileId: 'replacement', digest: 'f'.repeat(64), byteLength: 18 },
@@ -136,7 +136,7 @@ describe('authoring interaction lifecycle ownership', () => {
     });
 
     expect(canonicalStateForFinalizedInteraction(
-      { ...replaced, revision: finalized.reviewRevision },
+      { ...replaced, revision: finalized.annotationRevision },
       finalized.generation,
       finalized,
       authoringAuthorityFor(source, finalized.generation),
@@ -245,7 +245,7 @@ describe('authoring interaction lifecycle ownership', () => {
         ...authenticated(input),
         outcome: input.outcome,
         draftId: input.draftId,
-        reviewRevision: 9,
+        annotationRevision: 9,
       }),
       releaseInteraction: (input) => broker.release(authenticated(input)),
       acknowledgeInteraction: (input) => broker.acknowledge(authenticated(input)),

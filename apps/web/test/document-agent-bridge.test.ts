@@ -14,7 +14,7 @@ describe('review agent context', () => {
       selection: { kind: 'reliable', generation: 2, anchor: { reliable: true, pageIndex: 1, quote: 'Selected text', prefix: '', suffix: '', rect: { x: 0, y: 0, width: 1, height: 1 }, segmentRects: [] } },
       selectionIsCurrent: true, activeAnnotationId: 'note',
     });
-    expect(snapshot).toMatchObject({ reviewRevision: 4, page: 3, source: { fileId: 'file', digest: 'digest' }, selection: { text: 'Selected text', pages: [2] }, annotations: [{ id: 'note', page: 3, kind: 'pageNote', text: 'Check this claim' }], activeAnnotationId: 'note' });
+    expect(snapshot).toMatchObject({ annotationRevision: 4, page: 3, source: { fileId: 'file', digest: 'digest' }, selection: { text: 'Selected text', pages: [2] }, annotations: [{ id: 'note', page: 3, kind: 'pageNote', text: 'Check this claim' }], activeAnnotationId: 'note' });
     expect(snapshot.source).not.toHaveProperty('path');
   });
 

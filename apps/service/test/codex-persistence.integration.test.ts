@@ -62,7 +62,7 @@ async function fixture(realNative = false) {
   // Build the closed pending envelope explicitly, keeping metadata out of requests.
   const panel = async () => {
     const launch = manager.stageLaunch({ sessionId, kind: "opened" })!;
-    expect(manager.claimLaunch({ bindProof: launch.bindProof, reviewSessionId: sessionId, documentGeneration: 1, taskSessionId: "task-native" })).toBe(true);
+    expect(manager.claimLaunch({ bindProof: launch.bindProof, documentSessionId: sessionId, documentGeneration: 1, taskSessionId: "task-native" })).toBe(true);
     const d = manager.display(launch.handoff.token)!;
     manager.attestDisplay(d.receipt, "task-native");
     const a = await manager.pending({ protocolVersion: 1, runtimeId: d.privateMeta.runtimeId, attemptId: d.privateMeta.attemptId,

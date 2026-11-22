@@ -59,7 +59,7 @@ export type HookLifecycleEvent =
   | {
       readonly kind: "claim";
       readonly taskSessionId: string;
-      readonly reviewSessionId: string;
+      readonly documentSessionId: string;
       readonly documentGeneration: number;
       readonly bindProof: string;
       readonly native?: true;
@@ -180,11 +180,11 @@ function launchResponse(value: unknown, surface: "codex" | "codex-native" | "ele
         !["opened", "focused"].includes(String(parsed.kind)) || typeof parsed.sessionId !== "string" || !DOCUMENT_IDENTIFIER.test(parsed.sessionId) ||
         !Number.isSafeInteger(parsed.documentGeneration) || (parsed.documentGeneration as number) < 1 || typeof parsed.bindProof !== "string" || !SECRET.test(parsed.bindProof) ||
         typeof parsed.launchId !== "string" || !SECRET.test(parsed.launchId) || typeof parsed.expiresAt !== "string" || !Number.isFinite(Date.parse(parsed.expiresAt))) return undefined;
-    return { reviewSessionId: parsed.sessionId, documentGeneration: parsed.documentGeneration as number, bindProof: parsed.bindProof, native: true, desktop: true };
+    return { documentSessionId: parsed.sessionId, documentGeneration: parsed.documentGeneration as number, bindProof: parsed.bindProof, native: true, desktop: true };
   }
   if (surface === "codex-native") {
     const native = parseCodexNativeLaunchSuccess(parsed);
-    return native === undefined ? undefined : { reviewSessionId: native.sessionId, documentGeneration: native.documentGeneration, bindProof: native.bindProof, native: true };
+    return native === undefined ? undefined : { documentSessionId: native.sessionId, documentGeneration: native.documentGeneration, bindProof: native.bindProof, native: true };
   }
   if (
     !isObject(parsed) || parsed.ok !== true ||
@@ -205,7 +205,7 @@ function launchResponse(value: unknown, surface: "codex" | "codex-native" | "ele
     ) return undefined;
   } catch { return undefined; }
   return {
-    reviewSessionId: parsed.sessionId,
+    documentSessionId: parsed.sessionId,
     documentGeneration: parsed.documentGeneration,
     bindProof: parsed.bindProof,
   };
@@ -457,12 +457,12 @@ export async function runHookCommand(
       const response = await control({
         kind: "claim-binding",
         taskSessionId: event.taskSessionId,
-        reviewSessionId: event.reviewSessionId,
+        documentSessionId: event.documentSessionId,
         documentGeneration: event.documentGeneration,
         bindProof: event.bindProof,
         ...(event.native === true ? { native: true as const } : {}),
       });
-      qualification.record("hook-result", { status: response.kind === "codex-binding" ? response.status : response.kind === "binding" ? response.result.status : "ignored", taskSessionId: event.taskSessionId, reviewSessionId: event.reviewSessionId });
+      qualification.record("hook-result", { status: response.kind === "codex-binding" ? response.status : response.kind === "binding" ? response.result.status : "ignored", taskSessionId: event.taskSessionId, documentSessionId: event.documentSessionId });
       if ((response.kind === "binding" && response.result.status === "denied") || (response.kind === "codex-binding" && response.status === "denied")) {
         await write(`${JSON.stringify(hookOutput(
           "PostToolUse",

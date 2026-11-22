@@ -16,6 +16,8 @@ export interface RecentDocumentEntry {
 }
 export type RecentDocumentInput = Pick<RecentDocumentEntry, 'sessionId' | 'title' | 'source'>;
 type State = { schemaVersion: 1; entries: RecentDocumentEntry[] };
+/** Frozen filename: stores written by earlier releases must keep loading. */
+export const RECENT_DOCUMENTS_FILENAME = 'extension-recent-reviews.json';
 const maxEntries = 50;
 const maxBytes = 8 * 1024 * 1024;
 const object = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -49,7 +51,7 @@ export class ExtensionRecentDocuments {
     if (this.#state) return this.#state;
     await ensurePrivateDirectory(this.root);
     try {
-      const state: unknown = JSON.parse((await readPrivateFile(join(this.root, 'extension-recent-reviews.json'), maxBytes)).toString());
+      const state: unknown = JSON.parse((await readPrivateFile(join(this.root, RECENT_DOCUMENTS_FILENAME), maxBytes)).toString());
       if (!object(state) || !keys(state, ['schemaVersion', 'entries']) || state.schemaVersion !== 1 ||
           !Array.isArray(state.entries) || state.entries.length > maxEntries || !state.entries.every(entry) ||
           new Set(state.entries.map(item => item.id)).size !== state.entries.length ||
@@ -64,7 +66,7 @@ export class ExtensionRecentDocuments {
     const next: State = { schemaVersion: 1, entries };
     const bytes = Buffer.from(JSON.stringify(next));
     if (bytes.byteLength > maxBytes) throw Error('Recent review storage is full');
-    const path = join(this.root, 'extension-recent-reviews.json');
+    const path = join(this.root, RECENT_DOCUMENTS_FILENAME);
     const temporary = await stagePublication(path, bytes);
     try {
       await syncPublishedFile(await publishFile(temporary, path));

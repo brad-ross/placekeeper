@@ -309,7 +309,7 @@ export class PlacekeeperHost {
         const electronAppActivity = electronLifecycle.activity();
         return {
           ...activity,
-          reviewPresence: activity.reviewPresence + chromeActivity.connections
+          documentPresence: activity.documentPresence + chromeActivity.connections
             + electronActivity.helpers + electronAppActivity.appInstances + codexRuntime.activityCount() + extensionRuntime.activityCount(),
           transientWork: activity.transientWork + saving.activityCount() + editorNavigation.activity(),
         };
@@ -343,7 +343,7 @@ export class PlacekeeperHost {
       exporting,
       lifecycle,
       upgradeParticipants: participants,
-      protectUpgradeReview: sessionId => createUpgradeDocumentProtection(broker, saving, sessionId).protect(),
+      protectUpgradeDocument: sessionId => createUpgradeDocumentProtection(broker, saving, sessionId).protect(),
     });
     const context = new LiveContextService({ broker });
     const reconciliation = new SourceReconciliationService({ broker });

@@ -1168,7 +1168,7 @@ export function ReaderShell(props: ReaderShellProps) {
     setWorkspaceRequest(item && anyWorkspaceOpen
       ? {
           kind: 'mark',
-          reviewId: item.id,
+          annotationId: item.id,
           pageIndex: item.pageIndex,
           token: ++annotationRequestTokenRef.current,
         }

@@ -13,6 +13,7 @@ import {
   DOCUMENT_RUNTIME_PROTOCOL,
   DOCUMENT_RUNTIME_VERSION,
   isDocumentRuntimeMethodForHost,
+  wireAnnotationRevision,
   type DocumentRuntimeBrokerMethod,
   type DocumentRuntimeInvokeMethod,
   type DocumentRuntimeMethod,
@@ -757,19 +758,21 @@ export function createLoopbackRuntimeClient(options: LoopbackRuntimeClientOption
           attachmentReady.resolve(value.attachment);
           return;
         }
+        // Either revision spelling; see LEGACY_ANNOTATION_REVISION_KEY.
+        const annotationRevision = wireAnnotationRevision(value);
         const successor = value.kind === "document-successor" &&
           Number.isSafeInteger(value.previousGeneration) &&
           Number.isSafeInteger(value.documentGeneration) &&
-          Number.isSafeInteger(value.reviewRevision);
+          annotationRevision !== undefined;
         const sameGeneration = value.kind === "session-invalidated" &&
           Number.isSafeInteger(value.documentGeneration) &&
-          Number.isSafeInteger(value.reviewRevision) &&
+          annotationRevision !== undefined &&
           (value.reason === "revision" || value.reason === "freshness" || value.reason === "presence");
         if (!successor && !sameGeneration) return;
         const payload = {
           sessionId: identity.sessionId,
           generation: value.documentGeneration as number,
-          revision: value.reviewRevision as number,
+          revision: annotationRevision!,
           reason: successor ? "generation" : value.reason,
           ...(successor ? { previousGeneration: value.previousGeneration } : {}),
         };

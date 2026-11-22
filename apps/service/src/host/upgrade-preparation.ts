@@ -17,7 +17,7 @@ export interface UpgradeParticipantCredentials {
 }
 export interface UpgradeAcknowledgement {
   readonly revision: string;
-  readonly reviewRevisionDurable: boolean;
+  readonly annotationRevisionDurable: boolean;
   readonly protectedDraftDurable: boolean;
   readonly pdfSaveSettled: boolean;
 }
@@ -53,7 +53,7 @@ export class UpgradePreparationCoordinator {
   constructor(readonly lifecycle: DaemonLifecycleCoordinator, readonly timeoutMs = 120_000) {
     this.#participantsCovered = () => {
       const activity = lifecycle.status().activity;
-      return activity.reviewPresence === 0 && activity.codexTasks === 0;
+      return activity.documentPresence === 0 && activity.codexTasks === 0;
     };
   }
 
@@ -114,7 +114,7 @@ export class UpgradePreparationCoordinator {
     if (status.phase !== "preparing" && status.phase !== "ready") throw new Error("Upgrade preparation is not accepting acknowledgements");
     const expected = status.participants.find(p => p.id === host.id);
     if (!expected || expected.revision !== host.revision || acknowledgement.revision !== expected.revision
-      || !acknowledgement.reviewRevisionDurable || !acknowledgement.protectedDraftDurable || !acknowledgement.pdfSaveSettled) {
+      || !acknowledgement.annotationRevisionDurable || !acknowledgement.protectedDraftDurable || !acknowledgement.pdfSaveSettled) {
       this.#invalidate("Review protection failed or revision acknowledgement is stale");
       return this.#participantView(this.#attempt!.status);
     }
@@ -187,6 +187,39 @@ export function isUpgradePreparationRequest(value: unknown): value is UpgradePre
   if (value.operation === "participant-poll") return participant(value.participant);
   if (value.operation === "participant-ack") return participant(value.participant) && credentials(value.credentials, false) && object(value.acknowledgement)
     && typeof value.acknowledgement.revision === "string" && value.acknowledgement.revision.length <= 512
-    && [value.acknowledgement.reviewRevisionDurable, value.acknowledgement.protectedDraftDurable, value.acknowledgement.pdfSaveSettled].every(x => typeof x === "boolean");
+    && [acknowledgementRevisionDurable(value.acknowledgement), value.acknowledgement.protectedDraftDurable, value.acknowledgement.pdfSaveSettled].every(x => typeof x === "boolean");
   return false;
+}
+
+/**
+ * Wire spelling of `UpgradeAcknowledgement.annotationRevisionDurable`.
+ * Participants and the daemon can come from different builds, so the daemon
+ * accepts both spellings and senders keep the legacy one.
+ *
+ * TODO(0.4.0): send `annotationRevisionDurable` once no supported daemon older
+ * than 0.3.3 (the first release that accepts it) can still be running.
+ */
+export const LEGACY_ANNOTATION_REVISION_DURABLE_KEY = "reviewRevisionDurable" as const;
+
+function acknowledgementRevisionDurable(acknowledgement: Record<string, unknown>): unknown {
+  const current = acknowledgement.annotationRevisionDurable;
+  const legacy = acknowledgement[LEGACY_ANNOTATION_REVISION_DURABLE_KEY];
+  return current !== undefined && legacy !== undefined && current !== legacy ? undefined : current ?? legacy;
+}
+
+/** Maps a request accepted by `isUpgradePreparationRequest` to its in-memory spelling. */
+export function normalizeUpgradePreparationRequest(request: UpgradePreparationRequest): UpgradePreparationRequest {
+  if (request.operation !== "participant-ack") return request;
+  const wire = request.acknowledgement as unknown as Record<string, unknown>;
+  const { [LEGACY_ANNOTATION_REVISION_DURABLE_KEY]: _legacy, annotationRevisionDurable: _current, ...rest } = wire;
+  return {
+    ...request,
+    acknowledgement: { ...rest, annotationRevisionDurable: acknowledgementRevisionDurable(wire) } as unknown as UpgradeAcknowledgement,
+  };
+}
+
+export function toWireUpgradePreparationRequest(request: UpgradePreparationRequest): unknown {
+  if (request.operation !== "participant-ack") return request;
+  const { annotationRevisionDurable, ...rest } = request.acknowledgement;
+  return { ...request, acknowledgement: { ...rest, [LEGACY_ANNOTATION_REVISION_DURABLE_KEY]: annotationRevisionDurable } };
 }

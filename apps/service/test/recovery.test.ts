@@ -293,6 +293,35 @@ describe("atomic recovery generations", () => {
     expect(draft(0).state.annotationName).toBeUndefined();
   });
 
+  it("stores interaction receipt annotation revisions under the frozen reviewRevision key", async () => {
+    const receipt = {
+      status: "finalized" as const,
+      sessionId: "a011ee5d-5e5c-4f34-929d-41f49256f427",
+      attachmentId: "attachment-one",
+      interactionToken: "token-one",
+      generation: 1,
+      outcome: "applied" as const,
+    };
+    const current = { ...migrateRecoverableDraft(draft(2)), interactionReceipts: [{ ...receipt, annotationRevision: 2 }] };
+    const directory = await temporaryDirectory();
+    const store = new DraftSnapshotStore(directory);
+    await store.persist(current);
+    const written = JSON.parse(await readFile(join(directory, "draft.json"), "utf8"));
+    expect(written.payload.interactionReceipts).toEqual([{ ...receipt, reviewRevision: 2 }]);
+    expect(Object.keys(written.payload.interactionReceipts[0])).not.toContain("annotationRevision");
+    expect((await store.recover())?.interactionReceipts).toEqual([{ ...receipt, annotationRevision: 2 }]);
+
+    // A record exactly as an earlier release wrote it.
+    const legacyPayload = { ...migrateRecoverableDraft(draft(3)), interactionReceipts: [{ ...receipt, reviewRevision: 3 }] };
+    const legacyJson = JSON.stringify(legacyPayload);
+    await writeFile(join(directory, "draft.json"), JSON.stringify({
+      checksum: createHash("sha256").update(legacyJson).digest("hex"),
+      payload: legacyPayload,
+    }));
+    expect((await new DraftSnapshotStore(directory).recover())?.interactionReceipts)
+      .toEqual([{ ...receipt, annotationRevision: 3 }]);
+  });
+
   it("rechecks an active temporary when its owner releases it without changing the directory", async () => {
     const directory = await temporaryDirectory();
     const store = new DraftSnapshotStore(directory);
@@ -785,7 +814,7 @@ describe("broker acknowledgement and restart recovery", () => {
 
     await expect(broker.quiesceForShutdown()).resolves.toBeUndefined();
 
-    expect(broker.activity()).toEqual({ reviewPresence: 0, codexTasks: 0, transientWork: 0 });
+    expect(broker.activity()).toEqual({ documentPresence: 0, codexTasks: 0, transientWork: 0 });
     await expect(access(join(recoveryRoot, clean.launch.sessionId))).resolves.toBeUndefined();
     await expect(access(join(recoveryRoot, dirty.launch.sessionId))).resolves.toBeUndefined();
     await expect(new DraftSnapshotStore(
@@ -907,7 +936,7 @@ describe("broker acknowledgement and restart recovery", () => {
     ]);
     expect(outcomes.filter(({ status }) => status === "fulfilled")).toHaveLength(1);
     expect(outcomes.filter(({ status }) => status === "rejected")).toHaveLength(1);
-    expect(restarted.activity().reviewPresence).toBe(1);
+    expect(restarted.activity().documentPresence).toBe(1);
   });
 
   it("expires an unused offer without changing protected work", async () => {

@@ -121,22 +121,35 @@ export class MemoryDocumentLocationHistory implements DocumentLocationHistoryPor
   }
 }
 
-interface PlacekeeperHistoryState {
-  readonly placekeeperReviewLocation: 1;
+interface DocumentHistoryEntry {
   readonly index: number;
   readonly baseline: number;
 }
 
-function historyState(value: unknown): PlacekeeperHistoryState | null {
+/**
+ * Marker key of the browser `history.state` entries this class owns. Entries
+ * survive reloads, so a page reloaded into a newer build must still recognize
+ * entries an earlier build pushed: the key is frozen. `historyState` and
+ * `historyEntryState` are the only places that read or write it.
+ */
+export const DOCUMENT_HISTORY_STATE_MARKER = 'placekeeperReviewLocation' as const;
+
+type StoredHistoryState = { readonly [DOCUMENT_HISTORY_STATE_MARKER]: 1 } & DocumentHistoryEntry;
+
+export function historyState(value: unknown): DocumentHistoryEntry | null {
   if (typeof value !== 'object' || value === null) return null;
-  const candidate = value as Partial<PlacekeeperHistoryState>;
-  return candidate.placekeeperReviewLocation === 1
+  const candidate = value as Partial<StoredHistoryState>;
+  return candidate[DOCUMENT_HISTORY_STATE_MARKER] === 1
     && Number.isSafeInteger(candidate.index)
     && (candidate.index ?? -1) >= 0
     && Number.isSafeInteger(candidate.baseline)
     && (candidate.baseline ?? -1) >= 0
-    ? candidate as PlacekeeperHistoryState
+    ? { index: candidate.index!, baseline: candidate.baseline! }
     : null;
+}
+
+export function historyEntryState(entry: DocumentHistoryEntry): StoredHistoryState {
+  return { [DOCUMENT_HISTORY_STATE_MARKER]: 1, index: entry.index, baseline: entry.baseline };
 }
 
 export class BrowserDocumentLocationHistory implements DocumentLocationHistoryPort {
@@ -250,8 +263,8 @@ export class BrowserDocumentLocationHistory implements DocumentLocationHistoryPo
     );
   };
 
-  private entryState(): PlacekeeperHistoryState {
-    return { placekeeperReviewLocation: 1, index: this.index, baseline: this.baseline };
+  private entryState(): StoredHistoryState {
+    return historyEntryState({ index: this.index, baseline: this.baseline });
   }
 
   private currentHash(): string {

@@ -3,6 +3,9 @@ import { describe, expect, it, vi } from 'vitest';
 import type { PlacekeeperLinkLocation } from '../../../packages/core/src/placekeeper-link.js';
 import {
   BrowserDocumentLocationHistory,
+  DOCUMENT_HISTORY_STATE_MARKER,
+  historyEntryState,
+  historyState,
   MemoryDocumentLocationHistory,
   type DocumentLocationHistoryEnvironment,
 } from '../src/reader/document-location-history.js';
@@ -112,6 +115,27 @@ describe('browser review location history', () => {
     reloaded.start(() => undefined);
     expect(reloaded.snapshot()).toEqual({ canBack: true, canForward: true });
     expect(reloaded.read()).toEqual(page(4));
+  });
+
+  it('keeps the frozen placekeeperReviewLocation history.state key and adopts entries an earlier build wrote', () => {
+    expect(DOCUMENT_HISTORY_STATE_MARKER).toBe('placekeeperReviewLocation');
+    expect(historyEntryState({ index: 2, baseline: 1 })).toEqual({ placekeeperReviewLocation: 1, index: 2, baseline: 1 });
+    expect(historyState({ placekeeperReviewLocation: 1, index: 2, baseline: 1 })).toEqual({ index: 2, baseline: 1 });
+    expect(historyState({ documentLocation: 1, index: 2, baseline: 1 })).toBeNull();
+
+    // Entries exactly as a pre-rename build pushed them, then a reload.
+    const environment = new FakeEnvironment();
+    environment.entries.splice(0, Infinity,
+      { state: { placekeeperReviewLocation: 1, index: 0, baseline: 0 }, fragment: 'v=1&page=3' },
+      { state: { placekeeperReviewLocation: 1, index: 1, baseline: 0 }, fragment: 'v=1&page=4' },
+      { state: { placekeeperReviewLocation: 1, index: 2, baseline: 0 }, fragment: 'v=1&page=8' });
+    environment.cursor = 1;
+    environment.location.hash = '#v=1&page=4';
+    const reloaded = new BrowserDocumentLocationHistory(environment);
+    reloaded.start(() => undefined);
+    expect(reloaded.snapshot()).toEqual({ canBack: true, canForward: true });
+    reloaded.push(page(9));
+    expect(environment.entries[environment.cursor]!.state).toEqual({ placekeeperReviewLocation: 1, index: 2, baseline: 0 });
   });
 
   it('round-trips durable destinations through replace, push, Back, and Forward', () => {

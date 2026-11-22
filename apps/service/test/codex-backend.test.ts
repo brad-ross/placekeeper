@@ -38,7 +38,7 @@ async function fixture(generated = true, imported = false) {
   // Build the closed pending envelope explicitly, keeping metadata out of requests.
   const panel = async () => {
     const launch = manager.stageLaunch({ sessionId, kind: "opened" })!;
-    expect(manager.claimLaunch({ bindProof: launch.bindProof, reviewSessionId: sessionId, documentGeneration: 1, taskSessionId: "task-native" })).toBe(true);
+    expect(manager.claimLaunch({ bindProof: launch.bindProof, documentSessionId: sessionId, documentGeneration: 1, taskSessionId: "task-native" })).toBe(true);
     const d = manager.display(launch.handoff.token)!;
     manager.attestDisplay(d.receipt, "task-native");
     const a = await manager.pending({ protocolVersion: 1, runtimeId: d.privateMeta.runtimeId, attemptId: d.privateMeta.attemptId,
@@ -443,7 +443,7 @@ describe("active native service backend", () => {
     expect(await f.manager.handle(request(b, "saveStatus"))).toMatchObject({ status: "ok" });
     const matched = await f.broker.restartReconnects.matchNative({ ticket: a.reconnectTicket, runtimeId: a.runtimeId, attemptId: a.attemptId, documentGeneration: 1 });
     expect(matched).toBeDefined();
-    const scope = matched === undefined ? undefined : f.broker.nativeRestartScope(matched.sourcePathHash, matched.sourceDigest, matched.reviewSessionHash);
+    const scope = matched === undefined ? undefined : f.broker.nativeRestartScope(matched.sourcePathHash, matched.sourceDigest, matched.documentSessionHash);
     expect(scope?.canonicalSourcePath).toContain("relocated.pdf");
     expect(f.broker.taskBindings.nativeReconnectForTask("task-native")?.pdfPath).toBe(scope?.canonicalSourcePath);
     await f.manager.close();

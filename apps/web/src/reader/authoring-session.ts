@@ -14,6 +14,7 @@ import {
   projectAnnotation,
   projectAnnotationProjections,
 } from '../../../../packages/core/src/annotation-projection.js';
+import { wireAnnotationRevision } from '../../../../packages/core/src/document-runtime-protocol.js';
 import type { PdfWriterAnnotation } from '../../../../packages/core/src/pdf-writer.js';
 import type { DocumentRect } from '../../../../packages/core/src/document-commands.js';
 import type { CaretAnchor, SelectionAnchor } from '../pdf/selection-anchor.js';
@@ -30,7 +31,7 @@ export interface DocumentInteractionReceipt {
   readonly interactionToken: string;
   readonly generation: number;
   readonly outcome: DocumentInteractionOutcome;
-  readonly reviewRevision: number;
+  readonly annotationRevision: number;
   readonly sessionId?: string;
   readonly attachmentId?: string;
 }
@@ -341,6 +342,15 @@ function lifecycleRecord(value: unknown): Record<string, unknown> | null {
     ? value as Record<string, unknown> : null;
 }
 
+/** Normalizes a host's finalized receipt, which may carry the revision under
+ * its legacy wire key (see LEGACY_ANNOTATION_REVISION_KEY). */
+function interactionReceipt(value: Record<string, unknown>): DocumentInteractionReceipt | undefined {
+  const annotationRevision = wireAnnotationRevision(value);
+  if (annotationRevision === undefined) return undefined;
+  const { reviewRevision: _legacy, ...rest } = value;
+  return { ...rest, annotationRevision } as unknown as DocumentInteractionReceipt;
+}
+
 /** Starts one broker-owned interaction and retains an exact finalization request for retries. */
 export async function beginDocumentInteraction(
   transport: DocumentInteractionTransport,
@@ -380,9 +390,9 @@ export async function beginDocumentInteraction(
         return undefined;
       }
       if (value?.status === 'finalized' && value.interactionToken === interactionToken &&
-        value.generation === generation && (value.outcome === 'applied' || value.outcome === 'discarded') &&
-        typeof value.reviewRevision === 'number') {
-        return value as unknown as DocumentInteractionReceipt;
+        value.generation === generation && (value.outcome === 'applied' || value.outcome === 'discarded')) {
+        const receipt = interactionReceipt(value);
+        if (receipt !== undefined) return receipt;
       }
       const current = typeof value?.generation === 'number' ? ` Current generation: ${value.generation}.` : '';
       throw new Error(`The annotation interaction could not be reacquired safely.${current}`);
@@ -394,12 +404,12 @@ export async function beginDocumentInteraction(
         throw new Error('An uncertain annotation completion must retry the exact finalization request.');
       }
       const value = lifecycleRecord(await transport.finalizeInteraction(finalization));
-      if (value?.status !== 'finalized' || value.interactionToken !== interactionToken ||
-        value.generation !== generation || value.outcome !== outcome ||
-        typeof value.reviewRevision !== 'number') {
+      const receipt = value?.status === 'finalized' && value.interactionToken === interactionToken &&
+        value.generation === generation && value.outcome === outcome ? interactionReceipt(value) : undefined;
+      if (receipt === undefined) {
         throw new Error('The annotation completion was not durably acknowledged.');
       }
-      return value as unknown as DocumentInteractionReceipt;
+      return receipt;
     },
     async acknowledge(receipt) {
       if (consumed) return;

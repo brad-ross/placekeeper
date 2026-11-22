@@ -5,7 +5,7 @@ import { UpgradePreparationCoordinator } from '../src/host/upgrade-preparation.j
 import { UpgradeDocumentParticipants } from '../src/host/upgrade-document-participants.js';
 
 it('protects the final typed revision and leaves prepared peers attached until global commit', async () => {
-  const lifecycle = new DaemonLifecycleCoordinator({ activity: () => ({ reviewPresence: 2, codexTasks: 0, transientWork: 0 }), drain: async () => {} });
+  const lifecycle = new DaemonLifecycleCoordinator({ activity: () => ({ documentPresence: 2, codexTasks: 0, transientWork: 0 }), drain: async () => {} });
   const coordinator = new UpgradePreparationCoordinator(lifecycle);
   const participants = new UpgradeDocumentParticipants(coordinator);
   let revision = '1'; let durable = ''; let fail = false;
@@ -26,7 +26,7 @@ it('protects the final typed revision and leaves prepared peers attached until g
 });
 
 it('ignores stale attempts, does not prepare on decline, and disconnect cancels readiness', async () => {
-  const lifecycle = new DaemonLifecycleCoordinator({ activity: () => ({ reviewPresence: 0, codexTasks: 0, transientWork: 0 }), drain: async () => {} });
+  const lifecycle = new DaemonLifecycleCoordinator({ activity: () => ({ documentPresence: 0, codexTasks: 0, transientWork: 0 }), drain: async () => {} });
   const coordinator = new UpgradePreparationCoordinator(lifecycle);
   const participants = new UpgradeDocumentParticipants(coordinator);
   let writes = 0;
@@ -45,7 +45,7 @@ it('ignores stale attempts, does not prepare on decline, and disconnect cancels 
 });
 
 it('waits for exact routes admitted at freeze while later status traffic remains independent', async () => {
-  const lifecycle = new DaemonLifecycleCoordinator({ activity: () => ({ reviewPresence: 0, codexTasks: 0, transientWork: 0 }), drain: async () => {} });
+  const lifecycle = new DaemonLifecycleCoordinator({ activity: () => ({ documentPresence: 0, codexTasks: 0, transientWork: 0 }), drain: async () => {} });
   const first = lifecycle.enterActivity()!;
   lifecycle.freezeAdmission();
   let done = false;
@@ -99,7 +99,7 @@ it('uses live browser and editor connection ownership, requires idle desktop app
     expect(await chrome({ type: 'activate', lane: 'lifecycle', documentValidated: true })).toMatchObject([{ type: 'active' }]);
     const launch = await host.open({ pdfPath: pdf, surface: 'codex-native' });
     if (!launch.ok || !('handoff' in launch)) throw new Error('Expected Codex launch');
-    expect(host.codexRuntime.claimLaunch({ bindProof: launch.bindProof, reviewSessionId: launch.sessionId, documentGeneration: launch.documentGeneration, taskSessionId: 'upgrade_mixed_task' })).toBe(true);
+    expect(host.codexRuntime.claimLaunch({ bindProof: launch.bindProof, documentSessionId: launch.sessionId, documentGeneration: launch.documentGeneration, taskSessionId: 'upgrade_mixed_task' })).toBe(true);
     const display = host.codexRuntime.display(launch.handoff.token)!;
     expect(host.codexRuntime.attestDisplay(display.receipt, 'upgrade_mixed_task')).toBe(true);
     const meta = display.privateMeta;
@@ -161,7 +161,7 @@ it('uses live browser and editor connection ownership, requires idle desktop app
     // The ordinary browser disconnect grace remains authoritative during retirement.
     await new Promise(resolve => setTimeout(resolve, 5_050));
     const authorize = () => host.upgradePreparation.status(attempt).phase === 'committed';
-    expect(await host.lifecycle.shutdownIfIdle({ authorize })).toMatchObject({ status: 'refused', activity: { reviewPresence: 1 } });
+    expect(await host.lifecycle.shutdownIfIdle({ authorize })).toMatchObject({ status: 'refused', activity: { documentPresence: 1 } });
     expect(await codex('detach', {})).toMatchObject({ status: 'ok' });
     expect(host.codexRuntime.activityCount()).toBe(0);
     expect(await host.lifecycle.shutdownIfIdle({ authorize })).toEqual({ status: 'accepted' });
@@ -173,7 +173,7 @@ it('uses live browser and editor connection ownership, requires idle desktop app
 }, 15_000);
 
 it('re-proves a peer final revision, blocks later authoring, and invalidates unexpected committed review changes', async () => {
-  const lifecycle = new DaemonLifecycleCoordinator({ activity: () => ({ reviewPresence: 0, codexTasks: 0, transientWork: 0 }), drain: async () => {} });
+  const lifecycle = new DaemonLifecycleCoordinator({ activity: () => ({ documentPresence: 0, codexTasks: 0, transientWork: 0 }), drain: async () => {} });
   const coordinator = new UpgradePreparationCoordinator(lifecycle);
   const participants = new UpgradeDocumentParticipants(coordinator);
   let revision = '1';
@@ -194,7 +194,7 @@ it('re-proves a peer final revision, blocks later authoring, and invalidates une
 });
 
 it('cancels a document generation change instead of accepting it as a final input flush', async () => {
-  const lifecycle = new DaemonLifecycleCoordinator({ activity: () => ({ reviewPresence: 0, codexTasks: 0, transientWork: 0 }), drain: async () => {} });
+  const lifecycle = new DaemonLifecycleCoordinator({ activity: () => ({ documentPresence: 0, codexTasks: 0, transientWork: 0 }), drain: async () => {} });
   const coordinator = new UpgradePreparationCoordinator(lifecycle); const participants = new UpgradeDocumentParticipants(coordinator);
   let generation = 1;
   participants.attach('electron:one', { revision: () => `${generation}:0`, generation: () => generation, protect: async () => {} });
@@ -206,7 +206,7 @@ it('cancels a document generation change instead of accepting it as a final inpu
 
 it('negotiates desktop participation without changing a legacy app acknowledgement', async () => {
   const { NativeAppLifecycleManager } = await import('../src/desktop/app-lifecycle.js');
-  const lifecycle = new DaemonLifecycleCoordinator({ activity: () => ({ reviewPresence: 0, codexTasks: 0, transientWork: 0 }), drain: async () => {} });
+  const lifecycle = new DaemonLifecycleCoordinator({ activity: () => ({ documentPresence: 0, codexTasks: 0, transientWork: 0 }), drain: async () => {} });
   const participants = new UpgradeDocumentParticipants(new UpgradePreparationCoordinator(lifecycle));
   const apps = new NativeAppLifecycleManager({ detach: async () => {} }); apps.upgradeParticipants = participants;
   const legacy = { protocolVersion: 1, type: 'register-app', appInstanceId: 'legacy_upgrade_app', processId: process.pid, startIdentity: 'legacy_start_identity', buildIdentity: 'legacy_build_identity' };
@@ -221,7 +221,7 @@ it('negotiates desktop participation without changing a legacy app acknowledgeme
 
 it('ignores an obsolete app settlement without killing the persistent app channel or acknowledging its successor', async () => {
   const { NativeAppLifecycleManager } = await import('../src/desktop/app-lifecycle.js');
-  const lifecycle = new DaemonLifecycleCoordinator({ activity: () => ({ reviewPresence: 0, codexTasks: 0, transientWork: 0 }), drain: async () => {} });
+  const lifecycle = new DaemonLifecycleCoordinator({ activity: () => ({ documentPresence: 0, codexTasks: 0, transientWork: 0 }), drain: async () => {} });
   const coordinator = new UpgradePreparationCoordinator(lifecycle); const participants = new UpgradeDocumentParticipants(coordinator);
   const apps = new NativeAppLifecycleManager({ detach: async () => {} }); apps.upgradeParticipants = participants;
   const appInstanceId = 'upgrade_stale_app';
@@ -265,7 +265,7 @@ it('requires authenticated widget detach or an explicit trusted task end to rele
   try {
     const launch = await host.open({ pdfPath: pdf, surface: 'codex-native' });
     if (!launch.ok || !('handoff' in launch)) throw new Error('Expected Codex launch');
-    expect(host.codexRuntime.claimLaunch({ bindProof: launch.bindProof, reviewSessionId: launch.sessionId, documentGeneration: launch.documentGeneration, taskSessionId: 'upgrade_ended_task' })).toBe(true);
+    expect(host.codexRuntime.claimLaunch({ bindProof: launch.bindProof, documentSessionId: launch.sessionId, documentGeneration: launch.documentGeneration, taskSessionId: 'upgrade_ended_task' })).toBe(true);
     const display = host.codexRuntime.display(launch.handoff.token)!; expect(host.codexRuntime.attestDisplay(display.receipt, 'upgrade_ended_task')).toBe(true);
     const meta = display.privateMeta;
     const active = await host.codexRuntime.pending({ protocolVersion: 1, runtimeId: meta.runtimeId, attemptId: meta.attemptId, requestId: randomUUID(), generation: meta.generation, capability: meta.pendingCapability, authority: 'pending', method: 'ready', payload: {} });
@@ -284,7 +284,7 @@ it('requires authenticated widget detach or an explicit trusted task end to rele
 });
 
 it('accepts overlapping reproofs after a peer has made the same durable revision ready', async () => {
-  const lifecycle = new DaemonLifecycleCoordinator({ activity: () => ({ reviewPresence: 0, codexTasks: 0, transientWork: 0 }), drain: async () => {} });
+  const lifecycle = new DaemonLifecycleCoordinator({ activity: () => ({ documentPresence: 0, codexTasks: 0, transientWork: 0 }), drain: async () => {} });
   const coordinator = new UpgradePreparationCoordinator(lifecycle);
   const participants = new UpgradeDocumentParticipants(coordinator);
   const delayed = Promise.withResolvers<void>();

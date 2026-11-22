@@ -85,7 +85,7 @@ async function fixture(options: {
   expect(broker.taskBindings.claim({
     bindProof: opened.launch.bindProof,
     taskSessionId: "task-a",
-    reviewSessionId: opened.launch.sessionId,
+    documentSessionId: opened.launch.sessionId,
     documentGeneration: opened.launch.documentGeneration,
   }).status).toBe("pending");
   expect(broker.exchangeBootstrap(opened.launch.sessionId, capability)).toBeTypeOf("string");
@@ -200,7 +200,7 @@ describe("atomic live-context service", () => {
     await broker.claimTaskBinding({
       bindProof: opened.launch.bindProof,
       taskSessionId: "task-a",
-      reviewSessionId: opened.launch.sessionId,
+      documentSessionId: opened.launch.sessionId,
       documentGeneration: opened.launch.documentGeneration,
     });
     const view = broker.exchangeBootstrapForHttp(
@@ -247,7 +247,7 @@ describe("atomic live-context service", () => {
     taskBindings.claim({
       bindProof: launchA.launch.bindProof,
       taskSessionId: "task-a",
-      reviewSessionId: launchA.launch.sessionId,
+      documentSessionId: launchA.launch.sessionId,
       documentGeneration: launchA.launch.documentGeneration,
     });
     const viewA = broker.exchangeBootstrapForHttp(
@@ -266,7 +266,7 @@ describe("atomic live-context service", () => {
     taskBindings.claim({
       bindProof: launchB.launch.bindProof,
       taskSessionId: "task-b",
-      reviewSessionId: launchB.launch.sessionId,
+      documentSessionId: launchB.launch.sessionId,
       documentGeneration: launchB.launch.documentGeneration,
     });
     const viewB = broker.exchangeBootstrapForHttp(
@@ -649,18 +649,18 @@ describe("atomic live-context service", () => {
     const stale = await fixture();
     stale.broker.taskBindings.revokeTask("task-a");
     const proof = stale.broker.taskBindings.issueBindProof({
-      reviewSessionId: stale.launch.sessionId,
+      documentSessionId: stale.launch.sessionId,
       documentGeneration: 2,
       browserCapability: "browser-capability-stale-generation-aaaaaaaa",
     });
     stale.broker.taskBindings.claim({
       bindProof: proof,
       taskSessionId: "task-stale",
-      reviewSessionId: stale.launch.sessionId,
+      documentSessionId: stale.launch.sessionId,
       documentGeneration: 2,
     });
     stale.broker.taskBindings.activateBrowser({
-      reviewSessionId: stale.launch.sessionId,
+      documentSessionId: stale.launch.sessionId,
       documentGeneration: 2,
       browserCapability: "browser-capability-stale-generation-aaaaaaaa",
     });
@@ -693,7 +693,7 @@ describe("atomic live-context service", () => {
     broker.taskBindings.claim({
       bindProof: opened.launch.bindProof,
       taskSessionId: "task-existing",
-      reviewSessionId: opened.launch.sessionId,
+      documentSessionId: opened.launch.sessionId,
       documentGeneration: 1,
     });
     broker.exchangeBootstrap(opened.launch.sessionId, capability);

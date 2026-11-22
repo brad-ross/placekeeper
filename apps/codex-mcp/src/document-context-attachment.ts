@@ -33,7 +33,8 @@ export async function prepareDocumentContext(input: DocumentAgentContextInput): 
         title: snapshot.title.slice(0, 180),
         sourceDigest: snapshot.source.digest,
         documentGeneration: snapshot.documentGeneration,
-        reviewRevision: snapshot.reviewRevision,
+        // Model-facing attachment: the `reviewRevision` key is frozen agent-facing output.
+        reviewRevision: snapshot.annotationRevision,
         userNote: note,
         selection: boundedSelection,
         annotations: boundedAnnotations,

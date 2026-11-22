@@ -183,7 +183,7 @@ function abortable<T>(operation: Promise<T>, signal: AbortSignal | undefined): P
 export interface SessionStateInvalidation {
   readonly sessionId: string;
   readonly documentGeneration: number;
-  readonly reviewRevision: number;
+  readonly annotationRevision: number;
   readonly reason: "revision" | "freshness" | "presence" | "save" | "generation" | "terminated";
 }
 
@@ -323,7 +323,7 @@ export class SessionBroker {
         if (state === undefined) return;
         this.#publishStateInvalidation(sessionId, {
           documentGeneration: state.workflow.documentGeneration,
-          reviewRevision: state.revision,
+          annotationRevision: state.revision,
           reason: "presence",
         });
       },
@@ -432,7 +432,7 @@ export class SessionBroker {
             input.outcome !== 'discarded',
           );
           return {
-            reviewRevision: nextState.revision,
+            annotationRevision: nextState.revision,
             persist: async (receipt) => {
               const interactionReceipts = [...session.interactionReceipts, receipt];
               const predecessor = await session.store.recover();
@@ -450,7 +450,7 @@ export class SessionBroker {
                 if (recoverReceipt) this.interactions.recoverFinalized(receipt);
                 this.#publishStateInvalidation(input.sessionId, {
                   documentGeneration: nextState.workflow.documentGeneration,
-                  reviewRevision: nextState.revision,
+                  annotationRevision: nextState.revision,
                   reason: "revision",
                 });
               };
@@ -580,7 +580,7 @@ export class SessionBroker {
   #publishSaveInvalidation(session: ActiveSession): void {
     this.#publishStateInvalidation(session.id, {
       documentGeneration: session.state.workflow.documentGeneration,
-      reviewRevision: session.state.revision,
+      annotationRevision: session.state.revision,
       reason: "save",
     });
   }
@@ -759,7 +759,7 @@ export class SessionBroker {
     this.#presentations.recordBootstrap(digestSecretHex(capability), launchScope);
     const bindProof = surface === "codex"
       ? this.taskBindings.issueBindProof({
-          reviewSessionId: session.id,
+          documentSessionId: session.id,
           documentGeneration: session.state.workflow.documentGeneration,
           browserCapability: capability,
         })
@@ -767,7 +767,7 @@ export class SessionBroker {
     if (bindProof !== undefined && reconnectBrowserToken !== undefined) {
       this.#presentations.recordReconnectProof(digestSecretHex(bindProof), {
         browserToken: reconnectBrowserToken,
-        reviewSessionId: session.id,
+        documentSessionId: session.id,
         documentGeneration: session.state.workflow.documentGeneration,
         browserCapabilityHash: launchScope.browserCapabilityHash,
         canonicalSourcePath: session.canonicalSourcePath,
@@ -1609,7 +1609,7 @@ export class SessionBroker {
       this.#presentations.notifyRestartReconnectExchange(scope.browserCapabilityHash);
       if (scope.surface === "codex") {
         this.taskBindings.activateBrowser({
-          reviewSessionId: sessionId,
+          documentSessionId: sessionId,
           documentGeneration: scope.documentGeneration,
           browserCapability: capability,
         });
@@ -1652,14 +1652,14 @@ export class SessionBroker {
 
   /** Service-only admission metadata. Never include this scope in model output. */
   nativeAdmissionScope(sessionId: string): {
-    readonly reviewSessionId: string;
+    readonly documentSessionId: string;
     readonly documentGeneration: number;
     readonly canonicalSourcePath: string;
     readonly sourceDigest: string;
   } | undefined {
     const session = this.#activeById.get(sessionId);
     return session === undefined || session.ending ? undefined : {
-      reviewSessionId: session.id,
+      documentSessionId: session.id,
       documentGeneration: session.state.workflow.documentGeneration,
       canonicalSourcePath: session.canonicalSourcePath,
       sourceDigest: session.state.source.digest,
@@ -1687,7 +1687,7 @@ export class SessionBroker {
   async claimTaskBinding(input: {
     readonly bindProof: string;
     readonly taskSessionId: string;
-    readonly reviewSessionId: string;
+    readonly documentSessionId: string;
     readonly documentGeneration: number;
   }): Promise<ReturnType<TaskBindingRegistry["claim"]>> {
     const proofHash = digestSecretHex(input.bindProof);
@@ -1697,7 +1697,7 @@ export class SessionBroker {
     if (
       result.status === "denied" ||
       metadata === undefined ||
-      metadata.reviewSessionId !== input.reviewSessionId ||
+      metadata.documentSessionId !== input.documentSessionId ||
       metadata.documentGeneration !== input.documentGeneration
     ) return result;
     const { expiresAtMs: _expiresAtMs, ...reconnectMetadata } = metadata;
@@ -1742,7 +1742,7 @@ export class SessionBroker {
     this.#presentations.recordPendingReconnect(scopeKey, {
       ticket,
       browserToken: input.browserToken,
-      reviewSessionId: session.id,
+      documentSessionId: session.id,
       documentGeneration: session.state.workflow.documentGeneration,
       browserCapabilityHash: scopeKey,
       canonicalSourcePath: session.canonicalSourcePath,
@@ -1771,7 +1771,7 @@ export class SessionBroker {
       this.#presentations.clearPendingRestartReconnects(pending.ticket.ticketId);
       const attached = this.taskBindings.attachReconnectedBrowser({
         taskSessionId,
-        reviewSessionId: pending.reviewSessionId,
+        documentSessionId: pending.documentSessionId,
         documentGeneration: pending.documentGeneration,
         browserCapabilityHash: capabilityHash,
       });
@@ -1780,7 +1780,7 @@ export class SessionBroker {
       const binding: ReconnectBindingMetadata = {
         taskSessionId,
         browserToken: pending.browserToken,
-        reviewSessionId: pending.reviewSessionId,
+        documentSessionId: pending.documentSessionId,
         documentGeneration: pending.documentGeneration,
         browserCapabilityHash: capabilityHash,
         canonicalSourcePath: pending.canonicalSourcePath,
@@ -1794,7 +1794,7 @@ export class SessionBroker {
       if (binding.taskSessionId !== taskSessionId) continue;
       const active = this.taskBindings.bindingForTask(taskSessionId);
       if (
-        active?.reviewSessionId === binding.reviewSessionId &&
+        active?.documentSessionId === binding.documentSessionId &&
         active.documentGeneration === binding.documentGeneration
       ) await this.restartReconnects.issue(binding);
       return;
@@ -1878,14 +1878,14 @@ export class SessionBroker {
   }
 
   activity(): {
-    readonly reviewPresence: number;
+    readonly documentPresence: number;
     readonly codexTasks: number;
     readonly transientWork: number;
   } {
     this.#sweepBootstrapScopes();
     const controls = this.controls.activity();
     return {
-      reviewPresence: controls.reviewPresence + this.credentials.pendingBootstrapCount(),
+      documentPresence: controls.documentPresence + this.credentials.pendingBootstrapCount(),
       codexTasks: this.taskBindings.activityCount(),
       transientWork: controls.transientWork,
     };
@@ -2172,7 +2172,7 @@ export class SessionBroker {
         this.#publishSaveInvalidation(session);
         if (confirmation !== undefined) this.#publishStateInvalidation(sessionId, {
           documentGeneration: nextState.workflow.documentGeneration,
-          reviewRevision: nextState.revision,
+          annotationRevision: nextState.revision,
           reason: "revision",
         });
         return { destination, sync, state: nextState };
@@ -2490,7 +2490,7 @@ export class SessionBroker {
         : undefined;
     if (trustedCodexScope !== undefined) {
       const heartbeat = this.taskBindings.renewBrowserHeartbeat({
-        reviewSessionId: sessionId,
+        documentSessionId: sessionId,
         documentGeneration: session.state.workflow.documentGeneration,
         browserCapabilityHash: trustedCodexScope.browserCapabilityHash,
       });
@@ -2499,7 +2499,7 @@ export class SessionBroker {
       );
       if (
         heartbeat.status === "active" &&
-        reconnectBinding?.reviewSessionId === sessionId &&
+        reconnectBinding?.documentSessionId === sessionId &&
         reconnectBinding.documentGeneration === session.state.workflow.documentGeneration &&
         reconnectBinding.canonicalSourcePath === session.canonicalSourcePath &&
         reconnectBinding.sourceDigest === session.state.source.digest
@@ -2528,7 +2528,7 @@ export class SessionBroker {
               sessionId,
               {
                 documentGeneration: session.state.workflow.documentGeneration,
-                reviewRevision: session.state.revision,
+                annotationRevision: session.state.revision,
                 sourceDigest: session.state.source.digest,
                 stateDigest: documentSemanticDigest(session.state.items),
               },
@@ -2693,7 +2693,7 @@ export class SessionBroker {
         session.sync = sync;
         this.#publishStateInvalidation(session.id, {
           documentGeneration: state.workflow.documentGeneration,
-          reviewRevision: state.revision,
+          annotationRevision: state.revision,
           reason: "freshness",
         });
       });
@@ -2721,7 +2721,7 @@ export class SessionBroker {
     }
     if (staged.digest === session.currentOriginalDigest) {
       await rm(staged.path, { force: true });
-      let invalidation: { readonly documentGeneration: number; readonly reviewRevision: number } | undefined;
+      let invalidation: { readonly documentGeneration: number; readonly annotationRevision: number } | undefined;
       const result = await this.#withSessionTail(session, async () => {
         if (
           session.ending || session.latestObservationEpoch !== input.observationEpoch ||
@@ -2779,7 +2779,7 @@ export class SessionBroker {
           session.sync = sync;
           invalidation = {
             documentGeneration: state.workflow.documentGeneration,
-            reviewRevision: state.revision,
+            annotationRevision: state.revision,
           };
         } else await session.store.persist({
           ...this.#draft(session), generationLineage,
@@ -2796,7 +2796,7 @@ export class SessionBroker {
       if (invalidation !== undefined) {
         this.#publishStateInvalidation(session.id, {
           documentGeneration: invalidation.documentGeneration,
-          reviewRevision: invalidation.reviewRevision,
+          annotationRevision: invalidation.annotationRevision,
           reason: "freshness",
         });
       }
@@ -3067,7 +3067,7 @@ export class SessionBroker {
           this.#presentations.removeSessionBootstraps(session.id);
           this.#presentations.migrateGeneration(session.id, successorGeneration);
           const migration = this.taskBindings.migrateGeneration({
-            reviewSessionId: session.id,
+            documentSessionId: session.id,
             previousGeneration: expected.documentGeneration,
             successorGeneration,
           });
@@ -3078,7 +3078,7 @@ export class SessionBroker {
             sessionId: session.id,
             previousGeneration: expected.documentGeneration,
             documentGeneration: successorGeneration,
-            reviewRevision: nextState.revision,
+            annotationRevision: nextState.revision,
             ...(migratedTaskSessionId === undefined ? {} : { migratedTaskSessionId }),
           };
           activatedEvent = successorEvent;
@@ -3135,7 +3135,7 @@ export class SessionBroker {
             previousGeneration: expected.documentGeneration,
             documentGeneration: successorGeneration,
             digest: staged!.digest,
-            reviewRevision: nextState.revision,
+            annotationRevision: nextState.revision,
             ...(activatedEvent?.migratedTaskSessionId === undefined
               ? {}
               : { migratedTaskSessionId: activatedEvent.migratedTaskSessionId }),
@@ -3151,7 +3151,7 @@ export class SessionBroker {
           previousGeneration: expected.documentGeneration,
           documentGeneration: successorGeneration,
           digest: staged!.digest,
-          reviewRevision: nextState.revision,
+          annotationRevision: nextState.revision,
           ...(event?.migratedTaskSessionId === undefined
             ? {}
             : { migratedTaskSessionId: event.migratedTaskSessionId }),
@@ -3323,7 +3323,7 @@ export class SessionBroker {
   ): Promise<LiveDocumentReplacementResult> {
     const identity = candidate.identity;
     if (identity === undefined) throw new Error("A same-digest observation requires stable file identity");
-    let invalidation: { readonly documentGeneration: number; readonly reviewRevision: number } | undefined;
+    let invalidation: { readonly documentGeneration: number; readonly annotationRevision: number } | undefined;
     const result = await this.#withSessionTail(session, async () => {
       const preHashInfo = await lstat(candidate.sourcePath).catch(() => undefined);
       const currentDigest = preHashInfo === undefined
@@ -3390,7 +3390,7 @@ export class SessionBroker {
         };
         invalidation = {
           documentGeneration: state.workflow.documentGeneration,
-          reviewRevision: state.revision,
+          annotationRevision: state.revision,
         };
       }
       if (lineageChanged || state !== session.state) {
@@ -3417,7 +3417,7 @@ export class SessionBroker {
     if (invalidation !== undefined) {
       this.#publishStateInvalidation(session.id, {
         documentGeneration: invalidation.documentGeneration,
-        reviewRevision: invalidation.reviewRevision,
+        annotationRevision: invalidation.annotationRevision,
         reason: "freshness",
       });
     }
@@ -3452,7 +3452,7 @@ export class SessionBroker {
       (!Number.isSafeInteger(observationEpoch) || observationEpoch <= 0)) {
       throw new RangeError("observationEpoch must be a positive safe integer");
     }
-    let invalidation: { readonly documentGeneration: number; readonly reviewRevision: number } | undefined;
+    let invalidation: { readonly documentGeneration: number; readonly annotationRevision: number } | undefined;
     const result = await this.#withSessionTail(session, async () => {
       if (session.ending) throw new Error("Review session is ending");
       const epoch = observationEpoch ?? session.latestObservationEpoch + 1;
@@ -3482,7 +3482,7 @@ export class SessionBroker {
         session.sync = sync;
         invalidation = {
           documentGeneration: state.workflow.documentGeneration,
-          reviewRevision: state.revision,
+          annotationRevision: state.revision,
         };
       }
       return {
@@ -3494,7 +3494,7 @@ export class SessionBroker {
     if (invalidation !== undefined) {
       this.#publishStateInvalidation(session.id, {
         documentGeneration: invalidation.documentGeneration,
-        reviewRevision: invalidation.reviewRevision,
+        annotationRevision: invalidation.annotationRevision,
         reason: "freshness",
       });
     }
@@ -3966,7 +3966,7 @@ export class SessionBroker {
       session.nativeAnnotationLedger = nextNativeAnnotationLedger;
       this.#publishStateInvalidation(sessionId, {
         documentGeneration: nextState.workflow.documentGeneration,
-        reviewRevision: nextState.revision,
+        annotationRevision: nextState.revision,
         reason: "revision",
       });
       return nextState;
@@ -4126,7 +4126,7 @@ export class SessionBroker {
       this.controls.cancel(session.id);
       this.interactions.revokeSession(session.id);
       this.#emitStateInvalidation({ sessionId: session.id, documentGeneration: session.state.workflow.documentGeneration,
-        reviewRevision: session.state.revision, reason: "terminated" });
+        annotationRevision: session.state.revision, reason: "terminated" });
       for (const listener of this.#sessionEndListeners) listener(session.id, "shutdown");
     }
     this.#snapshotStores.clear();
@@ -4203,7 +4203,7 @@ export class SessionBroker {
     } finally {
       this.#snapshotStores.delete(sessionId);
       this.#emitStateInvalidation({ sessionId, documentGeneration: session.state.workflow.documentGeneration,
-        reviewRevision: session.state.revision, reason: "terminated" });
+        annotationRevision: session.state.revision, reason: "terminated" });
       for (const listener of this.#sessionEndListeners) listener(sessionId, "ended");
     }
   }

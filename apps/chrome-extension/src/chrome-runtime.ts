@@ -4,6 +4,7 @@ import {
   isDocumentRuntimeMethodForHost,
   sanitizeChromeDocumentRuntimeRequest,
   sanitizeChromeDocumentRuntimeResponse,
+  wireAnnotationRevision,
   type DocumentRuntimeBrokerMethod,
   type DocumentRuntimeMethod,
 } from "../../../packages/core/src/document-runtime-protocol.js";
@@ -117,7 +118,7 @@ interface ChromeInteractionOwnerClaimEnvironment {
 /** Chrome recreates its MIME frame on reload with empty history.state and a
  * "navigate" timing entry, but retains sessionStorage. Bind the secret to the
  * trusted tab and source instead; the service also scopes it to the recovered
- * review session and fences old connection incarnations. Never write handler
+ * document session and fences old connection incarnations. Never write handler
  * history: Chrome 153 can crash on a same-URL replaceState. */
 export function createChromeInteractionOwnerClaimStore(
   environment: ChromeInteractionOwnerClaimEnvironment,
@@ -1020,9 +1021,11 @@ export function createNativeEmbeddedDocument(options: NativeEmbeddedDocumentOpti
                 bootstrap = { ...bootstrap, state: safe, revision: safe.revision };
                 protectedDocument = true;
               } else if (method === "finalizeInteraction" && record(safe) &&
-                Number.isSafeInteger(safe.reviewRevision)) {
-                projection = { ...projection!, revision: safe.reviewRevision as number };
-                bootstrap = { ...bootstrap, revision: safe.reviewRevision };
+                wireAnnotationRevision(safe) !== undefined) {
+                // Either revision spelling; see LEGACY_ANNOTATION_REVISION_KEY.
+                const annotationRevision = wireAnnotationRevision(safe)!;
+                projection = { ...projection!, revision: annotationRevision };
+                bootstrap = { ...bootstrap, revision: annotationRevision };
                 protectedDocument = true;
               } else if (["chooseCopy", "chooseOriginal", "retrySave", "locateSave"].includes(method)) {
                 bootstrap = { ...bootstrap, saveStatus: safe };

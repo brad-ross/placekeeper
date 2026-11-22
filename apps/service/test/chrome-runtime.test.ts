@@ -14,7 +14,7 @@ import {
   type ChromeRuntimeBackend,
   type ChromeRuntimeProjection,
 } from "../src/browser/chrome-runtime.js";
-import { DocumentInteractions } from "../src/sessions/document-interactions.js";
+import { DocumentInteractions, toWireInteractionResult } from "../src/sessions/document-interactions.js";
 
 const origin = "chrome-extension://cgegjjjhbhnfgcoipeffhogoojfoekgg/";
 const connectionId = "connection-runtime-1";
@@ -144,10 +144,11 @@ describe("Chrome least-authority native runtime", () => {
         }
         if (action === "finalize") {
           if (attachment.attachmentId !== draftOwnerViewId) return { status: "unauthorized" };
-          return interactions.finalize({
+          // Like LocalDocumentBackend, send the receipt in its wire form.
+          return toWireInteractionResult(await interactions.finalize({
             ...attachment, interactionToken: input.interactionToken,
             order: input.order, outcome: input.outcome!, draftId: input.draftId!, commit: commits,
-          });
+          }));
         }
         if (action === "acknowledge") {
           return interactions.acknowledge({ ...attachment, interactionToken: input.interactionToken, order: input.order });

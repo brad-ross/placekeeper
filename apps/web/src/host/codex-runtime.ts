@@ -9,7 +9,7 @@ import type { ProductionScope } from './session-contracts.js';
 export interface CodexRuntimePort {
   readonly runtimeId: string;
   readonly contextOwner?: 'app';
-  readonly reviewedCopyExport?: boolean;
+  readonly annotatedCopyExport?: boolean;
   openExternalUrl?(url: string): Promise<void>;
   call(method: DocumentRuntimeMethod | 'resource' | 'createLink', payload: unknown): Promise<unknown>;
   subscribeInvalidations(listener: (event: HostRuntimeInvalidation) => void): () => void;
@@ -88,7 +88,7 @@ export function createCodexHostRuntime(port: CodexRuntimePort, environment: {
     const url = externalWebUrl(value);
     if (disposed || url === null || port.openExternalUrl === undefined) throw new Error('Host link opening is unavailable.');
     await port.openExternalUrl(url);
-  }, get capabilities() { return { ...runtime.capabilities!, ...(port.reviewedCopyExport === undefined ? {} : { reviewedCopyExport: port.reviewedCopyExport }) }; }, async bootstrap(signal) {
+  }, get capabilities() { return { ...runtime.capabilities!, ...(port.annotatedCopyExport === undefined ? {} : { annotatedCopyExport: port.annotatedCopyExport }) }; }, async bootstrap(signal) {
     const initial = await runtime.bootstrap(signal);
     return { ...initial, scope: ownedScope(initial.scope) };
   }, async scope(signal) {

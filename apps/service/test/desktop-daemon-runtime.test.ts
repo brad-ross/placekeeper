@@ -403,14 +403,14 @@ describe("Electron daemon runtime", () => {
 
 
 describe("independent host coordination", () => {
-  it.each(["reviewPresence", "codexTasks"] as const)("defers current-app host mutation with %s", async (blocker) => {
+  it.each(["documentPresence", "codexTasks"] as const)("defers current-app host mutation with %s", async (blocker) => {
     const identity = { daemonIdentity: "a".repeat(64), installArtifactIdentity: "b".repeat(64) };
     const mutate = vi.fn();
     await expect(coordinateUpgrade({
       candidate: identity, installed: identity, operation: "host-setup",
       inspect: async () => ({ kind: "exact", status: {
         protocolVersion: 1, upgradePreparationVersion: 1, daemonIdentity: identity.daemonIdentity, lifecycle: "accepting",
-        activity: { reviewPresence: 0, codexTasks: 0, transientWork: 0, [blocker]: 1 },
+        activity: { documentPresence: 0, codexTasks: 0, transientWork: 0, [blocker]: 1 },
       } }),
       shutdown: vi.fn(), waitForRetirement: vi.fn(), replaceAndReady: mutate,
     })).rejects.toMatchObject({ reason: "preparation-required" });
@@ -423,7 +423,7 @@ describe("independent host coordination", () => {
       candidate: identity, installed: identity, operation: "host-setup",
       inspect: async () => ({ kind: "exact", status: {
         protocolVersion: 1, upgradePreparationVersion: 1, daemonIdentity: identity.daemonIdentity, lifecycle: "accepting",
-        activity: { reviewPresence: 0, codexTasks: 0, transientWork: 0 },
+        activity: { documentPresence: 0, codexTasks: 0, transientWork: 0 },
       } }),
       shutdown: async () => { order.push("shutdown"); return { status: "accepted" }; },
       waitForRetirement: async () => { order.push("retired"); },

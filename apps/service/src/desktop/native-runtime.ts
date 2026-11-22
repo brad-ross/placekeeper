@@ -605,7 +605,7 @@ export class NativeRuntimeManager {
         expectedDocumentGeneration: message.generation,
         ...(trustedDestinationSelection === undefined ? {} : {
           trustedDestinationSelection,
-          expectedReviewRevision: message.revision,
+          expectedAnnotationRevision: message.revision,
           assertAuthority: () => {
             throwIfAborted(signal);
             if (this.#records.get(record.helperId) !== record || record.phase !== "active") {

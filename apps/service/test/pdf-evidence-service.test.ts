@@ -33,12 +33,12 @@ function fixture(options: {
   });
   const capability = "browser-capability-evidence-aaaaaaaaaaaaaaaa";
   const proof = bindings.issueBindProof({
-    reviewSessionId: "review-a",
+    documentSessionId: "review-a",
     documentGeneration: 1,
     browserCapability: capability,
   });
-  bindings.claim({ bindProof: proof, taskSessionId: "task-a", reviewSessionId: "review-a", documentGeneration: 1 });
-  bindings.activateBrowser({ reviewSessionId: "review-a", documentGeneration: 1, browserCapability: capability });
+  bindings.claim({ bindProof: proof, taskSessionId: "task-a", documentSessionId: "review-a", documentGeneration: 1 });
+  bindings.activateBrowser({ documentSessionId: "review-a", documentGeneration: 1, browserCapability: capability });
   const identity: LiveObservationIdentity = {
     placekeeperSessionId: "review-a",
     documentGeneration: 1,
@@ -82,7 +82,7 @@ describe("task-scoped PDF evidence service", () => {
   it("retrieves the immutable document and bounded page evidence without source paths", async () => {
     const { service, identity, bytes, sourceLoads, pageInspections } = fixture();
     const catalog = service.mint({
-      reviewItems: [],
+      annotations: [],
       taskSessionId: "task-a",
       identity,
       pageCount: 2,
@@ -131,13 +131,13 @@ describe("task-scoped PDF evidence service", () => {
   it("prunes stale payload handles as soon as a task mints a new observation identity", async () => {
     const { service, bindings, identity, bytes } = fixture();
     const stale = service.mint({
-      reviewItems: [], taskSessionId: "task-a", identity, pageCount: 1,
+      annotations: [], taskSessionId: "task-a", identity, pageCount: 1,
       sourceByteLength: bytes.byteLength, existingAnnotations: [existing(1)],
     });
     const nextIdentity = { ...identity, reviewRevision: 3, stateDigest: "c".repeat(64) };
     bindings.markVerified("task-a", nextIdentity);
     const current = service.mint({
-      reviewItems: [], taskSessionId: "task-a", identity: nextIdentity, pageCount: 1,
+      annotations: [], taskSessionId: "task-a", identity: nextIdentity, pageCount: 1,
       sourceByteLength: bytes.byteLength, existingAnnotations: [existing(2)],
     });
 
@@ -150,7 +150,7 @@ describe("task-scoped PDF evidence service", () => {
   it("deduplicates concurrent cold source loads and page inspections", async () => {
     const { service, identity, bytes, sourceLoads, pageInspections } = fixture();
     const catalog = service.mint({
-      reviewItems: [], taskSessionId: "task-a", identity, pageCount: 1,
+      annotations: [], taskSessionId: "task-a", identity, pageCount: 1,
       sourceByteLength: bytes.byteLength, existingAnnotations: [],
     });
     const request = () => service.retrieve({
@@ -168,7 +168,7 @@ describe("task-scoped PDF evidence service", () => {
   it("evicts completed PDF inspection data that exceeds the cache byte budget", async () => {
     const { service, identity, bytes, sourceLoads } = fixture({ maxInspectionCacheBytes: 1 });
     const catalog = service.mint({
-      reviewItems: [], taskSessionId: "task-a", identity, pageCount: 1,
+      annotations: [], taskSessionId: "task-a", identity, pageCount: 1,
       sourceByteLength: bytes.byteLength, existingAnnotations: [],
     });
     const request = () => service.retrieve({
@@ -185,7 +185,7 @@ describe("task-scoped PDF evidence service", () => {
   it("rejects a single retained annotation payload that exceeds its byte budget", () => {
     const { service, identity, bytes } = fixture({ maxRetainedPayloadBytes: 64 });
     expect(() => service.mint({
-      reviewItems: [], taskSessionId: "task-a", identity, pageCount: 1,
+      annotations: [], taskSessionId: "task-a", identity, pageCount: 1,
       sourceByteLength: bytes.byteLength,
       existingAnnotations: [{ ...existing(1), contents: "x".repeat(256) }],
     })).toThrow(/retained evidence byte limit/i);
@@ -194,7 +194,7 @@ describe("task-scoped PDF evidence service", () => {
   it("paginates raw annotations and enforces item, page, and byte bounds", async () => {
     const { service, identity, bytes, sourceLoads } = fixture();
     const catalog = service.mint({
-      reviewItems: [],
+      annotations: [],
       taskSessionId: "task-a",
       identity,
       pageCount: 1,
@@ -245,7 +245,7 @@ describe("task-scoped PDF evidence service", () => {
       payload: { comment: `comment ${pageIndex}` },
     }));
     const catalog = service.mint({
-      reviewItems: annotations,
+      annotations: annotations,
       taskSessionId: "task-a",
       identity,
       pageCount: 3,
@@ -276,7 +276,7 @@ describe("task-scoped PDF evidence service", () => {
   it("rejects wrong-task, expired, revoked, and stale-generation handles", async () => {
     const { service, bindings, identity, bytes, setGeneration } = fixture();
     const catalog = service.mint({
-      reviewItems: [],
+      annotations: [],
       taskSessionId: "task-a",
       identity,
       pageCount: 1,
@@ -314,7 +314,7 @@ describe("task-scoped PDF evidence service", () => {
 
     const fresh = fixture();
     const expiring = fresh.service.mint({
-      reviewItems: [],
+      annotations: [],
       taskSessionId: "task-a",
       identity: fresh.identity,
       pageCount: 1,

@@ -49,7 +49,7 @@ describe('automatic refresh interaction lifecycle', () => {
           held = false;
           return {
             status: 'finalized', interactionToken: input.interactionToken,
-            generation: 4, outcome: input.outcome, reviewRevision: state.revision,
+            generation: 4, outcome: input.outcome, annotationRevision: state.revision,
           } satisfies DocumentInteractionReceipt;
         },
         async releaseInteraction() { held = false; return { status: 'released' }; },

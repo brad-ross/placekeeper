@@ -27,7 +27,7 @@ test('focused native links settle in the existing reader before task activation 
         const taskSessionId = `focused-link-${randomUUID()}`;
         cleanupTaskSessionId = taskSessionId;
         expect(await requestControl(socket, { kind: 'claim-binding', native: true, taskSessionId,
-            reviewSessionId: receipt.sessionId, documentGeneration: receipt.documentGeneration, bindProof: receipt.bindProof,
+            documentSessionId: receipt.sessionId, documentGeneration: receipt.documentGeneration, bindProof: receipt.bindProof,
         })).toMatchObject({ kind: 'codex-binding', status: 'accepted' });
         const before = await requestControl(socket, { kind: 'refresh-context', taskSessionId });
         expect(before).toMatchObject({ kind: 'context', result: { status: 'unavailable' } });
