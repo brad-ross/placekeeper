@@ -46,7 +46,7 @@ export async function runInstallerUI(request: InstallerRequest, profile: string)
         if (proceed.response === 2) request.uninstall=true;
         const verb=request.uninstall?'Uninstall':'Install';
         const result = await runInstaller(request, async () => {
-            const decision = await dialog.showMessageBox({ type: 'warning', title: 'Close reviews to install?', message: `${verb === 'Install' ? 'Installing' : 'Uninstalling'} Placekeeper will close active reviews.`, detail: 'Pending edits and recoverable drafts will be protected before reviews close. Cancel keeps the current installation and reviews available.', buttons: ['Cancel', 'Protect work and close reviews'], defaultId: 0, cancelId: 0 });
+            const decision = await dialog.showMessageBox({ type: 'warning', title: 'Close documents to install?', message: `${verb === 'Install' ? 'Installing' : 'Uninstalling'} Placekeeper will close active reviews.`, detail: 'Pending edits and recoverable drafts will be protected before documents close. Cancel keeps the current installation and documents available.', buttons: ['Cancel', 'Protect work and close documents'], defaultId: 0, cancelId: 0 });
             return decision.response === 1;
         });
         if (process.platform === 'win32' && !request.uninstall && request.port === undefined) {

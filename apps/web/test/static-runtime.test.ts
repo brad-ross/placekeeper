@@ -536,13 +536,13 @@ describe("static browser review runtime", () => {
     const acknowledged = "accepted" in named ? named.state : named;
     const fence = { expectedRevision: acknowledged.revision, documentGeneration: acknowledged.workflow.documentGeneration };
     const other = await runtime.command(setAnnotationName(acknowledged, "Other Window"));
-    await expect(runtime.exportReviewedCopy(undefined, fence)).rejects.toThrow("Review changed");
+    await expect(runtime.exportReviewedCopy(undefined, fence)).rejects.toThrow("Document changed");
     expect(writer.write).not.toHaveBeenCalled();
     const retry = await runtime.command(setAnnotationName("accepted" in other ? other.state : other, "Brad Ross"));
     const retryState = "accepted" in retry ? retry.state : retry;
     await expect(runtime.exportReviewedCopy(undefined, {
       expectedRevision: retryState.revision, documentGeneration: retryState.workflow.documentGeneration + 1,
-    })).rejects.toThrow("Review changed");
+    })).rejects.toThrow("Document changed");
     const exporting = runtime.exportReviewedCopy(undefined, {
       expectedRevision: retryState.revision, documentGeneration: retryState.workflow.documentGeneration,
     });

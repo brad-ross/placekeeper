@@ -164,9 +164,9 @@ test('test MCP bridge export conflict preserves annotation-name recovery guidanc
     };
     await page.getByRole('button', { name: /Open document actions$/u }).click();
     await page.getByRole('menuitem', { name: 'Export', exact: true }).click();
-    const dialog = page.getByRole('dialog', { name: 'Export reviewed PDF', exact: true });
+    const dialog = page.getByRole('dialog', { name: 'Export Annotated Document', exact: true });
     await dialog.getByRole('button', { name: 'Export', exact: true }).click();
-    await expect(dialog).toContainText('Review changed. Confirm the annotation name again to export the latest review.');
+    await expect(dialog).toContainText('Document changed. Confirm the annotation name again to export the latest version.');
     expect(changed).toBe(true);
     expect(writes).toBe(0);
     expect(await bridge.sourceBytes()).toEqual(source);

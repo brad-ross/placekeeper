@@ -94,7 +94,7 @@ describe("Chrome extension static contract", () => {
     ]);
 
     expect(handlerEntry).toContain('handlerActions!.setAttribute("aria-label", "Protected recovery choices")');
-    expect(handlerEntry).toContain('title!.textContent = "Existing review recovered"');
+    expect(handlerEntry).toContain('title!.textContent = "Existing document recovered"');
     expect(handlerEntry).toContain('setHandlerButtonContent(bypass, "chrome", "Default")');
     expect(handlerUi).toContain('["discard", "Discard", "delete", "destructive"]');
     expect(handlerUi).toContain('["fork", "Fork", "git-fork", "secondary"]');

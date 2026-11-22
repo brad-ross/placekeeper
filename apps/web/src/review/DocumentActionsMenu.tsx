@@ -61,7 +61,7 @@ export function reviewExportPresentation(input: {
     canExport: input.summary.export.eligible,
     requiresStaleConfirmation: false,
     annotationBlocked: false,
-    message: input.summary.export.eligible ? '' : 'Reviewed PDF export is not available yet.',
+    message: input.summary.export.eligible ? '' : 'Annotated Document export is not available yet.',
   };
 }
 
@@ -92,14 +92,14 @@ export interface ReviewExportResult {
 
 function exportMessageFromResult(result: ReviewExportResult | void): string {
   if (result?.warning !== undefined && result.warning.trim() !== '') return result.warning;
-  return 'Reviewed PDF exported.';
+  return 'Annotated Document exported.';
 }
 
 const EXPORT_OUTCOME_MESSAGES: Readonly<Record<ExportOutcome, string>> = {
   idle: '',
   pending: '',
-  success: 'Reviewed PDF exported.',
-  failure: 'Export failed. Your review is still available; try again.',
+  success: 'Annotated Document exported.',
+  failure: 'Export failed. Your annotations are still available; try again.',
 };
 
 export const DocumentActionsEnabled = createContext(true);

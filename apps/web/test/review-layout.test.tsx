@@ -261,7 +261,7 @@ describe('review shell layout and accessibility contract', () => {
     expect(html).toContain('data-viewer-status');
     expect(html).toContain('data-generation-status="reconciling"');
     expect(html).not.toContain('reconciliation-workspace__notice');
-    expect(html.match(/A rebuilt PDF is loading and Review Items are reconciling\./gu)).toHaveLength(1);
+    expect(html.match(/A rebuilt PDF is loading and annotations are reconciling\./gu)).toHaveLength(1);
     expect(html.indexOf('data-review-stage')).toBeLessThan(html.indexOf('data-review-toast-stack'));
     expect(html.indexOf('data-review-toast-stack')).toBeLessThan(html.indexOf('Document canvas'));
     expect(html).not.toContain('review-shell--generation-status');
@@ -301,7 +301,7 @@ describe('review shell layout and accessibility contract', () => {
     {
       refresh: 'reconciling' as const,
       role: 'status',
-      text: 'A rebuilt PDF is loading and Review Items are reconciling.',
+      text: 'A rebuilt PDF is loading and annotations are reconciling.',
     },
     {
       refresh: 'failed' as const,
@@ -794,7 +794,7 @@ describe('review shell layout and accessibility contract', () => {
       </ReviewShell>,
     );
     expect(html).toContain('data-tools-workspace-open="true"');
-    expect(html).toContain('aria-label="Selection review actions"');
+    expect(html).toContain('aria-label="Selection actions"');
     expect(html).not.toContain('aria-label="Page actions"');
   });
 
@@ -1370,7 +1370,7 @@ describe('review shell layout and accessibility contract', () => {
     );
 
     expect(html).toContain('role="toolbar"');
-    expect(html).toContain('aria-label="Selection review actions"');
+    expect(html).toContain('aria-label="Selection actions"');
     expect(html).toContain('aria-keyshortcuts="Alt+Shift+H"');
     expect(html).toContain('aria-label="All annotations"');
     expect(html).toContain('aria-live="polite"');

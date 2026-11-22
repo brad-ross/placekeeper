@@ -43,14 +43,14 @@ function activeAuthoringDraftIds(value: unknown): readonly string[] {
   if (!Array.isArray(value) || value.length > 256 ||
     value.some((id) => typeof id !== "string" || !SAFE_RUNTIME_ID.test(id)) ||
     new Set(value).size !== value.length) {
-    throw new Error("The local review presence was invalid.");
+    throw new Error("The local document presence was invalid.");
   }
   return Object.freeze([...value]) as readonly string[];
 }
 
 class LocalReviewRequestError extends Error {
   constructor(readonly status: number) {
-    super(`The local review action failed safely (${status}).`);
+    super(`The local document action failed safely (${status}).`);
   }
 }
 
@@ -93,7 +93,7 @@ export async function reopenProductionSession(
   } = {},
 ): Promise<ReopenProductionResult> {
   if (!/^[0-9a-f-]{36}$/u.test(viewId)) {
-    throw new Error("The live review address is invalid.");
+    throw new Error("The live document address is invalid.");
   }
   const response = await fetch(`/r/${viewId}/reopen`, {
     method: "POST",
@@ -144,7 +144,7 @@ export async function resumeProductionSession(
   pathname: string,
 ): Promise<ProductionSession> {
   if (!/^[0-9a-f-]{36}$/u.test(viewId)) {
-    throw new Error("The live review address is invalid.");
+    throw new Error("The live document address is invalid.");
   }
   const response = await fetch(`/r/${viewId}/resume`, {
     method: "POST",
@@ -152,7 +152,7 @@ export async function resumeProductionSession(
     body: JSON.stringify({ pathname }),
   });
   if (!response.ok) {
-    throw new Error("This live review is no longer available.");
+    throw new Error("This live document is no longer available.");
   }
   return Object.freeze(await response.json() as ProductionSession);
 }
@@ -172,7 +172,7 @@ function client(session: ProductionSession) {
       if (path === "/export" && response.status === 409) {
         const rejected = await response.json().catch(() => undefined) as { error?: { kind?: string } } | undefined;
         if (rejected?.error?.kind === "export-conflict") {
-          throw new Error("Review changed. Confirm the annotation name again to export the latest review.");
+          throw new Error("Document changed. Confirm the annotation name again to export the latest version.");
         }
       }
       throw new LocalReviewRequestError(response.status);
@@ -267,7 +267,7 @@ export async function loadProductionSession(session: ProductionSession): Promise
             state: currentState,
             message: generationConflict
               ? "The PDF was rebuilt before this command could be applied. The current generation is shown; review it and retry explicitly."
-              : "Another review window changed this draft. The latest saved revision is shown; retry your command.",
+              : "Another window changed this draft. The latest saved revision is shown; retry your command.",
             ...(generationConflict ? { reason: "generation-conflict" as const } : {}),
           };
         }
@@ -288,7 +288,7 @@ export async function loadProductionSession(session: ProductionSession): Promise
             };
           }
         }
-        if (!response.ok) throw new Error(`The local review action failed safely (${response.status}).`);
+        if (!response.ok) throw new Error(`The local document action failed safely (${response.status}).`);
         const nextState = await response.json() as ReviewStateView;
         commandGeneration = nextState.workflow.documentGeneration;
         return nextState;

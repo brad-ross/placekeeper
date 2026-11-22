@@ -340,7 +340,7 @@ function safeChromeSaveStatus(value: unknown): unknown | undefined {
   } else if (destination.phase === "active" && safeInteger(destination.generation) &&
     (destination.kind === "original" || destination.kind === "copy")) {
     safeDestination = {
-      phase: "active", generation: destination.generation, kind: destination.kind, targetPath: "Reviewed PDF",
+      phase: "active", generation: destination.generation, kind: destination.kind, targetPath: "Annotated Document",
     };
   } else return undefined;
   if ((value.sync.phase !== "clean" && value.sync.phase !== "saving" && value.sync.phase !== "not-saved") ||
@@ -570,7 +570,7 @@ export function sanitizeChromeReviewRuntimeResponse(
       (value.warning !== undefined && value.warning !== COMMITTED_REVIEWED_COPY_WARNING)) return undefined;
     return {
       kind: "reviewed-copy",
-      path: "Reviewed PDF",
+      path: "Annotated Document",
       revision: value.revision,
       digest: value.digest,
       ...(value.warning === undefined ? {} : { warning: COMMITTED_REVIEWED_COPY_WARNING }),
@@ -619,7 +619,7 @@ export function isReviewExportFence(value: unknown): value is ReviewExportFence 
 
 export class ReviewExportConflictError extends Error {
   constructor() {
-    super("Review changed. Confirm the annotation name again to export the latest review.");
+    super("Document changed. Confirm the annotation name again to export the latest version.");
     this.name = "ReviewExportConflictError";
   }
 }

@@ -153,8 +153,8 @@ async function chooseProtectedRecovery(
 ): Promise<"resume" | "discard" | "fork"> {
   if (signal?.aborted === true) throw signal.reason;
   document.body.dataset.documentLoading = "false";
-  title!.textContent = "Existing review recovered";
-  status!.textContent = "Choose how Placekeeper should reopen your unfinished review.";
+  title!.textContent = "Existing document recovered";
+  status!.textContent = "Choose how Placekeeper should reopen your unfinished document.";
   handlerActions!.setAttribute("aria-label", "Protected recovery choices");
   const buttons = createRecoveryButtons(document);
   const recoveryActions = document.createElement("div");
@@ -300,7 +300,7 @@ const controller = createHandlerController({
   },
   status: (message) => {
     status.textContent = message;
-    if (message === "Review ready.") {
+    if (message === "Document ready.") {
       document.body.dataset.documentLoading = "false";
       reviewRoot.inert = false;
       launchShell.hidden = true;
@@ -312,7 +312,7 @@ const controller = createHandlerController({
       launchShell.hidden = false;
       reopen.hidden = false;
       handlerActions.replaceChildren(reopen);
-      title.textContent = message.includes("updated") ? "Update required" : "Review disconnected";
+      title.textContent = message.includes("updated") ? "Update required" : "Document disconnected";
       reopen.focus({ preventScroll: true });
     }
   },

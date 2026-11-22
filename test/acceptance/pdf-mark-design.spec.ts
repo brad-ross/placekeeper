@@ -222,7 +222,7 @@ test('text selection uses the shared blue wash and a plain I-beam', async ({ pag
   const selection = pdfPage.locator(':scope > [data-pdf-selection-layer] > div[style*="mix-blend-mode"] > div').first();
   await expect(selection).toHaveCSS('background-color', 'rgb(207, 222, 234)');
   await page.mouse.up();
-  const palette = page.getByRole('toolbar', { name: 'Selection review actions' });
+  const palette = page.getByRole('toolbar', { name: 'Selection actions' });
   await expect(palette).toBeVisible();
   for (const percent of [250, 50, 150]) {
     const zoom = page.getByRole('textbox', { name: /^Current zoom/ });

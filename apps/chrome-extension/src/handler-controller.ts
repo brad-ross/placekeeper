@@ -144,10 +144,10 @@ export function createHandlerController(ports: HandlerPorts): HandlerController 
             : event.protected ? "disconnected-protected" : "disconnected-clean";
           ports.status?.(event.type === "update-required"
             ? event.protected
-              ? "Placekeeper needs to be updated before this protected review can reopen."
-              : "Placekeeper needs to be updated before this review can reconnect."
+              ? "Placekeeper needs to be updated before this protected document can reopen."
+              : "Placekeeper needs to be updated before this document can reconnect."
             : event.protected
-              ? "Placekeeper disconnected. Your review is protected and can be reopened."
+              ? "Placekeeper disconnected. Your work is protected and can be reopened."
               : "Placekeeper disconnected. Reopen this PDF to continue.");
         });
         current = "mounting";
@@ -155,11 +155,11 @@ export function createHandlerController(ports: HandlerPorts): HandlerController 
         await review.mountAndValidate(abort.signal);
         if (terminal || bypassRequested) throw new Error("bypassed");
         current = "activating";
-        ports.status?.("Activating this review…");
+        ports.status?.("Activating this document…");
         await review.activate(abort.signal);
         activeCommitted = true;
         current = "active";
-        ports.status?.("Review ready.");
+        ports.status?.("Document ready.");
       } catch {
         if (!activeCommitted && review !== undefined) {
           unsubscribeLifecycle?.();

@@ -517,7 +517,7 @@ export function ReviewShell(props: ReviewShellProps) {
   const handledCommandInvocationRef = useRef(0);
   const peekHeldRef = useRef(false);
   const dismissedPeekIdRef = useRef<string | undefined>(undefined);
-  const [announcement, setAnnouncement] = useState(`Review revision ${props.state.revision}.`);
+  const [announcement, setAnnouncement] = useState(`Revision ${props.state.revision}.`);
   const [transitionAnnouncement, setTransitionAnnouncement] = useState('');
   const handledAccessibilityTransitionRef = useRef(0);
 
@@ -650,7 +650,7 @@ export function ReviewShell(props: ReviewShellProps) {
     && (props.generationRefreshStatus === 'reconciling' || props.locationRestoreStatus === 'restoring');
   const generatedStatusMessages = [
     props.generationRefreshStatus === 'reconciling'
-      ? 'A rebuilt PDF is loading and Review Items are reconciling.'
+      ? 'A rebuilt PDF is loading and annotations are reconciling.'
       : props.generationRefreshStatus === 'failed'
         ? 'The rebuilt PDF could not be loaded safely. The last successful PDF remains reviewable.'
         : props.state.workflow.mode === 'generated-output'
@@ -661,7 +661,7 @@ export function ReviewShell(props: ReviewShellProps) {
       ? props.locationRestoreStatus === 'restoring'
         ? 'Restoring the prior reading position.'
         : props.locationRestoreStatus === 'fallback'
-          ? 'The prior reading position could not be restored; review remains available.'
+          ? 'The prior reading position could not be restored; the document remains available.'
           : ''
       : '',
   ].filter(Boolean);
@@ -1990,7 +1990,7 @@ export function ReviewShell(props: ReviewShellProps) {
       })}
       terminalPending={authoringTerminalPending !== null}
       {...(authoringTerminalPending?.delayed === true ? {
-        terminalPendingMessage: 'Saved. Waiting for the latest review state; retrying automatically.',
+        terminalPendingMessage: 'Saved. Waiting for the latest document state; retrying automatically.',
       } : {})}
       onValueChange={(value) => {
         if (authoringSessionRef.current?.token !== authoringSession.token) return;
@@ -2123,7 +2123,7 @@ export function ReviewShell(props: ReviewShellProps) {
               onRequestHandled: props.onDocumentActionsRequestHandled,
             }),
             onExport: props.save.onExportReviewedCopy
-              ?? (() => Promise.reject(new Error('Reviewed export is unavailable.'))),
+              ?? (() => Promise.reject(new Error('Annotated Document export is unavailable.'))),
             onOpenAnnotations: openAnnotationsFromDocumentActions,
           },
         })}

@@ -101,7 +101,7 @@ test('PDF text selection remains visibly colored when annotation actions appear'
   await page.mouse.down();
   await page.mouse.move(box.x + 245 * scale, box.y + 97 * scale, { steps: 12 });
   await page.mouse.up();
-  await expect(page.getByRole('toolbar', { name: 'Selection review actions' })).toBeVisible();
+  await expect(page.getByRole('toolbar', { name: 'Selection actions' })).toBeVisible();
   const rectangles = pdfPage.locator(':scope > div[style*="mix-blend-mode"]');
   await expect.poll(() => rectangles.count()).toBeGreaterThan(0);
   const colors = await rectangles.locator(':scope > div').evaluateAll((els) => els.map((el) => ({

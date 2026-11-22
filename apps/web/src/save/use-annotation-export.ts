@@ -67,7 +67,7 @@ export function useAnnotationExport(api: ProductionSessionApi, state: ReviewStat
       return;
     }
     const method = api.exportReviewedCopy;
-    if (!method) { setError('Reviewed export is unavailable.'); return; }
+    if (!method) { setError('Annotated Document export is unavailable.'); return; }
     busyRef.current = true;
     setPending(true);
     setError(undefined);
@@ -100,7 +100,7 @@ export function useAnnotationExport(api: ProductionSessionApi, state: ReviewStat
       });
       if (isCurrent(captured)) finish(captured, result);
     } catch (cause) {
-      if (isCurrent(captured)) setError(cause instanceof Error ? cause.message : 'Export failed. Your review is still available; try again.');
+      if (isCurrent(captured)) setError(cause instanceof Error ? cause.message : 'Export failed. Your annotations are still available; try again.');
     } finally {
       if (isCurrent(captured)) { busyRef.current = false; setPending(false); }
     }

@@ -26,7 +26,7 @@ const PRESENTATION = {
     focus: "document-workspace-if-loading",
   },
   "recoverable-failure": {
-    announcement: "This review could not be prepared. Recovery actions are available.",
+    announcement: "This document could not be prepared. Recovery actions are available.",
     focus: "first-recovery-action-if-needed",
   },
   retrying: {
@@ -34,15 +34,15 @@ const PRESENTATION = {
     focus: "retry-status",
   },
   "replacement-ready": {
-    announcement: "The review was restored.",
+    announcement: "The document was restored.",
     focus: "restore-semantic-target",
   },
   "protected-recovery": {
-    announcement: "Protected review recovery is available.",
+    announcement: "Protected document recovery is available.",
     focus: "first-recovery-action-if-needed",
   },
   "terminal-recovery": {
-    announcement: "This review needs to be reopened. Recovery actions are available.",
+    announcement: "This document needs to be reopened. Recovery actions are available.",
     focus: "first-recovery-action-if-needed",
   },
 } as const satisfies Record<AccessibilityTransitionKind, {

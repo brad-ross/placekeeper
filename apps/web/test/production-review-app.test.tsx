@@ -968,7 +968,7 @@ describe("one production review tree", () => {
     expect(html).not.toContain("two matching passages");
     expect(html).not.toContain(">Apply</button>");
     expect(html).not.toContain("Generation 4 is possibly stale");
-    expect(html).not.toContain("Export reviewed PDF");
+    expect(html).not.toContain("Export Annotated Document");
   });
 
   it("builds revision-fenced reattachment commands without changing semantic identity", () => {
@@ -1044,8 +1044,8 @@ describe("one production review tree", () => {
     expect(reattachmentCandidateFor("caret", { kind: "cleared", generation: 4 }, null).anchor).toBeNull();
     expect(reconciliationCommandRejectionMessage({
       accepted: false,
-      message: "Another review window changed this draft.",
-    })).toBe("Another review window changed this draft.");
+      message: "Another window changed this draft.",
+    })).toBe("Another window changed this draft.");
     expect(reconciliationCommandRejectionMessage({})).toBeNull();
   });
 
@@ -1153,7 +1153,7 @@ describe("one production review tree", () => {
     );
     expect(titleTrigger).not.toContain('lucide-chevron-down');
     expect(html).not.toContain('class="reconciliation-workspace__footer"');
-    expect(html).toContain("Protected review state");
+    expect(html).toContain("Protected document state");
     expect(html).not.toContain("Open automatic save options");
     expect(html).not.toContain('aria-haspopup="dialog"');
     expect(browserHtml).toContain('data-launch-surface="browser"');

@@ -227,7 +227,7 @@ test('Chrome disconnect dims the review and Reopen reloads the owning tab with r
 
 test('Chrome protected recovery uses the shared neutral dialog language and remains reachable at narrow sizes', async ({ page }) => {
   await chromePage(page, 'handler');
-  const dialog = page.getByRole('dialog', { name: 'Existing review recovered' });
+  const dialog = page.getByRole('dialog', { name: 'Existing document recovered' });
   await expect(dialog).toBeVisible();
   await expect(page.getByRole('button', { name: 'Resume', exact: true })).toBeFocused();
   expect(await controlStyle(page, '.handler-dialog')).toMatchObject({ border: '0px', radius: '17px', background: 'rgb(255, 255, 255)' });

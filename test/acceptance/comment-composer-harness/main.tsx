@@ -13,7 +13,7 @@ createRoot(root).render(
     optional
     saveLabel="Apply"
     terminalPending
-    terminalPendingMessage="Saved. Waiting for the latest review state; retrying automatically."
+    terminalPendingMessage="Saved. Waiting for the latest document state; retrying automatically."
     onSave={() => {
       saveCalls += 1;
       root.dataset.saveCalls = String(saveCalls);

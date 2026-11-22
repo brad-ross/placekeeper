@@ -452,20 +452,20 @@ const PENDING_FILE_ID = "00000000-0000-4000-8000-000000000001";
 
 const pendingApi: HostRuntime = {
   host: "electron",
-  bootstrap: async () => Promise.reject(new Error("The review is still loading.")),
+  bootstrap: async () => Promise.reject(new Error("The document is still loading.")),
   subscribeInvalidations: () => () => undefined,
-  command: async () => Promise.reject(new Error("The review is still loading.")),
-  saveStatus: async () => Promise.reject(new Error("The review is still loading.")),
-  saveProposal: async () => Promise.reject(new Error("The review is still loading.")),
-  chooseCopy: async () => Promise.reject(new Error("The review is still loading.")),
-  chooseFolder: async () => Promise.reject(new Error("The review is still loading.")),
-  chooseOriginal: async () => Promise.reject(new Error("The review is still loading.")),
-  retrySave: async () => Promise.reject(new Error("The review is still loading.")),
-  locateSave: async () => Promise.reject(new Error("The review is still loading.")),
-  exportReviewedCopy: async () => Promise.reject(new Error("The review is still loading.")),
-  scope: async () => Promise.reject(new Error("The review is still loading.")),
-  forwardSyncTex: async () => Promise.reject(new Error("The review is still loading.")),
-  reverseSyncTex: async () => Promise.reject(new Error("The review is still loading.")),
+  command: async () => Promise.reject(new Error("The document is still loading.")),
+  saveStatus: async () => Promise.reject(new Error("The document is still loading.")),
+  saveProposal: async () => Promise.reject(new Error("The document is still loading.")),
+  chooseCopy: async () => Promise.reject(new Error("The document is still loading.")),
+  chooseFolder: async () => Promise.reject(new Error("The document is still loading.")),
+  chooseOriginal: async () => Promise.reject(new Error("The document is still loading.")),
+  retrySave: async () => Promise.reject(new Error("The document is still loading.")),
+  locateSave: async () => Promise.reject(new Error("The document is still loading.")),
+  exportReviewedCopy: async () => Promise.reject(new Error("The document is still loading.")),
+  scope: async () => Promise.reject(new Error("The document is still loading.")),
+  forwardSyncTex: async () => Promise.reject(new Error("The document is still loading.")),
+  reverseSyncTex: async () => Promise.reject(new Error("The document is still loading.")),
   dispose: () => undefined,
 };
 
@@ -524,7 +524,7 @@ export function RuntimeLoadingWorkspace(props: {
     aria-busy="true"
   >
     {props.refreshStatus === "failed"
-      ? <p role="alert">This review could not be prepared.</p>
+      ? <p role="alert">This document could not be prepared.</p>
       : <DocumentLoading />}
   </section>;
 }
@@ -558,7 +558,7 @@ export function RuntimeProductionReviewApp(props: {
       poll: () => runtime.upgradePoll!(), settle: request => runtime.upgradeSettle!(request),
       frozen: (frozen, reason) => { flushSync(() => { setUpgradeFrozen(frozen); setUpgradeMessage(reason); }); },
       protectInput: async () => {
-        if (!closeSettlement.current) throw new Error('This review is still opening. Retry the upgrade after it loads.');
+        if (!closeSettlement.current) throw new Error('This document is still opening. Retry the upgrade after it loads.');
         await closeSettlement.current();
       },
       close: async () => {
@@ -604,7 +604,7 @@ export function RuntimeProductionReviewApp(props: {
     }).catch((error: unknown) => {
       if (controller.signal.aborted) return;
       setRefreshStatus("failed");
-      props.onRuntimeError?.(error instanceof Error ? error : new Error("The review could not be loaded."));
+      props.onRuntimeError?.(error instanceof Error ? error : new Error("The document could not be loaded."));
     });
     return () => controller.abort();
   }, [props.runtime, seed]);
@@ -684,7 +684,7 @@ export function RuntimeProductionReviewApp(props: {
   // Initial preparation owns no document viewer or reading state. Mount the
   // real session afresh so its first render cannot reuse placeholder resources.
   // Later generations keep this instance and its predecessor reading capture.
-  if (upgradeClosed) return <div role="status">This review was protected and closed for the upgrade. Reopen it in Placekeeper after installation finishes.</div>;
+  if (upgradeClosed) return <div role="status">This document was protected and closed for the upgrade. Reopen it in Placekeeper after installation finishes.</div>;
   return <>{upgradeMessage && <div className="review-upgrade-status" role="status">{upgradeMessage}</div>}<div className="review-upgrade-content" inert={upgradeFrozen}><ProductionReviewApp
     key={loaded === undefined ? 'preparing-runtime' : 'active-runtime'}
     {...(props.onContextSnapshot === undefined ? {} : { onContextSnapshot: props.onContextSnapshot })}

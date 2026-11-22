@@ -935,7 +935,7 @@ describe("VS Code local host adapter", () => {
     expect(RECOVERY_CHOICE_LABELS).toEqual([
       "Resume draft",
       "Discard draft",
-      "Start independent review",
+      "Start independent copy",
     ]);
     expect(RECOVERY_CHOICE_LABELS.map(recoveryDecisionForLabel))
       .toEqual(["resume", "discard", "fork"]);
@@ -946,7 +946,7 @@ describe("VS Code local host adapter", () => {
   it("renders an inert neutral reattachment surface for a disconnected panel", () => {
     const html = buildReviewPanelReattachmentHtml();
 
-    expect(html).toContain("Reconnect this review");
+    expect(html).toContain("Reconnect this document");
     expect(html).toContain("Placekeeper: View PDF");
     expect(html).toContain("protected annotations");
     expect(html).toContain("border-radius:17px");

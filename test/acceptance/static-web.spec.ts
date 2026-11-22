@@ -18,7 +18,7 @@ async function exportReviewedPdf(page: Page, options: {
     await page.getByRole("button", { name: /Open document actions$/u }).click();
   }
   await page.getByRole("menuitem", { name: /^(?:Retry export|Export)$/u }).click();
-  const dialog = page.getByRole('dialog', { name: 'Export reviewed PDF', exact: true });
+  const dialog = page.getByRole('dialog', { name: 'Export Annotated Document', exact: true });
   const name = dialog.getByRole('textbox', { name: 'Name on annotations', exact: true });
   await expect(name).toBeFocused();
   if (options.expectedName !== undefined) await expect(name).toHaveValue(options.expectedName);
@@ -206,7 +206,7 @@ test("@critical @representative keeps the local keyboard journey private and rou
   page.on('download', () => { downloads += 1; });
   await page.getByRole('button', { name: /Open document actions$/u }).click();
   await page.getByRole('menuitem', { name: 'Export', exact: true }).click();
-  const cancelledDialog = page.getByRole('dialog', { name: 'Export reviewed PDF', exact: true });
+  const cancelledDialog = page.getByRole('dialog', { name: 'Export Annotated Document', exact: true });
   const draftName = cancelledDialog.getByRole('textbox', { name: 'Name on annotations', exact: true });
   await expect(draftName).toHaveValue('Placekeeper');
   await draftName.fill('Cancelled annotation name');
@@ -281,7 +281,7 @@ test("@representative creates a selection-derived highlight on a cropped PDF wit
   const pdfPage = page.locator("[data-page-index='0']").first();
   const box = await pdfPage.boundingBox();
   if (box === null) throw new Error("Rendered cropped page has no bounds.");
-  const actions = page.getByRole("toolbar", { name: "Selection review actions" });
+  const actions = page.getByRole("toolbar", { name: "Selection actions" });
   const scale = box.width / 540;
   const start = { x: (72 - 36) * scale + 6, y: (756 - 695) * scale };
   const end = { x: Math.min((500 - 36) * scale, box.width - 40), y: (756 - 665) * scale };
@@ -373,7 +373,7 @@ test("exhaustive profile exports and reopens all five editable annotation kinds"
   await waitForStaticPdf(page);
   await expect(page.locator("[data-review-item]")).toHaveCount(2);
   const pdfPage = page.locator("[data-page-index='0']").first();
-  const actions = page.getByRole("toolbar", { name: "Selection review actions" });
+  const actions = page.getByRole("toolbar", { name: "Selection actions" });
 
   await dragPdfCoordinates(page, pdfPage, { x: 252, y: 99 }, { x: 405, y: 99 });
   await expect(actions).toBeVisible();

@@ -213,7 +213,7 @@ async function coordinateLifecycleMutation(
         const credentials: UpgradeAttemptCredentials = { attemptId: preview.attemptId, token: preview.token, candidate: preview.candidate };
         try {
           const nativeConsent = args.includes("--native-installer-consent");
-          if (!nativeConsent && !process.stdin.isTTY) throw new Error("Active reviews need approval to close. Run the source installer in an interactive terminal, or close reviews and retry.");
+          if (!nativeConsent && !process.stdin.isTTY) throw new Error("Open documents need approval to close. Run the source installer in an interactive terminal, or close documents and retry.");
           const terminal = createInterface({ input: process.stdin, output: process.stderr });
           let accepted = false;
           try {
@@ -222,16 +222,16 @@ async function coordinateLifecycleMutation(
               const answer = await Promise.race([terminal[Symbol.asyncIterator]().next(), new Promise<never>((_, reject) => { const timer = setTimeout(() => reject(Error("Installer consent timed out")), 120_000); timer.unref(); })]);
               const decision = answer.done ? undefined : JSON.parse(answer.value) as { version?: unknown; accepted?: unknown };
               accepted = decision?.version === 1 && decision.accepted === true;
-            } else accepted = /^y(?:es)?$/iu.test((await terminal.question(`This Placekeeper change will close active reviews after protecting pending edits and drafts. Close reviews and continue? [y/N] `)).trim());
+            } else accepted = /^y(?:es)?$/iu.test((await terminal.question(`This Placekeeper change will close open documents after protecting pending edits and drafts. Close documents and continue? [y/N] `)).trim());
           } finally { terminal.close(); }
           let preparation = await request({ operation: "begin", credentials, consent: accepted });
-          if (!accepted) throw new Error("Installation canceled; current reviews remain available");
+          if (!accepted) throw new Error("Installation canceled; open documents remain available");
           const deadline = Date.now() + 120_000;
           while (preparation.phase === "preparing" && Date.now() < deadline) {
             await new Promise(resolve => setTimeout(resolve, 100));
             preparation = await request({ operation: "status", credentials });
           }
-          if (preparation.phase !== "ready") throw new Error("Pending review work could not be protected; installation stopped");
+          if (preparation.phase !== "ready") throw new Error("Pending annotation work could not be protected; installation stopped");
           if ((await request({ operation: "commit", credentials })).phase !== "committed") throw new Error("Review closure was not committed");
           return credentials;
         } catch (error) { await request({ operation: "cancel", credentials }).catch(() => undefined); throw error; }

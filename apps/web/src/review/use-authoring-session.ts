@@ -482,7 +482,7 @@ export function useAuthoringSession({
       const next = accepted ? result as ReviewStateView : (result as RejectedReviewCommand).state;
       acknowledgedRef.current = next;
       setAnnouncement(accepted
-        ? `Review revision ${next.revision} saved.`
+        ? `Revision ${next.revision} saved.`
         : disposition === 'persistence-pending'
           ? 'The annotation is waiting to be saved to the PDF.'
           : (result as RejectedReviewCommand).message);
@@ -1017,8 +1017,8 @@ export function useAuthoringSession({
         const pending = pendingCanonicalFinalizationRef.current;
         if (pending?.session.token !== session.token) return;
         setAnnouncement(outcome === 'applied'
-          ? 'The annotation was saved. Placekeeper is still retrying the latest review state.'
-          : 'The cancellation was saved. Placekeeper is still retrying the latest review state.');
+          ? 'The annotation was saved. Placekeeper is still retrying the latest document state.'
+          : 'The cancellation was saved. Placekeeper is still retrying the latest document state.');
         setAuthoringTerminalPending({ token: session.token, delayed: true });
       }, canonicalFinalizationPendingNoticeMs);
       setAuthoringTerminalPending({ token: session.token, delayed: false });

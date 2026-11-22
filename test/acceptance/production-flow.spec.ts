@@ -571,7 +571,7 @@ test('classifies an initial packaged-runtime bootstrap rejection as one preparat
   await page.goto(bootstrapUrl.href);
   const alerts = page.getByRole('alert');
   await expect(alerts).toHaveCount(1);
-  await expect(alerts).toHaveText('This review could not be prepared.');
+  await expect(alerts).toHaveText('This document could not be prepared.');
   await expect(page.locator('[data-runtime-loading-workspace]')).toBeVisible();
   await expect(page.locator('[data-generation-status="failed"]')).toHaveCount(0);
   await expect(page.getByText(/rebuilt PDF|last successful PDF/iu)).toHaveCount(0);
@@ -836,7 +836,7 @@ test("keeps mounted Codex context through fresh-page re-entry, then fails closed
     await page.goto(launched.url);
     const status = page.locator("[data-codex-context]");
     await expect(status).toHaveAttribute("data-codex-context", "current");
-    await expect(status).toHaveAttribute("aria-label", /Agent context current at review revision \d+/);
+    await expect(status).toHaveAttribute("aria-label", /Agent context current at revision \d+/);
     await expect(status.locator(".lucide-bot")).toBeVisible();
     expect((await status.boundingBox())?.width).toBe(32);
     await status.hover();
@@ -3947,7 +3947,7 @@ test('keeps repeated-click PDF text selection out of insertion mode', async ({ p
   const scale = box.width / 612;
   await page.mouse.click(box.x + 150 * scale, box.y + 99 * scale, { clickCount: 3 });
 
-  await expect(page.getByRole('toolbar', { name: 'Selection review actions' })).toBeVisible();
+  await expect(page.getByRole('toolbar', { name: 'Selection actions' })).toBeVisible();
   await expect(page.getByRole('toolbar', { name: 'Insertion review action' })).toHaveCount(0);
   await expect(page.locator('[data-review-insertion-caret]')).toHaveCount(0);
 });
@@ -4035,7 +4035,7 @@ test("one installed-style browser tree preserves review state across responsive 
   await replacementComposer.getByRole("button", { name: "Apply" }).click();
   await expect(replacementComposer).toHaveCount(0);
   await expect(pageCanvas.locator(':scope > [data-pdf-selection-layer] > div[style*="mix-blend-mode"]')).toHaveCount(0);
-  await expect(page.getByRole('toolbar', { name: 'Selection review actions' })).toHaveCount(0);
+  await expect(page.getByRole('toolbar', { name: 'Selection actions' })).toHaveCount(0);
   await expect(page.locator("[data-review-item]")).toHaveCount(initialItems.length + 1);
   await expect.poll(() => host.broker.saveStatus(initialSessionId)?.sync.phase).toBe("clean");
   const replacementState = host.broker.state(initialSessionId);
@@ -4394,7 +4394,7 @@ test('keeps a manually reattached annotation stationary through pointer Apply in
 
   const predecessorPage = page.locator("[data-page-index='0']").first();
   await dragPdfPointer(page, predecessorPage, { x: 76, y: 98 }, { x: 405, y: 98 });
-  const selectionActions = page.getByRole('toolbar', { name: 'Selection review actions' });
+  const selectionActions = page.getByRole('toolbar', { name: 'Selection actions' });
   await expect(selectionActions).toBeVisible();
   await selectionActions.getByRole('button', { name: 'Highlight', exact: true }).click();
   const highlightComposer = page.getByRole('region', { name: 'Highlight Comment' });
@@ -4422,7 +4422,7 @@ test('keeps a manually reattached annotation stationary through pointer Apply in
       const topLeft = document.querySelector<HTMLElement>(
         '[data-review-toast-stack] [data-generation-status="reconciling"]',
       );
-      if (topLeft?.innerText.includes('A rebuilt PDF is loading and Review Items are reconciling.')) {
+      if (topLeft?.innerText.includes('A rebuilt PDF is loading and annotations are reconciling.')) {
         state.topLeftSeen = true;
         const row = root.querySelector<HTMLElement>(`[data-review-item="${targetId}"]`);
         if (row !== null) state.rowYWhileTopLeftVisible.push(row.getBoundingClientRect().y);
@@ -4553,7 +4553,7 @@ test('keeps a manually reattached annotation stationary through pointer Apply in
       const generationToasts = [...document.querySelectorAll<HTMLElement>(
         '[data-review-toast-stack] [data-generation-status="reconciling"]',
       )].filter((toast) => painted(toast)
-        && toast.innerText.includes('A rebuilt PDF is loading and Review Items are reconciling.'));
+        && toast.innerText.includes('A rebuilt PDF is loading and annotations are reconciling.'));
       audit.samples.push({
         elapsedMs: performance.now() - startedAt,
         listIdentity: currentList === list && list.isConnected,
@@ -4859,7 +4859,7 @@ test('keeps a first-page multiline highlight composer stable and reveals one ico
   const pdfPage = page.locator(".pdf-workspace__page[data-page-index='0']").first();
   await waitForRenderedPageImage(pdfPage);
   await dragPdfPointer(page, pdfPage, { x: 76, y: 98 }, { x: 405, y: 128 }, undefined, { steps: 12 });
-  const selectionActions = page.getByRole('toolbar', { name: 'Selection review actions' });
+  const selectionActions = page.getByRole('toolbar', { name: 'Selection actions' });
   await expect(selectionActions).toBeVisible();
   await selectionActions.getByRole('button', { name: 'Highlight', exact: true }).click();
 
@@ -6082,7 +6082,7 @@ test('copies a real Main PDF selection from the selection action popup', async (
   ].join('\n');
 
   await dragAcrossProductionPdfPages(page, main, 0, 1);
-  const actions = page.getByRole('toolbar', { name: 'Selection review actions' });
+  const actions = page.getByRole('toolbar', { name: 'Selection actions' });
   await expect(actions).toBeVisible();
   await actions.getByRole('button', { name: 'Copy', exact: true }).click();
 
@@ -6203,7 +6203,7 @@ test('rejects every review action from a real 13-page selection without changing
   await dragAcrossProductionPdfPages(page, main, 0, 12);
   await expect.poll(() => page.locator('[data-review-contextual-host]')
     .getAttribute('data-selection-status')).toBe('over-limit');
-  const actions = page.getByRole('toolbar', { name: 'Selection review actions' });
+  const actions = page.getByRole('toolbar', { name: 'Selection actions' });
   await expect(actions).toBeVisible();
 
   for (const action of ['Copy', 'Replace', 'Delete', 'Highlight'] as const) {
@@ -6230,7 +6230,7 @@ for (const action of ['Replace', 'Delete', 'Highlight'] as const) {
     await chooseFreshCopyDestination(page);
     const main = page.locator('[data-pdf-copy-surface="main"]');
     await dragAcrossProductionPdfPages(page, main, 0, 1);
-    const actions = page.getByRole('toolbar', { name: 'Selection review actions' });
+    const actions = page.getByRole('toolbar', { name: 'Selection actions' });
     await expect(actions).toBeVisible();
     await actions.getByRole('button', { name: action, exact: true }).click();
     if (action === 'Replace') {
@@ -6396,7 +6396,7 @@ test('clears Main and Reference PDF selections before preserving link actions', 
   const main = page.locator('[data-pdf-copy-surface="main"]');
   const mainSelection = main.locator(':scope .pdf-workspace__page[data-page-index] > [data-pdf-selection-layer] > div[style*="mix-blend-mode"]');
   await dragAcrossProductionPdfPages(page, main, 0, 1, { y: 58 });
-  await expect(page.getByRole('toolbar', { name: 'Selection review actions' })).toBeVisible();
+  await expect(page.getByRole('toolbar', { name: 'Selection actions' })).toBeVisible();
   await expect(mainSelection).not.toHaveCount(0);
   await expect.poll(() => page.evaluate(() => window.getSelection()?.toString() ?? ''))
     .not.toBe('');
@@ -6409,7 +6409,7 @@ test('clears Main and Reference PDF selections before preserving link actions', 
     requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
   }));
   await primaryLink.click();
-  await expect(page.getByRole('toolbar', { name: 'Selection review actions' })).toHaveCount(0);
+  await expect(page.getByRole('toolbar', { name: 'Selection actions' })).toHaveCount(0);
   await expect(mainSelection).toHaveCount(0);
   await expect.poll(() => page.evaluate(() => window.getSelection()?.toString() ?? ''))
     .toBe('');
@@ -6600,7 +6600,7 @@ test('keeps PDF drag selection available while the Annotation Tray is open', asy
   await page.mouse.up();
 
   await expect.poll(() => selectionRects.count()).toBeGreaterThan(rectCountBeforeDrag);
-  const selectionActions = page.getByRole('toolbar', { name: 'Selection review actions' });
+  const selectionActions = page.getByRole('toolbar', { name: 'Selection actions' });
   await expect(selectionActions).toBeVisible();
   const overlayOrder = await page.locator('[data-review-stage]').evaluate((stage) => {
     const contextual = stage.querySelector<HTMLElement>('[data-review-contextual-host]');
@@ -7035,7 +7035,7 @@ test("anchors highlight and delete annotations across inline and display equatio
     { steps: 8 },
   );
 
-  let selectionActions = page.getByRole("toolbar", { name: "Selection review actions" });
+  let selectionActions = page.getByRole("toolbar", { name: "Selection actions" });
   await expect(selectionActions).toBeVisible();
   await expect(page.locator("[data-viewer-status]")).toHaveCount(0);
   await selectionActions.getByRole("button", { name: "Highlight", exact: true }).click();
@@ -7052,7 +7052,7 @@ test("anchors highlight and delete annotations across inline and display equatio
     undefined,
     { steps: 8 },
   );
-  selectionActions = page.getByRole("toolbar", { name: "Selection review actions" });
+  selectionActions = page.getByRole("toolbar", { name: "Selection actions" });
   await expect(selectionActions).toBeVisible();
   await expect(page.locator("[data-viewer-status]")).toHaveCount(0);
   await selectionActions.getByRole("button", { name: "Delete", exact: true }).click();
@@ -7171,7 +7171,7 @@ test("shows command conflicts until a retry succeeds", async ({ page }) => {
   await expect(pageCanvas).toBeVisible();
   await waitForRenderedPageImage(pageCanvas);
   await dragPdfPointer(page, pageCanvas, { x: 253, y: 98 }, { x: 405, y: 98 });
-  const selectionActions = page.getByRole("toolbar", { name: "Selection review actions" });
+  const selectionActions = page.getByRole("toolbar", { name: "Selection actions" });
   await expect(selectionActions).toBeVisible();
 
   const externalState = host.broker.state(launched.sessionId);
@@ -7876,7 +7876,7 @@ test('document annotation name export rejects a concurrent rename and retries th
   });
   await page.getByRole('button', { name: /Open document actions$/u }).click();
   await page.getByRole('menuitem', { name: 'Export', exact: true }).click();
-  const dialog = page.getByRole('dialog', { name: 'Export reviewed PDF', exact: true });
+  const dialog = page.getByRole('dialog', { name: 'Export Annotated Document', exact: true });
   const name = dialog.getByRole('textbox', { name: 'Name on annotations', exact: true });
   await name.fill('Alice');
   const conflict = page.waitForResponse((response) => response.url().endsWith(`/s/${launched.sessionId}/export`));

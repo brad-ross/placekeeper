@@ -39,7 +39,7 @@ export function createCodexHostRuntime(port: CodexRuntimePort, environment: {
     let materializer = materializers.get(role);
     if (materializer === undefined) { materializer = new VerifiedResourceMaterializer(); materializers.set(role, materializer); }
     const bytes = await materializer.materialize(1, descriptor, (offset, length) => port.call('resource', { handle: descriptor.handle, offset, length }), { current: () => !disposed && descriptors.get(handle) === descriptor, digest });
-    if (disposed || descriptors.get(handle) !== descriptor) throw new Error('Native review disconnected.');
+    if (disposed || descriptors.get(handle) !== descriptor) throw new Error('Native document disconnected.');
     const url = createURL(new Blob([bytes], { type: descriptor.mediaType }));
     const entry = entries.get(`${role}:${descriptor.sha256}:${descriptor.byteLength}`);
     if (entry?.key === handle) entry.fulfilled = true;
@@ -94,7 +94,7 @@ export function createCodexHostRuntime(port: CodexRuntimePort, environment: {
   }, async scope(signal) {
     return ownedScope(await runtime.scope(signal));
   }, async createLink(location) {
-    if (disposed) throw new Error('Native review disconnected.');
+    if (disposed) throw new Error('Native document disconnected.');
     const value = await port.call('createLink', { location });
     if (disposed || typeof value !== 'object' || value === null || !('link' in value) || typeof value.link !== 'string' || !value.link.startsWith('placekeeper:///')) throw new Error('Native link unavailable.');
     return value.link;

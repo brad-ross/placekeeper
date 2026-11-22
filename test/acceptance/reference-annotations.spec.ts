@@ -221,7 +221,7 @@ async function dragSelection(page: Page, pdfPage: Locator): Promise<void> {
   await page.mouse.down();
   await page.mouse.move(end.x, end.y, { steps: 12 });
   await page.mouse.up();
-  const actions = page.getByRole('toolbar', { name: 'Selection review actions' });
+  const actions = page.getByRole('toolbar', { name: 'Selection actions' });
   try {
     await expect(actions).toBeVisible();
   } catch {
@@ -263,7 +263,7 @@ async function expectSelectionActionsInsideReference(
   page: Page,
   relationship: 'above' | 'below',
 ): Promise<void> {
-  const actions = page.getByRole('toolbar', { name: 'Selection review actions' });
+  const actions = page.getByRole('toolbar', { name: 'Selection actions' });
   const referenceViewport = page.locator('.reference-panel__viewport');
   await expect.poll(async () => {
     const [actionsBounds, viewportBounds, selectionBounds] = await Promise.all([
@@ -539,7 +539,7 @@ test('creates, edits, reopens, and deletes one shared selection annotation from 
     element.scrollTop += selectionTop - viewportBounds.top - 2;
   });
   await expectSelectionActionsInsideReference(page, 'below');
-  const highlight = page.getByRole('toolbar', { name: 'Selection review actions' })
+  const highlight = page.getByRole('toolbar', { name: 'Selection actions' })
     .getByRole('button', { name: 'Highlight', exact: true });
   await installFirstVisibleReferencePlacementProbe(
     page,

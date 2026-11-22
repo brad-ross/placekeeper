@@ -392,7 +392,7 @@ test.describe('canonical review workflow', () => {
     await expect(eligibleMenu.getByRole('menuitem')).toHaveText(['Save options', 'Export']);
     await exportAction.click();
     await expect(page.locator('[data-export-count]')).toHaveAttribute('data-export-count', '1');
-    await expect(page.getByText('Reviewed PDF exported.')).toBeVisible();
+    await expect(page.getByText('Annotated Document exported.')).toBeVisible();
     await expect(exportAction).toBeFocused();
     await page.keyboard.press('Escape');
     await expect(documentActionsTrigger).toBeFocused();
@@ -556,7 +556,7 @@ test.describe('canonical review workflow', () => {
     await exportAction.click();
     await page.getByRole('menuitem', { name: 'Confirm export' }).click();
     await expect(page.locator('[data-export-count]')).toHaveAttribute('data-export-count', '1');
-    await expect(page.getByText('Reviewed PDF exported.')).toBeVisible();
+    await expect(page.getByText('Annotated Document exported.')).toBeVisible();
 
     await page.goto('/test/acceptance/review-harness/index.html?reconciliation=ready&export=delayed');
     await page.getByRole('button', { name: /Open document actions/u }).click();
@@ -569,18 +569,18 @@ test.describe('canonical review workflow', () => {
     await expect(page.getByText('Exporting reviewed PDF…')).toHaveCount(0);
     await expect(page.locator('[data-export-count]')).toHaveAttribute('data-export-count', '1');
     await page.getByRole('button', { name: 'Finish harness export' }).evaluate(element => (element as HTMLButtonElement).click());
-    await expect(page.getByText('Reviewed PDF exported.')).toBeVisible();
+    await expect(page.getByText('Annotated Document exported.')).toBeVisible();
     await expect(exportAction).toBeFocused();
 
     await page.goto('/test/acceptance/review-harness/index.html?reconciliation=ready&export=fail-once');
     await page.getByRole('button', { name: /Open document actions/u }).click();
     await page.getByRole('menuitem', { name: 'Export', exact: true }).click();
     const retry = page.getByRole('menuitem', { name: 'Retry export' });
-    await expect(page.getByText('Export failed. Your review is still available; try again.')).toBeVisible();
+    await expect(page.getByText('Export failed. Your annotations are still available; try again.')).toBeVisible();
     await expect(retry).toBeFocused();
     await retry.click();
     await expect(page.locator('[data-export-count]')).toHaveAttribute('data-export-count', '2');
-    await expect(page.getByText('Reviewed PDF exported.')).toBeVisible();
+    await expect(page.getByText('Annotated Document exported.')).toBeVisible();
   });
 
   test('routes host export requests through blocked, stale, pending, and retry states', async ({ page }) => {
@@ -601,10 +601,10 @@ test.describe('canonical review workflow', () => {
     menu = page.getByRole('menu', { name: /Actions for/u });
     const retry = menu.getByRole('menuitem', { name: 'Retry export' });
     await expect(retry).toBeFocused();
-    await expect(menu.getByText('Export failed. Your review is still available; try again.')).toBeVisible();
+    await expect(menu.getByText('Export failed. Your annotations are still available; try again.')).toBeVisible();
     await retry.click();
     await expect(page.locator('[data-export-count]')).toHaveAttribute('data-export-count', '2');
-    await expect(menu.getByText('Reviewed PDF exported.')).toBeVisible();
+    await expect(menu.getByText('Annotated Document exported.')).toBeVisible();
 
     await page.goto('/test/acceptance/review-harness/index.html?reconciliation=ready&export=delayed&host-export=1');
     menu = page.getByRole('menu', { name: /Actions for/u });
@@ -615,7 +615,7 @@ test.describe('canonical review workflow', () => {
     await expect(menu.getByText('Exporting reviewed PDF…')).toHaveCount(0);
     await expect(page.locator('[data-export-count]')).toHaveAttribute('data-export-count', '1');
     await page.getByRole('button', { name: 'Finish harness export' }).evaluate(element => (element as HTMLButtonElement).click());
-    await expect(menu.getByText('Reviewed PDF exported.')).toBeVisible();
+    await expect(menu.getByText('Annotated Document exported.')).toBeVisible();
     await page.getByRole('button', { name: 'Remount review shell' }).click();
     await expect(page.locator('[data-export-count]')).toHaveAttribute('data-export-count', '1');
     await expect(page.getByRole('menu', { name: /Actions for/u })).toHaveCount(0);
@@ -858,7 +858,7 @@ test.describe('canonical review workflow', () => {
   });
 
   test('dismisses selection actions after an annotation is completed', async ({ page }) => {
-    const selectionActions = page.getByRole('toolbar', { name: 'Selection review actions' });
+    const selectionActions = page.getByRole('toolbar', { name: 'Selection actions' });
 
     await expect(selectionActions).toBeVisible();
     for (const name of ['Replace', 'Delete', 'Highlight']) {
@@ -889,7 +889,7 @@ test.describe('canonical review workflow', () => {
   });
 
   test('keeps selection actions visible while Workspace Annotations is toggled', async ({ page }) => {
-    const selectionActions = page.getByRole('toolbar', { name: 'Selection review actions' });
+    const selectionActions = page.getByRole('toolbar', { name: 'Selection actions' });
 
     await expect(selectionActions).toBeVisible();
     await openAnnotationsWorkspace(page);
@@ -2318,7 +2318,7 @@ test.describe('canonical review workflow', () => {
   });
 
   test('keeps the frozen authoring session after rejection and preserves a newer selection', async ({ page }) => {
-    const selectionActions = page.getByRole('toolbar', { name: 'Selection review actions' });
+    const selectionActions = page.getByRole('toolbar', { name: 'Selection actions' });
 
     await page.getByRole('button', { name: 'Reject next command' }).click();
     await page.getByRole('button', { name: 'Delete', exact: true }).click();
@@ -2966,7 +2966,7 @@ test.describe('canonical review workflow', () => {
   });
 
   test('does not clear a newer selection when an older annotation finishes saving', async ({ page }) => {
-    const selectionActions = page.getByRole('toolbar', { name: 'Selection review actions' });
+    const selectionActions = page.getByRole('toolbar', { name: 'Selection actions' });
 
     await page.getByRole('button', { name: 'Hold next command' }).click();
     await page.getByRole('button', { name: 'Delete', exact: true }).click();
@@ -3250,7 +3250,7 @@ test.describe('canonical review workflow', () => {
   test('announces anchor recovery and creates no mutation when selection authority is absent', async ({ page }) => {
     const announcement = page.locator('.review-workspace__status');
     await page.getByRole('button', { name: 'Clear anchors' }).click();
-    await expect(page.getByRole('toolbar', { name: 'Selection review actions' })).toHaveCount(0);
+    await expect(page.getByRole('toolbar', { name: 'Selection actions' })).toHaveCount(0);
     await page.getByRole('application', { name: 'PDF review canvas' }).focus();
     await page.keyboard.press('Alt+Shift+R');
     await expect(announcement).toContainText('Select reliable text');

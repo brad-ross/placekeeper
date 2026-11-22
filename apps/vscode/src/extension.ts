@@ -76,7 +76,7 @@ import {
 } from "./webview-bridge.js";
 
 const VIEW_COMMANDS = ["placekeeper.open", "placekeeper.viewPdf"] as const;
-const RECONNECT_REVIEW_MESSAGE = "Reopen this PDF in Placekeeper to reconnect its review.";
+const RECONNECT_REVIEW_MESSAGE = "Reopen this PDF in Placekeeper to reconnect its annotations.";
 const PANEL_TYPE = "placekeeper.review";
 const PANEL_BINDINGS_KEY = "placekeeper.panel-bindings.v1";
 const COMPATIBILITY_SETUP_KEY = "placekeeper.latex-workshop-setup.v1";
@@ -177,7 +177,7 @@ async function chooseBinding(commandArgs: readonly unknown[]): Promise<ReviewBin
       const labels = binding.candidates.map((candidate) => candidate.fsPath);
       const selectedLabel = await vscode.window.showQuickPick(labels, {
         title: "Choose generated PDF",
-        placeHolder: "Placekeeper will keep this output bound to its own review tab",
+        placeHolder: "Placekeeper will keep this output bound to its own document tab",
       });
       chosen = binding.candidates.find((candidate) => candidate.fsPath === selectedLabel);
     }
@@ -386,8 +386,8 @@ export function activate(context: vscode.ExtensionContext): void {
     while (launched.ok && launched.kind === "recovery-offered") {
       const recoveryLaunch = launched;
       const selectedRecovery = await vscode.window.showQuickPick(RECOVERY_CHOICE_LABELS, {
-        title: "Recover Placekeeper review",
-        placeHolder: "Choose how to continue this generated PDF review",
+        title: "Recover Placekeeper document",
+        placeHolder: "Choose how to continue annotating this generated PDF",
       });
       const decision = recoveryDecisionForLabel(selectedRecovery);
       if (decision === undefined) throw new Error("Recovery was cancelled");
@@ -666,7 +666,7 @@ export function activate(context: vscode.ExtensionContext): void {
           return status;
         }
         if (status !== "ok") {
-          void vscode.window.showWarningMessage("Forward SyncTeX could not find this source location. PDF review remains available.");
+          void vscode.window.showWarningMessage("Forward SyncTeX could not find this source location. The document remains available.");
           return status;
         }
         panel.reveal(panel.viewColumn, false);
@@ -674,7 +674,7 @@ export function activate(context: vscode.ExtensionContext): void {
         return status;
       }
       catch {
-        void vscode.window.showWarningMessage("Forward SyncTeX is unavailable. PDF review remains available.");
+        void vscode.window.showWarningMessage("Forward SyncTeX is unavailable. The document remains available.");
         return "failed";
       }
     }),

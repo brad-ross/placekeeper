@@ -187,10 +187,10 @@ class NativeRuntimeError extends Error {
 
 function reasonError(reason: string): Error {
   if (reason === "export-conflict") {
-    return new NativeRuntimeError(reason, "Review changed. Confirm the annotation name again to export the latest review.");
+    return new NativeRuntimeError(reason, "Document changed. Confirm the annotation name again to export the latest version.");
   }
   if (reason === "protocol-mismatch" || reason === "update-required") {
-    return new NativeRuntimeError(reason, "Update the Placekeeper Chrome extension and native service, then reopen this review (protocol-mismatch).");
+    return new NativeRuntimeError(reason, "Update the Placekeeper Chrome extension and native service, then reopen this document (protocol-mismatch).");
   }
   return new NativeRuntimeError(reason, `Chrome native runtime ${reason}.`);
 }
@@ -1036,7 +1036,7 @@ export function createNativeEmbeddedReview(options: NativeEmbeddedReviewOptions)
               emitRuntime(reviewResponse(raw, projection!, true, safe));
             }, (error: unknown) => {
               emitRuntime(reviewResponse(raw, projection!, false,
-                error instanceof Error && error.message.startsWith("Review changed.") ? { kind: "export-conflict" } : {}));
+                error instanceof Error && error.message.startsWith("Document changed.") ? { kind: "export-conflict" } : {}));
             }).finally(() => {
               runtimeInvokes = Math.max(0, runtimeInvokes - 1);
               if (runtimeInvokes === 0 && refreshRequested) requestRefresh();

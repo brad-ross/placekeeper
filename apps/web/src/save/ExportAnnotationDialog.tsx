@@ -34,7 +34,7 @@ export function ExportAnnotationDialog(props: {
         }
         trapDialogFocus(event);
       }}>
-      <header className="compact-editorial-modal__header"><h2 id={titleId}>Export reviewed PDF</h2></header>
+      <header className="compact-editorial-modal__header"><h2 id={titleId}>Export Annotated Document</h2></header>
       <div className="compact-editorial-modal__body">
         <AnnotationNameField value={name} onChange={setName} disabled={props.pending}
           error={props.error} errorId={errorId} inputRef={firstRef} />

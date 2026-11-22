@@ -181,7 +181,7 @@ export function reconciliationCommandRejectionMessage(result: unknown): string |
   if (typeof result === "object" && result !== null && "accepted" in result && result.accepted === false) {
     return "message" in result && typeof result.message === "string"
       ? result.message
-      : "The review state changed. Refresh the target and try again.";
+      : "The document state changed. Refresh the target and try again.";
   }
   return null;
 }
@@ -764,7 +764,7 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
     } catch {
       acceptedFocusKeyRef.current = null;
       acceptedFocusPendingRef.current = false;
-      setMessage("The review state changed or the command was rejected. Nothing was moved.");
+      setMessage("The document state changed or the command was rejected. Nothing was moved.");
     } finally {
       setPending(false);
     }
@@ -976,7 +976,7 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
         </div>
       </section> : null}
       {detail.mode === "discard" ? <section className="reconciliation-workspace__resolution" data-discard-confirmation>
-        <p className="reconciliation-workspace__instruction">Discard this annotation from the reviewed PDF?</p>
+        <p className="reconciliation-workspace__instruction">Discard this annotation from the Annotated Document?</p>
         <div className="comment-composer__actions reconciliation-workspace__editor-actions">
           <button className="review-button review-button--secondary" type="button" title="Cancel" disabled={pending} onClick={closeDetail}><span>Cancel</span></button>
           <button className="review-button review-button--secondary reconciliation-workspace__destructive" type="button" title="Discard this annotation" disabled={pending} onClick={() => void submit(discardCommand(activeRecord.target))}><span>Discard</span></button>

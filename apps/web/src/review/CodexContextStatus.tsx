@@ -30,7 +30,7 @@ export function CodexContextStatus({ status }: CodexContextStatusProps) {
         ? 'Connecting this PDF to your agent.'
         : 'Reopen this PDF from your agent to restore live context.';
   const accessibleLabel = current
-    ? `${title} at review revision ${status.identity.reviewRevision}`
+    ? `${title} at revision ${status.identity.reviewRevision}`
     : `${title}. ${detail}`;
 
   const positionTooltip = () => {

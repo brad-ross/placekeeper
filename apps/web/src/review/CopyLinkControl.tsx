@@ -200,7 +200,7 @@ export function CopyLinkControl({
       {status.status === 'success' ? (
         <span className="sr-only" role="status">Link copied.</span>
       ) : null}
-      {status.status === 'unavailable' ? <p role="alert">Link unavailable. Retry from the current review.</p> : null}
+      {status.status === 'unavailable' ? <p role="alert">Link unavailable. Retry from the current document.</p> : null}
       {status.status === 'failure' ? (
         <div className="copy-link-control__fallback">
           <p role="alert">Clipboard access failed. Copy the link below.</p>

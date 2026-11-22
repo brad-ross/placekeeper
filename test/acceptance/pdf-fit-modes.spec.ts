@@ -313,7 +313,7 @@ test('selection, page notes, and distant destinations follow shifted page geomet
   await page.mouse.down();
   await page.mouse.move(first!.x + 270 * initialScale, first!.y + 116 * initialScale, { steps: 12 });
   await page.mouse.up();
-  await expect(page.getByRole('toolbar', { name: 'Selection review actions' })).toBeVisible();
+  await expect(page.getByRole('toolbar', { name: 'Selection actions' })).toBeVisible();
   await expect(page.locator('[data-pdf-native-selection-bridge="main"]')).toHaveText(/^Body page 01 line 03: selectab/u);
   await page.keyboard.press('Escape');
   await addStaticKeyboardPageNote(page, 'A note on the aligned page');

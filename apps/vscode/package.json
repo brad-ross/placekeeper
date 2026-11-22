@@ -1,7 +1,7 @@
 {
   "name": "placekeeper-vscode",
   "displayName": "Placekeeper",
-  "description": "Review generated LaTeX PDFs with Placekeeper inside VS Code.",
+  "description": "Read and annotate generated LaTeX PDFs with Placekeeper inside VS Code.",
   "version": "0.3.2",
   "type": "module",
   "publisher": "placekeeper-local",
@@ -55,11 +55,11 @@
       },
       {
         "command": "placekeeper.reattach",
-        "title": "Placekeeper: Reattach Review Item"
+        "title": "Placekeeper: Reattach Annotation"
       },
       {
         "command": "placekeeper.exportReviewedPdf",
-        "title": "Placekeeper: Export Reviewed PDF"
+        "title": "Placekeeper: Export Annotated Document"
       },
       {
         "command": "placekeeper.configureLatexWorkshop",

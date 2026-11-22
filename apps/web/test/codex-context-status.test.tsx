@@ -18,7 +18,7 @@ describe("Codex live context status", () => {
     }} />);
 
     expect(html).toContain('data-codex-context="current"');
-    expect(html).toContain('aria-label="Agent context current at review revision 3"');
+    expect(html).toContain('aria-label="Agent context current at revision 3"');
     expect(html).toContain("lucide-bot");
     expect(html).toContain("PDF content and annotations are synced with the connected agent");
     expect(html).not.toContain("Codex");
