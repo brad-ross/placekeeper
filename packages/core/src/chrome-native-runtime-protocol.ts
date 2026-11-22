@@ -1,6 +1,6 @@
 import {
   DOCUMENT_RUNTIME_VERSION,
-  isDocumentRuntimeMethodForHost,
+  canonicalDocumentRuntimeMethodForHost,
   sanitizeChromeDocumentRuntimeRequest,
   sanitizeChromeDocumentRuntimeResponse,
   type DocumentRuntimeBrokerMethod,
@@ -60,6 +60,43 @@ export type ChromeRuntimeHostMessage = RuntimeEnvelope & (
   | { readonly lane: ChromeRuntimeLane; readonly type: "failure"; readonly requestId?: string; readonly reason: string }
   | { readonly lane: "lifecycle"; readonly type: "update-required"; readonly requestId?: string }
 );
+
+/**
+ * Handshake field that carries DOCUMENT_RUNTIME_VERSION in `hello` and
+ * `hello-ack`. The Chrome extension (store-updated) and the native service
+ * upgrade independently, and both sides check handshake keys exactly, so the
+ * sender must keep the legacy spelling until every peer in the field accepts
+ * the new one.
+ *
+ * TODO(0.4.0): send CHROME_RUNTIME_DOCUMENT_VERSION_KEY once the oldest
+ * supported Chrome extension and service are 0.3.3 or later (the first release
+ * that accepts both spellings); keep accepting the legacy key on receive.
+ */
+export const CHROME_RUNTIME_LEGACY_DOCUMENT_VERSION_KEY = "reviewRuntimeVersion" as const;
+export const CHROME_RUNTIME_DOCUMENT_VERSION_KEY = "documentRuntimeVersion" as const;
+type HandshakeVersionKey = typeof CHROME_RUNTIME_LEGACY_DOCUMENT_VERSION_KEY | typeof CHROME_RUNTIME_DOCUMENT_VERSION_KEY;
+
+/** Returns the one handshake version key present on `value`, if exactly one is. */
+function handshakeVersionKey(value: Record<string, unknown>): HandshakeVersionKey | undefined {
+  const legacy = Object.hasOwn(value, CHROME_RUNTIME_LEGACY_DOCUMENT_VERSION_KEY);
+  const current = Object.hasOwn(value, CHROME_RUNTIME_DOCUMENT_VERSION_KEY);
+  if (legacy === current) return undefined;
+  return legacy ? CHROME_RUNTIME_LEGACY_DOCUMENT_VERSION_KEY : CHROME_RUNTIME_DOCUMENT_VERSION_KEY;
+}
+
+/** The document runtime version a peer announced under either handshake key. */
+export function chromeRuntimeHandshakeDocumentVersion(value: unknown): unknown {
+  if (!record(value)) return undefined;
+  const key = handshakeVersionKey(value);
+  return key === undefined ? undefined : value[key];
+}
+
+function normalizedHandshake(value: Record<string, unknown>, key: HandshakeVersionKey): Record<string, unknown> | undefined {
+  if (value[key] !== DOCUMENT_RUNTIME_VERSION) return undefined;
+  if (key === CHROME_RUNTIME_LEGACY_DOCUMENT_VERSION_KEY) return value;
+  const { [key]: version, ...rest } = value;
+  return { ...rest, [CHROME_RUNTIME_LEGACY_DOCUMENT_VERSION_KEY]: version };
+}
 
 export type ChromeRuntimeProjectionChangeReason = "generation" | "revision" | "save" | "recovery" | "presence";
 
@@ -148,8 +185,10 @@ function safeFileSource(value: unknown): value is string {
 export function parseChromeRuntimeExtensionMessage(value: unknown): ChromeRuntimeExtensionMessage | undefined {
   if (!record(value) || !validEnvelope(value) || typeof value.type !== "string") return undefined;
   if (value.type === "hello") {
-    return exact(value, ["type", "protocol", "protocolVersion", "reviewRuntimeVersion", "connectionId"]) &&
-      value.reviewRuntimeVersion === DOCUMENT_RUNTIME_VERSION && value.protocol === CHROME_RUNTIME_PROTOCOL ? value as unknown as ChromeRuntimeHello : undefined;
+    const versionKey = handshakeVersionKey(value);
+    return versionKey !== undefined &&
+      exact(value, ["type", "protocol", "protocolVersion", versionKey, "connectionId"]) &&
+      value.protocol === CHROME_RUNTIME_PROTOCOL ? normalizedHandshake(value, versionKey) as unknown as ChromeRuntimeHello : undefined;
   }
   if (typeof value.lane !== "string" || !safeId(value.requestId)) return undefined;
   const base = ["type", "lane", "protocolVersion", "connectionId", "requestId"];
@@ -185,14 +224,15 @@ export function parseChromeRuntimeExtensionMessage(value: unknown): ChromeRuntim
     const keys = value.idempotencyKey === undefined
       ? [...base, "generation", "revision", "method", "payload"]
       : [...base, "generation", "revision", "method", "payload", "idempotencyKey"];
-    if (!exact(value, keys) || !isDocumentRuntimeMethodForHost("chrome", value.method) ||
-      value.method === "bootstrap" || value.method === "presence" || value.method === "detach" ||
+    const method = canonicalDocumentRuntimeMethodForHost("chrome", value.method);
+    if (!exact(value, keys) || method === undefined ||
+      method === "bootstrap" || method === "presence" || method === "detach" ||
       !safeInteger(value.generation) || !safeInteger(value.revision) ||
       (value.idempotencyKey !== undefined && (typeof value.idempotencyKey !== "string" || !OPERATION_KEY.test(value.idempotencyKey)))) return undefined;
-    const payload = sanitizeChromeDocumentRuntimeRequest(value.method, value.payload);
+    const payload = sanitizeChromeDocumentRuntimeRequest(method, value.payload);
     return payload === undefined
       ? undefined
-      : { ...value, payload } as unknown as ChromeRuntimeExtensionMessage;
+      : { ...value, method, payload } as unknown as ChromeRuntimeExtensionMessage;
   }
   if (value.lane === "resource" && value.type === "read") {
     return exact(value, [...base, "resource", "generation", "offset", "length"]) && value.resource === "document" &&
@@ -265,9 +305,11 @@ export function sanitizeChromeRuntimeProjection(value: unknown): unknown | undef
 export function parseChromeRuntimeHostMessage(value: unknown): ChromeRuntimeHostMessage | undefined {
   if (!record(value) || !validEnvelope(value) || typeof value.type !== "string" || containsForbiddenKey(value)) return undefined;
   if (value.type === "hello-ack") {
-    return exact(value, ["type", "protocol", "protocolVersion", "reviewRuntimeVersion", "connectionId", "leaseMs"]) &&
-      value.reviewRuntimeVersion === DOCUMENT_RUNTIME_VERSION && value.protocol === CHROME_RUNTIME_PROTOCOL && safeInteger(value.leaseMs) && (value.leaseMs as number) >= 1_000
-      ? value as unknown as ChromeRuntimeHostMessage : undefined;
+    const versionKey = handshakeVersionKey(value);
+    return versionKey !== undefined &&
+      exact(value, ["type", "protocol", "protocolVersion", versionKey, "connectionId", "leaseMs"]) &&
+      value.protocol === CHROME_RUNTIME_PROTOCOL && safeInteger(value.leaseMs) && (value.leaseMs as number) >= 1_000
+      ? normalizedHandshake(value, versionKey) as unknown as ChromeRuntimeHostMessage : undefined;
   }
   if (typeof value.lane !== "string") return undefined;
   if (value.type === "failure") {
@@ -316,10 +358,12 @@ export function parseChromeRuntimeHostMessage(value: unknown): ChromeRuntimeHost
   }
   if (value.type === "result") {
     if (value.lane !== "runtime" || !exact(value, ["type", "lane", "protocolVersion", "connectionId", "requestId", "method", "payload"]) ||
-      !safeId(value.requestId) || !isDocumentRuntimeMethodForHost("chrome", value.method) || value.method === "bootstrap") return undefined;
-    const payload = sanitizeChromeDocumentRuntimeResponse(value.method, value.payload);
+      !safeId(value.requestId)) return undefined;
+    const method = canonicalDocumentRuntimeMethodForHost("chrome", value.method);
+    if (method === undefined || method === "bootstrap") return undefined;
+    const payload = sanitizeChromeDocumentRuntimeResponse(method, value.payload);
     return payload === undefined
-      ? undefined : { ...value, payload } as unknown as ChromeRuntimeHostMessage;
+      ? undefined : { ...value, method, payload } as unknown as ChromeRuntimeHostMessage;
   }
   if (value.type === "invalidation") {
     return value.lane === "runtime" && exact(value, ["type", "lane", "protocolVersion", "connectionId", "revision", "generation", "reason"]) &&

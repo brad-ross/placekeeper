@@ -142,7 +142,7 @@ test.each(['0.1.0+codex.old', undefined, 42])('Codex identifies a stale or unver
   assert.match(result.message, /older|different.*version/);
   assert.match(result.message, /update or reinstall/);
   assert.match(result.message, /quit.*restart/i);
-  assert.match(result.message, /display_review/);
+  assert.match(result.message, /display_document/);
 });
 
 test.each(['manual', 'preview', 'setup'])('Zed %s choice reaches the coordinated helper with its mode', async choice => {

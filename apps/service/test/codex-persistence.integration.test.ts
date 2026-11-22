@@ -56,7 +56,7 @@ async function fixture(realNative = false) {
   let time = 1000;
   const manager = new CodexRuntimeManager(broker, { backend, now: () => new Date(time), panelLeaseMs: 100 });
   cleanups.push(async () => { await manager.close(); await saving.drain(); await broker.quiesceForShutdown(); await rm(root, { recursive: true, force: true }); });
-  const opened = await broker.openReview({ pdfPath, surface: "codex-native",  });
+  const opened = await broker.openDocument({ pdfPath, surface: "codex-native",  });
   if (opened.kind === "recovery-offered") throw new Error("recovery");
   const sessionId = opened.launch.sessionId;
   // Build the closed pending envelope explicitly, keeping metadata out of requests.
@@ -185,9 +185,9 @@ describe("native persistence composition", () => {
     const broker = new SessionBroker({ recoveryRoot: f.broker.recoveryRoot });
     await broker.initialize();
     cleanups.unshift(async () => { await broker.quiesceForShutdown(); });
-    const offer = await broker.openReview({ pdfPath: f.pdfPath, surface: "codex-native" });
+    const offer = await broker.openDocument({ pdfPath: f.pdfPath, surface: "codex-native" });
     if (offer.kind !== "recovery-offered") throw new Error("Expected durable review recovery");
-    const resumed = await broker.openReview({ pdfPath: f.pdfPath, surface: "codex-native", recoveryDecision: "resume", recoveryOffer: offer.recoveryOffer, recoveryOperationId: "resume_identity_proof" });
+    const resumed = await broker.openDocument({ pdfPath: f.pdfPath, surface: "codex-native", recoveryDecision: "resume", recoveryOffer: offer.recoveryOffer, recoveryOperationId: "resume_identity_proof" });
     if (resumed.kind === "recovery-offered") throw new Error("Recovery did not resume");
     const resumedId = resumed.launch.sessionId;
     const restoredPdf = await PDFDocument.load(await readFile(f.pdfPath));

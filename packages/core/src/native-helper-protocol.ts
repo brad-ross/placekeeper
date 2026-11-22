@@ -5,7 +5,7 @@ import {
   type PlacekeeperLinkLocation,
 } from "./placekeeper-link.js";
 import {
-  isDocumentRuntimeMethodForHost,
+  canonicalDocumentRuntimeMethodForHost,
   sanitizeNativeDocumentRuntimeRequest,
   sanitizeNativeDocumentRuntimeResponse,
   type DocumentRuntimeBrokerMethod,
@@ -212,13 +212,14 @@ export function parseNativeDocumentHelperMessage(host: NativeRuntimeHost, value:
     const keys = value.idempotencyKey === undefined
       ? [...base, "generation", "revision", "method", "payload"]
       : [...base, "generation", "revision", "method", "payload", "idempotencyKey"];
-    if (!exact(value, keys) || !isDocumentRuntimeMethodForHost(host, value.method)
-      || value.method === "bootstrap" || value.method === "presence" || value.method === "detach"
+    const method = canonicalDocumentRuntimeMethodForHost(host, value.method);
+    if (!exact(value, keys) || method === undefined
+      || method === "bootstrap" || method === "presence" || method === "detach"
       || !integer(value.generation) || value.generation < 1 || !integer(value.revision)
       || (value.idempotencyKey !== undefined
         && (typeof value.idempotencyKey !== "string" || !OPERATION_ID.test(value.idempotencyKey)))) return undefined;
-    const payload = sanitizeNativeDocumentRuntimeRequest(host, value.method, value.payload);
-    return payload === undefined ? undefined : { ...value, payload } as unknown as NativeDocumentHelperMessage;
+    const payload = sanitizeNativeDocumentRuntimeRequest(host, method, value.payload);
+    return payload === undefined ? undefined : { ...value, method, payload } as unknown as NativeDocumentHelperMessage;
   }
   if (value.type === "read-resource") {
     return exact(value, [...base, "resourceId", "generation", "role", "offset", "length"])
@@ -309,10 +310,11 @@ export function validNativeDocumentHelperResponse(host: NativeRuntimeHost, value
       && ["revision", "generation", "save", "recovery", "presence"].includes(String(value.reason));
   }
   if (value.type === "result") {
+    const method = canonicalDocumentRuntimeMethodForHost(host, value.method);
     return exact(value, [...base, "method", "payload"])
-      && isDocumentRuntimeMethodForHost(host, value.method)
-      && value.method !== "bootstrap" && value.method !== "presence" && value.method !== "detach"
-      && sanitizeNativeDocumentRuntimeResponse(host, value.method, value.payload) !== undefined;
+      && method !== undefined
+      && method !== "bootstrap" && method !== "presence" && method !== "detach"
+      && sanitizeNativeDocumentRuntimeResponse(host, method, value.payload) !== undefined;
   }
   if (value.type === "resource-bytes") {
     return exact(value, [...base, "sequence", "data", "done"]) && integer(value.sequence)

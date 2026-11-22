@@ -293,13 +293,13 @@ export class ChromeServiceRuntimeBackend implements ChromeRuntimeBackend {
         finished = true;
         const canonicalPath = await this.#transferStore.canonicalizeLocal(fileUrl);
         const workflow = request.initialWorkflowMode === undefined ? {} : { initialWorkflowMode: request.initialWorkflowMode };
-        const opened = await this.#broker.openReview({ pdfPath: canonicalPath, surface: this.#runtimeHost, ...workflow });
+        const opened = await this.#broker.openDocument({ pdfPath: canonicalPath, surface: this.#runtimeHost, ...workflow });
         if (opened.kind === "recovery-offered") {
           return {
             choices: ["resume", "discard", "fork"],
             offer: opened.recoveryOffer,
             choose: async (decision, operationId) => {
-              const recovered = await this.#broker.openReview({
+              const recovered = await this.#broker.openDocument({
                 pdfPath: canonicalPath,
                 surface: this.#runtimeHost,
                 ...workflow,
@@ -344,7 +344,7 @@ export class ChromeServiceRuntimeBackend implements ChromeRuntimeBackend {
         choices: ["resume", "discard", "fork"],
         offer: opened.recoveryOffer,
         choose: async (decision, operationId) => {
-          const recovered = await this.#broker.openReview({
+          const recovered = await this.#broker.openDocument({
             pdfPath: recoveryPath,
             surface: "chrome",
             recoveryDecision: decision,

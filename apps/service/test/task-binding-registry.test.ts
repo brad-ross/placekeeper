@@ -226,7 +226,7 @@ describe("task-scoped PDF binding registry", () => {
     });
 
     for (const capability of [BROWSER_CAPABILITY, secondCapability]) {
-      expect(registry.statusForReview("review-a", {
+      expect(registry.statusForDocument("review-a", {
         documentGeneration: 1,
         reviewRevision: 0,
         sourceDigest: "a".repeat(64),
@@ -309,7 +309,7 @@ describe("task-scoped PDF binding registry", () => {
       browserCapabilityHash: otherDiscriminator,
     })).toEqual({ status: "ignored" });
     expect(registry.bindingForTask("task-a")?.leaseExpiresAt).toBe(originalExpiry);
-    expect(registry.statusForReview("review-a", {
+    expect(registry.statusForDocument("review-a", {
       documentGeneration: 1,
       reviewRevision: 0,
       sourceDigest: "a".repeat(64),
@@ -322,7 +322,7 @@ describe("task-scoped PDF binding registry", () => {
       browserCapabilityHash: activeDiscriminator,
     })).toMatchObject({ status: "active" });
     expect(registry.bindingForTask("task-a")?.leaseExpiresAt).not.toBe(originalExpiry);
-    expect(registry.statusForReview("review-a", {
+    expect(registry.statusForDocument("review-a", {
       documentGeneration: 1,
       reviewRevision: 0,
       sourceDigest: "a".repeat(64),
@@ -347,31 +347,31 @@ describe("task-scoped PDF binding registry", () => {
     const verified = verifiedIdentity();
     expect(registry.markVerified("task-a", verified)).toBe(true);
 
-    expect(registry.statusForReview("review-a", {
+    expect(registry.statusForDocument("review-a", {
       documentGeneration: 1,
       reviewRevision: 4,
       sourceDigest: "a".repeat(64),
       stateDigest: verified.stateDigest,
     }, digestSecretHex(BROWSER_CAPABILITY))).toMatchObject({ status: "current", identity: verified });
-    expect(registry.statusForReview("review-a", {
+    expect(registry.statusForDocument("review-a", {
       documentGeneration: 1,
       reviewRevision: 4,
       sourceDigest: "a".repeat(64),
       stateDigest: "d".repeat(64),
     }, digestSecretHex(BROWSER_CAPABILITY))).toMatchObject({ status: "refreshing", lastVerified: verified });
-    expect(registry.statusForReview("review-a", {
+    expect(registry.statusForDocument("review-a", {
       documentGeneration: 1,
       reviewRevision: 5,
       sourceDigest: "a".repeat(64),
       stateDigest: verified.stateDigest,
     }, digestSecretHex(BROWSER_CAPABILITY))).toMatchObject({ status: "refreshing", lastVerified: verified });
-    expect(registry.statusForReview("review-a", {
+    expect(registry.statusForDocument("review-a", {
       documentGeneration: 1,
       reviewRevision: 4,
       sourceDigest: "c".repeat(64),
       stateDigest: verified.stateDigest,
     }, digestSecretHex(BROWSER_CAPABILITY))).toMatchObject({ status: "refreshing", lastVerified: verified });
-    expect(registry.statusForReview("review-a", {
+    expect(registry.statusForDocument("review-a", {
       documentGeneration: 2,
       reviewRevision: 4,
       sourceDigest: "a".repeat(64),

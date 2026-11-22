@@ -298,6 +298,7 @@ class NativeRuntimeChannel {
   async negotiate(interactionOwnerSecret?: string, signal?: AbortSignal): Promise<boolean> {
     const reply = await this.#requestInternal({
       type: "hello",
+      // Legacy handshake key: see CHROME_RUNTIME_LEGACY_DOCUMENT_VERSION_KEY for when it can flip.
       reviewRuntimeVersion: DOCUMENT_RUNTIME_VERSION,
       protocol: CHROME_RUNTIME_PROTOCOL,
       protocolVersion: CHROME_RUNTIME_PROTOCOL_VERSION,

@@ -38,7 +38,7 @@ export class DocumentConflictError extends Error {
 
   constructor(expected: number, actual: number) {
     super(`Expected review revision ${expected}, but current revision is ${actual}`);
-    this.name = "ReviewConflictError";
+    this.name = "DocumentConflictError";
   }
 }
 
@@ -47,7 +47,7 @@ export class DocumentDraftConflictError extends Error {
 
   constructor(expected: number, actual: number) {
     super(`Expected draft revision ${expected}, but current draft revision is ${actual}`);
-    this.name = "ReviewDraftConflictError";
+    this.name = "DocumentDraftConflictError";
   }
 }
 

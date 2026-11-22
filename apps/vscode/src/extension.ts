@@ -77,7 +77,17 @@ import {
 
 const VIEW_COMMANDS = ["placekeeper.open", "placekeeper.viewPdf"] as const;
 const RECONNECT_DOCUMENT_MESSAGE = "Reopen this PDF in Placekeeper to reconnect its annotations.";
+/**
+ * Webview viewType. VS Code serializes open panels under this id and restores
+ * them through the serializer registered for it; user keybindings and `when`
+ * clauses (`activeWebviewPanelId`, `webviewId`) also match it. Renaming it would
+ * orphan panels saved by older versions and silently break those keybindings,
+ * so it intentionally keeps its original value.
+ */
 const PANEL_TYPE = "placekeeper.review";
+export const EXPORT_ANNOTATED_DOCUMENT_COMMAND = "placekeeper.exportAnnotatedDocument";
+/** Deprecated alias of EXPORT_ANNOTATED_DOCUMENT_COMMAND, hidden from the Command Palette. */
+export const LEGACY_EXPORT_ANNOTATED_DOCUMENT_COMMAND = "placekeeper.exportReviewedPdf";
 const PANEL_BINDINGS_KEY = "placekeeper.panel-bindings.v1";
 const COMPATIBILITY_SETUP_KEY = "placekeeper.latex-workshop-setup.v1";
 const REVALIDATE_INTERVAL_MS = 30_000;
@@ -635,10 +645,26 @@ export function activate(context: vscode.ExtensionContext): void {
       await activePanel.webview.postMessage({
         protocol: DOCUMENT_RUNTIME_PROTOCOL, version: DOCUMENT_RUNTIME_VERSION,
         kind: "event", event: "host-command", panelId: runtime.client.identity.panelId,
-        payload: { command: "review-command", id },
+        payload: { command: "document-command", id },
       });
     }));
   }
+  const exportAnnotatedDocument = async (): Promise<void> => {
+    const runtime = activePanel === undefined ? undefined : runtimes.get(activePanel);
+    if (runtime === undefined) {
+      await vscode.window.showInformationMessage("Open a generated PDF in Placekeeper first.");
+      return;
+    }
+    const posted = await activePanel!.webview.postMessage({
+      protocol: DOCUMENT_RUNTIME_PROTOCOL,
+      version: DOCUMENT_RUNTIME_VERSION,
+      kind: "event",
+      event: "host-command",
+      panelId: runtime.client.identity.panelId,
+      payload: { command: "export-annotated-document" },
+    });
+    if (!posted) await vscode.window.showInformationMessage(RECONNECT_DOCUMENT_MESSAGE);
+  };
   for (const command of VIEW_COMMANDS) context.subscriptions.push(vscode.commands.registerCommand(command, view));
   context.subscriptions.push(
     vscode.commands.registerCommand("placekeeper.forwardSyncTex", async (...args: unknown[]) => {
@@ -713,22 +739,10 @@ export function activate(context: vscode.ExtensionContext): void {
       });
       if (!posted) await vscode.window.showInformationMessage(RECONNECT_DOCUMENT_MESSAGE);
     }),
-    vscode.commands.registerCommand("placekeeper.exportReviewedPdf", async () => {
-      const runtime = activePanel === undefined ? undefined : runtimes.get(activePanel);
-      if (runtime === undefined) {
-        await vscode.window.showInformationMessage("Open a generated PDF in Placekeeper first.");
-        return;
-      }
-      const posted = await activePanel!.webview.postMessage({
-        protocol: DOCUMENT_RUNTIME_PROTOCOL,
-        version: DOCUMENT_RUNTIME_VERSION,
-        kind: "event",
-        event: "host-command",
-        panelId: runtime.client.identity.panelId,
-        payload: { command: "export-reviewed-pdf" },
-      });
-      if (!posted) await vscode.window.showInformationMessage(RECONNECT_DOCUMENT_MESSAGE);
-    }),
+    vscode.commands.registerCommand(EXPORT_ANNOTATED_DOCUMENT_COMMAND, exportAnnotatedDocument),
+    // Deprecated alias kept for user keybindings and scripts that name the old id.
+    // package.json hides it from the Command Palette.
+    vscode.commands.registerCommand(LEGACY_EXPORT_ANNOTATED_DOCUMENT_COMMAND, exportAnnotatedDocument),
     vscode.commands.registerCommand("placekeeper.configureLatexWorkshop", async () => {
       if (!vscode.workspace.isTrusted) { await vscode.window.showWarningMessage("Trust this workspace before changing LaTeX Workshop settings."); return; }
       const runtime = activePanel === undefined ? undefined : runtimes.get(activePanel);

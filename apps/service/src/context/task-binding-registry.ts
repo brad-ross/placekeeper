@@ -668,7 +668,7 @@ export class TaskBindingRegistry {
     return this.#expiredTasks.has(taskSessionId) ? "expired" : "unbound";
   }
 
-  statusForReview(
+  statusForDocument(
     documentSessionId: string,
     live: LiveDocumentIdentity,
     browserCapabilityHash: string,

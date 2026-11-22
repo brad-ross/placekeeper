@@ -43,7 +43,7 @@ export class LocalDocumentBackend {
       // Establish the durable recovery boundary before attempting a side
       // effect. A rejected operation may conservatively retain a clean draft;
       // a committed operation can never lose its protection marker.
-      await this.#broker.protectChromeReview(sessionId);
+      await this.#broker.protectChromeDocument(sessionId);
     }
     options.assertAuthority?.();
     let result: unknown;
@@ -95,7 +95,7 @@ export class LocalDocumentBackend {
         const value = payload as { readonly confirmPossiblyStale?: true; readonly fence?: DocumentExportFence };
         const frozen = await this.#broker.freezeDelivery(sessionId, value.fence, options.expectedDocumentGeneration);
         options.assertAuthority?.();
-        result = await this.#exporting.exportReviewedCopy({
+        result = await this.#exporting.exportAnnotatedCopy({
           ...frozen,
           ...(value.confirmPossiblyStale === true ? { staleConfirmed: true as const } : {}),
         }, options.assertAuthority);
@@ -121,7 +121,7 @@ export class LocalDocumentBackend {
       order: value.order as number,
     };
     if (action === "begin") {
-      return this.#broker.beginReviewInteraction({ ...common, generation: value.generation as number,
+      return this.#broker.beginDocumentInteraction({ ...common, generation: value.generation as number,
         ...(typeof value.draftId === "string" ? { draftId: value.draftId } : {}) });
     }
     if (action === "release") return this.#broker.releaseDocumentInteraction(common);

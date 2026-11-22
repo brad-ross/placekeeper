@@ -61,6 +61,37 @@ describe("Chrome runtime protocol v2", () => {
     })).toBeUndefined();
   });
 
+  it("accepts the renamed documentRuntimeVersion handshake key while peers still send the legacy key", () => {
+    const hello = { type: "hello", protocol: CHROME_RUNTIME_PROTOCOL, protocolVersion: 2, connectionId };
+    // A newer peer may send the renamed key; it is normalized to the legacy key
+    // that this build still sends and forwards.
+    expect(validateRuntimeExtensionMessage({ ...hello, documentRuntimeVersion: 4 }))
+      .toEqual({ ...hello, reviewRuntimeVersion: 4 });
+    expect(validateRuntimeExtensionMessage({ ...hello, reviewRuntimeVersion: 4 }))
+      .toEqual({ ...hello, reviewRuntimeVersion: 4 });
+    expect(validateRuntimeExtensionMessage({ ...hello, reviewRuntimeVersion: 4, documentRuntimeVersion: 4 }))
+      .toBeUndefined();
+    expect(validateRuntimeExtensionMessage({ ...hello, documentRuntimeVersion: 3 })).toBeUndefined();
+    const ack = { type: "hello-ack", protocol: CHROME_RUNTIME_PROTOCOL, protocolVersion: 2, connectionId, leaseMs: 90_000 };
+    expect(parseRuntimeHostMessage({ ...ack, reviewRuntimeVersion: 4 })).toEqual({ ...ack, reviewRuntimeVersion: 4 });
+    expect(parseRuntimeHostMessage({ ...ack, documentRuntimeVersion: 4 })).toEqual({ ...ack, reviewRuntimeVersion: 4 });
+    expect(parseRuntimeHostMessage({ ...ack, reviewRuntimeVersion: 4, documentRuntimeVersion: 4 })).toBeUndefined();
+    expect(parseRuntimeHostMessage({ ...ack, documentRuntimeVersion: 5 })).toBeUndefined();
+  });
+
+  it("accepts the renamed exportAnnotatedCopy method and normalizes it to the legacy wire spelling", () => {
+    const invoke = { type: "invoke", lane: "runtime", protocolVersion: 2, connectionId,
+      requestId: "request-runtime-1", generation: 1, revision: 0, payload: {}, idempotencyKey: "operation-key-1234567890" };
+    expect(validateRuntimeExtensionMessage({ ...invoke, method: "exportReviewedCopy" })).toMatchObject({ method: "exportReviewedCopy" });
+    expect(validateRuntimeExtensionMessage({ ...invoke, method: "exportAnnotatedCopy" })).toMatchObject({ method: "exportReviewedCopy" });
+    const result = { type: "result", lane: "runtime", protocolVersion: 2, connectionId, requestId: "request-runtime-1",
+      payload: { kind: "annotated-copy", path: "/private/result.pdf", revision: 0, digest: "e".repeat(64) } };
+    for (const method of ["exportReviewedCopy", "exportAnnotatedCopy"]) {
+      expect(parseRuntimeHostMessage({ ...result, method })).toEqual({ ...result, method: "exportReviewedCopy",
+        payload: { kind: "reviewed-copy", path: "Annotated Document", revision: 0, digest: "e".repeat(64) } });
+    }
+  });
+
   it("accepts only closed, lane-specific v2 messages", () => {
     expect(validateRuntimeExtensionMessage({
       type: "begin", lane: "acquisition", protocolVersion: 2, connectionId,

@@ -157,21 +157,25 @@ export type PlacekeeperControlRequest =
       readonly handle: string;
       readonly request: PdfEvidenceRequest;
     }
-  | {
-      readonly kind: "retrieve-review-items-by-handle";
-      readonly handle: string;
-      readonly offset?: number;
-      readonly limit?: number;
-      readonly pageIndex?: number;
-      readonly maxBytes?: number;
-    }
-  | {
-      readonly kind: "retrieve-review-changes-by-handle";
-      readonly handle: string;
-      readonly offset?: number;
-      readonly limit?: number;
-      readonly maxBytes?: number;
-    };
+  | AnnotationsByHandleRequest<AnnotationsByHandleKind>
+  | AnnotationChangesByHandleRequest<AnnotationChangesByHandleKind>;
+
+/** Distributes over K so each spelling is its own discriminated member. */
+type AnnotationsByHandleRequest<K extends AnnotationsByHandleKind> = K extends unknown ? {
+  readonly kind: K;
+  readonly handle: string;
+  readonly offset?: number;
+  readonly limit?: number;
+  readonly pageIndex?: number;
+  readonly maxBytes?: number;
+} : never;
+type AnnotationChangesByHandleRequest<K extends AnnotationChangesByHandleKind> = K extends unknown ? {
+  readonly kind: K;
+  readonly handle: string;
+  readonly offset?: number;
+  readonly limit?: number;
+  readonly maxBytes?: number;
+} : never;
 
 export type PlacekeeperControlResponse =
   | { readonly kind: "extension-app"; readonly response: ExtensionResult | CodexAppResponse }
@@ -259,6 +263,26 @@ export type PlacekeeperControlResponse =
         | { readonly status: "unavailable"; readonly reason: PdfEvidenceUnavailableReason };
     }
   | { readonly kind: "error"; readonly reason: "invalid-request" | "unavailable" };
+
+/**
+ * Control request kinds for `placekeeper context items|changes`, legacy
+ * spelling first. A long-lived daemon can be older or newer than the CLI that
+ * talks to it, so the daemon accepts both spellings and the CLI keeps sending
+ * the legacy one.
+ *
+ * TODO(0.4.0): send the renamed kinds from the CLI once no supported daemon
+ * older than 0.3.3 (the first release that accepts them) can still be running.
+ */
+export const ANNOTATIONS_BY_HANDLE_KINDS = ["retrieve-review-items-by-handle", "retrieve-annotations-by-handle"] as const;
+export const ANNOTATION_CHANGES_BY_HANDLE_KINDS = ["retrieve-review-changes-by-handle", "retrieve-annotation-changes-by-handle"] as const;
+export type AnnotationsByHandleKind = typeof ANNOTATIONS_BY_HANDLE_KINDS[number];
+export type AnnotationChangesByHandleKind = typeof ANNOTATION_CHANGES_BY_HANDLE_KINDS[number];
+export function isAnnotationsByHandleKind(value: unknown): value is AnnotationsByHandleKind {
+  return (ANNOTATIONS_BY_HANDLE_KINDS as readonly unknown[]).includes(value);
+}
+export function isAnnotationChangesByHandleKind(value: unknown): value is AnnotationChangesByHandleKind {
+  return (ANNOTATION_CHANGES_BY_HANDLE_KINDS as readonly unknown[]).includes(value);
+}
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -370,7 +394,7 @@ export function isControlRequest(value: unknown): value is PlacekeeperControlReq
       typeof value.documentGeneration === "number" &&
       typeof value.bindProof === "string";
   }
-  if (value.kind === "retrieve-review-items-by-handle" || value.kind === "retrieve-review-changes-by-handle") {
+  if (isAnnotationsByHandleKind(value.kind) || isAnnotationChangesByHandleKind(value.kind)) {
     return typeof value.handle === "string";
   }
   if (value.kind === "retrieve-evidence" || value.kind === "retrieve-evidence-by-handle") {

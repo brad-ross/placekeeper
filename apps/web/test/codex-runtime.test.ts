@@ -221,8 +221,8 @@ it('restarts same-generation pending manifests and retains only fulfilled verifi
 it('maps only typed current native export conflicts to shared recovery guidance', async () => {
   const f = fixture(); await f.runtime.bootstrap();
   f.call.mockRejectedValueOnce(new NativeOperationError());
-  await expect(f.runtime.exportReviewedCopy?.(undefined, { expectedRevision: 0, documentGeneration: 1 })).rejects.toThrow('Document changed. Confirm the annotation name again to export the latest version.');
+  await expect(f.runtime.exportAnnotatedCopy?.(undefined, { expectedRevision: 0, documentGeneration: 1 })).rejects.toThrow('Document changed. Confirm the annotation name again to export the latest version.');
   f.call.mockRejectedValueOnce(new Error('/private/service/path'));
-  await expect(f.runtime.exportReviewedCopy?.(undefined, { expectedRevision: 0, documentGeneration: 1 })).rejects.toThrow('The native review action or resource could not be verified.');
+  await expect(f.runtime.exportAnnotatedCopy?.(undefined, { expectedRevision: 0, documentGeneration: 1 })).rejects.toThrow('The native review action or resource could not be verified.');
   f.runtime.dispose();
 });

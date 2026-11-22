@@ -29,7 +29,7 @@ export async function nativeBridge(fixture: string, options: { workflowMode?: "g
   const exporting = new ExportCoordinator({ writer, capabilities: broker.capabilities, controls: broker.controls });
   const backend = new CodexServiceRuntimeBackend({ broker, saving, exporting, assetRoot: resolve('dist/web') });
   const manager = new CodexRuntimeManager(broker, { backend });
-  const opened = await broker.openReview({ pdfPath, surface: 'codex-native', ...options });
+  const opened = await broker.openDocument({ pdfPath, surface: 'codex-native', ...options });
   if (opened.kind === 'recovery-offered') throw new Error('Fresh fixture offered recovery');
   const sessionId = opened.launch.sessionId;
   const task = `acceptance-${randomUUID()}`;

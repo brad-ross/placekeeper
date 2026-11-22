@@ -53,7 +53,7 @@ if (new URLSearchParams(location.search).has('runtime')) {
     subscribeHostCommands: next => { listener = next; return () => { listener = undefined; }; },
     scope: async () => scope, saveStatus: async () => saveStatus,
     command: unavailable, saveProposal: unavailable, chooseCopy: unavailable, chooseFolder: unavailable,
-    chooseOriginal: unavailable, retrySave: unavailable, locateSave: unavailable, exportReviewedCopy: unavailable,
+    chooseOriginal: unavailable, retrySave: unavailable, locateSave: unavailable, exportAnnotatedCopy: unavailable,
     forwardSyncTex: async input => { forwardAcks.push(input); return { status: "ok" }; }, reverseSyncTex: async () => { reverseCalls++; return { status: 'ok' }; }, dispose: () => undefined };
   Object.assign(window, { runtimeFixture: { send: (command: HostRuntimeCommand) => listener!(command), reverseCalls: () => reverseCalls, forwardAcks: () => forwardAcks } });
   root.render(<RuntimeProductionReaderApp runtime={runtime} />);

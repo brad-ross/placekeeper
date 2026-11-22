@@ -37,7 +37,7 @@ export class DocumentGenerationConflictError extends Error {
     readonly currentRevision: number,
   ) {
     super(`Review generation ${expectedGeneration} is stale; current generation is ${currentGeneration}`);
-    this.name = "ReviewGenerationConflictError";
+    this.name = "DocumentGenerationConflictError";
   }
 }
 export const LAUNCH_SURFACES = ["browser", "finder", "codex", "codex-native", "vscode", "chrome"] as const;

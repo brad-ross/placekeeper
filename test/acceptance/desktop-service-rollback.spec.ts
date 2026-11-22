@@ -75,7 +75,7 @@ test('packaged desktop to previous desktop to current desktop service rollback p
   const acceptedComment = 'Accepted review content must survive both service switches.';
   const protectedText = 'Acknowledged editor input must survive the retained reader.';
   try {
-    const opened = await seed.openReview({ pdfPath: source, surface: 'codex-native' });
+    const opened = await seed.openDocument({ pdfPath: source, surface: 'codex-native' });
     if (opened.kind !== 'opened') throw new Error('The disposable seed unexpectedly offered recovery');
     sessionId = opened.launch.sessionId;
     const timestamp = new Date().toISOString();

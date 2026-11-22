@@ -242,7 +242,7 @@ describe("explicit original replacement", () => {
     await writeFile(originalPath, original);
     const recoveryRoot = join(directory, "recovery");
     const firstBroker = new SessionBroker({ recoveryRoot });
-    const opened = await firstBroker.openReview({ pdfPath: originalPath });
+    const opened = await firstBroker.openDocument({ pdfPath: originalPath });
     if (opened.kind !== "opened") throw new Error("Expected opened review");
     await firstBroker.acceptMutation(
       opened.launch.sessionId,
@@ -294,13 +294,13 @@ describe("explicit original replacement", () => {
         firstBroker.recordSuccessfulReplacement(sessionId, digest),
     });
     const firstResult = await firstCoordinator.replaceOriginal(firstFrozen);
-    await expect(firstBroker.openReview({ pdfPath: originalPath })).resolves.toMatchObject({
+    await expect(firstBroker.openDocument({ pdfPath: originalPath })).resolves.toMatchObject({
       kind: "focused",
       launch: { sessionId: opened.launch.sessionId },
     });
 
     const restarted = new SessionBroker({ recoveryRoot });
-    const offered = await restarted.openReview({ pdfPath: originalPath });
+    const offered = await restarted.openDocument({ pdfPath: originalPath });
     expect(offered).toEqual({
       kind: "recovery-offered",
       recoverySessionId: opened.launch.sessionId,
@@ -311,14 +311,14 @@ describe("explicit original replacement", () => {
       },
     });
     if (offered.kind !== "recovery-offered") throw new Error("Expected recovery offer");
-    const resumed = await restarted.openReview({
+    const resumed = await restarted.openDocument({
       pdfPath: originalPath,
       recoveryDecision: "resume",
       recoveryOffer: offered.recoveryOffer,
       recoveryOperationId: randomUUID(),
     });
     if (resumed.kind !== "opened") throw new Error("Expected resumed review");
-    await expect(restarted.openReview({ pdfPath: originalPath })).resolves.toMatchObject({
+    await expect(restarted.openDocument({ pdfPath: originalPath })).resolves.toMatchObject({
       kind: "focused",
       launch: { sessionId: resumed.launch.sessionId },
     });
@@ -363,7 +363,7 @@ describe("explicit original replacement", () => {
     await writeFile(originalPath, original);
     const recoveryRoot = join(directory, "recovery");
     const broker = new SessionBroker({ recoveryRoot });
-    const opened = await broker.openReview({ pdfPath: originalPath });
+    const opened = await broker.openDocument({ pdfPath: originalPath });
     if (opened.kind !== "opened") throw new Error("Expected opened review");
     await broker.acceptMutation(
       opened.launch.sessionId,
@@ -408,7 +408,7 @@ describe("explicit original replacement", () => {
     expect(result.warning).toContain("original was replaced");
     expect(await readFile(originalPath)).toEqual(annotated);
     const restarted = new SessionBroker({ recoveryRoot });
-    await expect(restarted.openReview({ pdfPath: originalPath })).resolves.toEqual({
+    await expect(restarted.openDocument({ pdfPath: originalPath })).resolves.toEqual({
       kind: "recovery-offered",
       recoverySessionId: opened.launch.sessionId,
       choices: ["resume", "discard", "fork"],

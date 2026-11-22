@@ -462,7 +462,7 @@ const pendingApi: HostRuntime = {
   chooseOriginal: async () => Promise.reject(new Error("The document is still loading.")),
   retrySave: async () => Promise.reject(new Error("The document is still loading.")),
   locateSave: async () => Promise.reject(new Error("The document is still loading.")),
-  exportReviewedCopy: async () => Promise.reject(new Error("The document is still loading.")),
+  exportAnnotatedCopy: async () => Promise.reject(new Error("The document is still loading.")),
   scope: async () => Promise.reject(new Error("The document is still loading.")),
   forwardSyncTex: async () => Promise.reject(new Error("The document is still loading.")),
   reverseSyncTex: async () => Promise.reject(new Error("The document is still loading.")),
@@ -625,7 +625,7 @@ export function RuntimeProductionReaderApp(props: {
       } : undefined);
       return;
     }
-    if (command.command === "review-command") {
+    if (command.command === "document-command") {
       setHostDocumentCommand((current) => ({ id: command.id, token: (current?.token ?? 0) + 1 }));
       return;
     }
@@ -633,7 +633,7 @@ export function RuntimeProductionReaderApp(props: {
       setHostReattachRequestToken((token) => token + 1);
       return;
     }
-    if (command.command === "export-reviewed-pdf") {
+    if (command.command === "export-annotated-document") {
       setHostExportRequest({ token: ++hostExportSequenceRef.current });
       return;
     }

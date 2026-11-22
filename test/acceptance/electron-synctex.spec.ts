@@ -201,7 +201,7 @@ test.describe('installed Electron editor-command SyncTeX', () => {
       await forward(candidate, session, files.source, 6);
 
       // This is production renderer-presentation evidence, not a screenshot or a
-      // direct acknowledgement assertion. Only review:presentation IPC supplies
+      // direct acknowledgement assertion. Only document:presentation IPC supplies
       // these page/zoom values to the production windows.json persistence path.
       const sourcePath = await realpath(candidate.source);
       await expect.poll(() => readWindowState(statePath), { timeout: 60_000 }).toEqual([

@@ -33,7 +33,7 @@ async function setup(snapshotHooks?: SnapshotHooks) {
   const broker = new SessionBroker({ recoveryRoot: join(root, "recovery"), portableReader: async () => [],
     ...(snapshotHooks === undefined ? {} : { snapshotHooks }),
     inspectGeneration: async () => ({ pageCount: 1, pages: [] }) });
-  const opened = await broker.openReview({ pdfPath: source, surface: "codex-native" });
+  const opened = await broker.openDocument({ pdfPath: source, surface: "codex-native" });
   if (opened.kind === "recovery-offered") throw new Error("unexpected recovery");
   const browserSources = await BrowserSourceStore.create(join(root, "browser-sources"));
   const transferStore = await ChromeTransferStore.create({ root: browserSources.root, validate: async () => {} });
@@ -122,7 +122,7 @@ describe("correlated Electron task launch", () => {
     await manager.handle(helper, { ...envelope, type: "activate", documentValidated: true, requestId: "request_wrong_target_active" });
     const other = join(root, "other.pdf");
     await writeFile(other, "%PDF-1.7\nother document\n%%EOF");
-    const opened = await broker.openReview({ pdfPath: other, surface: "codex-native" });
+    const opened = await broker.openDocument({ pdfPath: other, surface: "codex-native" });
     if (opened.kind === "recovery-offered") throw new Error("unexpected recovery");
     const launch = manager.stageLaunch({ sessionId: opened.launch.sessionId, kind: "opened" })!;
     expect(manager.claimLaunch({ bindProof: launch.bindProof, taskSessionId: "task_wrong_document", reviewSessionId: launch.sessionId, documentGeneration: 1 })).toBe(true);
@@ -246,7 +246,7 @@ describe("correlated Electron task launch", () => {
       }
       await lifecycle.sweepDeadParents();
       expect(lifecycle.activity().appInstances).toBe(2);
-      await broker.protectChromeReview(sessionId);
+      await broker.protectChromeDocument(sessionId);
       blockMutation = true;
       const command = addPageNote(broker.state(sessionId)!, 0, { x: 1, y: 1, width: 2, height: 2 }, "survives parent death");
       const pending = manager.handle(helper, { ...envelope, type: "invoke", method: "command", generation: 1, revision: 0,

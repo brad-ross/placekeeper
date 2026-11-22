@@ -14,11 +14,11 @@ import {
 export const MAX_DOCUMENT_SELECTION_SEGMENTS = 256;
 
 export class InvalidDocumentCommandError extends Error {
-  readonly code = "INVALID_REVIEW_COMMAND";
+  readonly code = "INVALID_DOCUMENT_COMMAND";
 
   constructor(message: string) {
     super(message);
-    this.name = "InvalidReviewCommandError";
+    this.name = "InvalidDocumentCommandError";
   }
 }
 

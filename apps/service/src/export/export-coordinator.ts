@@ -168,7 +168,7 @@ export class ExportCoordinator {
     this.#validateFrozenDelivery = options.validateFrozenDelivery ?? (() => true);
   }
 
-  exportReviewedCopy(delivery: FrozenPdfDelivery, assertAuthority?: () => void): Promise<PdfExportResult> {
+  exportAnnotatedCopy(delivery: FrozenPdfDelivery, assertAuthority?: () => void): Promise<PdfExportResult> {
     assertAuthority?.();
     this.#assertDeliverable(delivery);
     return this.#runOnce(delivery, "copy", () => this.#runCopy(delivery, assertAuthority));
@@ -401,6 +401,7 @@ export class ExportCoordinator {
         warning ??= committedWarning("reviewed-copy");
       }
       return {
+        // Legacy wire kind: see LEGACY_ANNOTATED_COPY_EXPORT_KIND for when it can flip.
         kind: "reviewed-copy",
         path: outputPath,
         revision: delivery.revision,

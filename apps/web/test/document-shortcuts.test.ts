@@ -16,7 +16,7 @@ it('rejects old aliases, composition and extra modifiers', () => {
   }
   expect(documentCommandForShortcut({...base, key:'0', ctrlKey:false})).toBeUndefined();
 });
-it.each(['review', 'editable', 'dialog'] as const)('gates new commands in %s focus', (focusContext) => {
+it.each(['reader', 'editable', 'dialog'] as const)('gates new commands in %s focus', (focusContext) => {
   let invoked = 0;
   const ids = ['fit-width', 'toggle-horizontal-scroll-lock', 'open-outline', 'open-annotations', 'open-references'] as const;
   const surface = createDocumentCommandSurface({
@@ -25,9 +25,9 @@ it.each(['review', 'editable', 'dialog'] as const)('gates new commands in %s foc
     canFitWidth: true, canZoom: true, canToggleHorizontalScrollLock: true, horizontalScrollLocked: true,
     handlers: Object.fromEntries(ids.map((id) => [id, () => { invoked++; }])),
   });
-  for (const id of ids) expect(surface.invoke(id)).toBe(focusContext === 'review'
+  for (const id of ids) expect(surface.invoke(id)).toBe(focusContext === 'reader'
     || (focusContext === 'editable' && (id === 'fit-width' || id === 'open-annotations')));
-  expect(invoked).toBe(focusContext === 'review' ? 5 : focusContext === 'editable' ? 2 : 0);
+  expect(invoked).toBe(focusContext === 'reader' ? 5 : focusContext === 'editable' ? 2 : 0);
   expect(surface.snapshot.commands.find(({id}) => id === 'toggle-horizontal-scroll-lock')?.label).toBe('Unlock Horizontal Scrolling');
 });
 
@@ -35,7 +35,7 @@ it.each([[false, false], [true, false], [false, true], [true, true]])(
   'independently gates outline %s and references %s availability', (canOpenOutline, canOpenReferences) => {
     const invoked: string[] = [];
     const surface = createDocumentCommandSurface({
-      focusContext: 'review', canUndo: false, canRedo: false, canNavigateBack: false,
+      focusContext: 'reader', canUndo: false, canRedo: false, canNavigateBack: false,
       canNavigateForward: false, canFind: false, canOpenAnnotations: true,
       canOpenOutline, canOpenReferences, canOpenSaveOptions: false, canFitWidth: false, canZoom: false,
       handlers: { 'open-outline': () => invoked.push('outline'), 'open-references': () => invoked.push('references') },

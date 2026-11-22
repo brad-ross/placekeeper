@@ -75,7 +75,7 @@ async function fixture(options: {
       pages: [{ pageIndex: 0, text: "rebuilt" }],
     }),
   });
-  const opened = await broker.openReview({
+  const opened = await broker.openDocument({
     pdfPath,
     sourceRootPath: root,
     surface: "codex",

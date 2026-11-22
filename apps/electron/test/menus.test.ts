@@ -4,7 +4,7 @@ vi.mock('electron', () => ({ Menu: { buildFromTemplate: (template: any[]) => { m
 import { installMenus } from '../src/menus.js';
 it('native semantic commands keep increasing tokens across command snapshot and focus rebuilds', () => {
     const send = vi.fn();
-    const focused = () => ({ window: { webContents: { send } } as any, commands: { revision: 4, snapshot: { focusContext: 'review' as const, commands: [{ id: 'find' as const, label: 'Find in PDF', enabled: true }] } } });
+    const focused = () => ({ window: { webContents: { send } } as any, commands: { revision: 4, snapshot: { focusContext: 'reader' as const, commands: [{ id: 'find' as const, label: 'Find in PDF', enabled: true }] } } });
     installMenus(() => {}, focused, () => {}, () => {});
     menu.template.find(item => item.label === 'Document').submenu.find((item: any) => item.label === 'Find in PDF').click();
     installMenus(() => {}, focused, () => {}, () => {});
@@ -21,7 +21,7 @@ it('source navigation menus dispatch only native host commands and configure the
     installMenus(() => {}, focused, () => {}, () => {});
     const submenu = menu.template.find(item => item.label === 'Document').submenu;
     submenu.find((item: any) => item.label === 'Go to Source').click();
-    expect(send).toHaveBeenCalledWith('review:event', expect.objectContaining({ runtimeId: 'window1234', payload: { command: 'reverse-synctex' } }));
+    expect(send).toHaveBeenCalledWith('document:event', expect.objectContaining({ runtimeId: 'window1234', payload: { command: 'reverse-synctex' } }));
     submenu.find((item: any) => item.label === 'Configure Source Navigation…').click();
     expect(configureSource).toHaveBeenCalledOnce();
 });

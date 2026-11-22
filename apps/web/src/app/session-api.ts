@@ -276,7 +276,8 @@ export async function loadProductionSession(session: ProductionSession): Promise
           if (
             isObject(rejected) && rejected.ok === false &&
             isObject(rejected.error) &&
-            rejected.error.kind === "invalid-review-command" &&
+            // "invalid-review-command" is the legacy spelling current services still send.
+            (rejected.error.kind === "invalid-review-command" || rejected.error.kind === "invalid-document-command") &&
             typeof rejected.error.message === "string" &&
             rejected.error.message.length > 0 && rejected.error.message.length <= 512
           ) {
@@ -309,7 +310,7 @@ export async function loadProductionSession(session: ProductionSession): Promise
       locateSave: () => post<SaveStatus>("/save/locate"),
       resolveReadingLocation: (input: ReadingLocationResolutionRequestV1) =>
         post<ReadingLocationResolutionV1>("/reading-location", input),
-      exportReviewedCopy: (confirmPossiblyStale, fence) => post<ProductionExportResult>(
+      exportAnnotatedCopy: (confirmPossiblyStale, fence) => post<ProductionExportResult>(
         "/export",
         { ...(confirmPossiblyStale === true ? { confirmPossiblyStale: true } : {}),
         ...(fence === undefined ? {} : { fence }) },

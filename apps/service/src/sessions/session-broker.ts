@@ -368,7 +368,7 @@ export class SessionBroker {
       this.interactions.authorize(attachment);
   }
 
-  async beginReviewInteraction(input: {
+  async beginDocumentInteraction(input: {
     readonly sessionId: string;
     readonly attachment: DocumentInteractionAttachment;
     readonly generation: number;
@@ -787,7 +787,7 @@ export class SessionBroker {
     };
   }
 
-  async openReview(request: OpenDocumentRequest): Promise<OpenDocumentResult> {
+  async openDocument(request: OpenDocumentRequest): Promise<OpenDocumentResult> {
     await this.initialize();
     this.#recovery.sweep();
     const approvedFile = await this.capabilities.approvePdf(request.pdfPath);
@@ -949,7 +949,7 @@ export class SessionBroker {
       if (exact.length > 1) throw new Error("Host recovery target is ambiguous");
       if (exact[0]) {
         signal?.throwIfAborted();
-        return this.openReview({ pdfPath: this.#draftSnapshotPath(exact[0]), surface: "codex-native" });
+        return this.openDocument({ pdfPath: this.#draftSnapshotPath(exact[0]), surface: "codex-native" });
       }
       if (isHostDocument) {
         const sessionId = await this.#matchHostCopyRecovery(drafts, request, isHostDocument);
@@ -1025,7 +1025,7 @@ export class SessionBroker {
           this.capabilities.revokeFile(approvedFile.id);
           approvedFile = undefined;
           await this.#store(sessionId).remove().catch(() => undefined);
-          return this.openReview({
+          return this.openDocument({
             pdfPath: this.#draftSnapshotPath(matches[0]),
             surface: "chrome",
           });
@@ -1930,7 +1930,7 @@ export class SessionBroker {
     return this.#activeById.get(sessionId)?.chromeProtected === true;
   }
 
-  async protectChromeReview(sessionId: string): Promise<void> {
+  async protectChromeDocument(sessionId: string): Promise<void> {
     const session = this.#activeById.get(sessionId);
     if (session === undefined || session.ending) throw new Error("Review session is unavailable");
     if (session.chromeProtected) return;
@@ -2468,7 +2468,7 @@ export class SessionBroker {
          * owning task's next prompt. This contains no task identity. */
         readonly reconnectPending?: true;
         readonly requestedLocation?: PlacekeeperLinkLocation;
-        readonly codexContext?: ReturnType<TaskBindingRegistry["statusForReview"]>;
+        readonly codexContext?: ReturnType<TaskBindingRegistry["statusForDocument"]>;
       }
     | undefined
   > {
@@ -2524,7 +2524,7 @@ export class SessionBroker {
         : { requestedLocation: trustedLaunchScope.requestedLocation }),
       ...(trustedLaunchScope?.surface === "codex"
         ? {
-            codexContext: this.taskBindings.statusForReview(
+            codexContext: this.taskBindings.statusForDocument(
               sessionId,
               {
                 documentGeneration: session.state.workflow.documentGeneration,

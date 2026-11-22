@@ -36,7 +36,7 @@ async function fixture(generated = false, qualification?: NativeQualificationObs
     return { broker, manager };
   };
   const initial = build();
-  const opened = await initial.broker.openReview({ pdfPath: pdf, ...(generated ? { workflowMode: "generated-output" as const } : {}) });
+  const opened = await initial.broker.openDocument({ pdfPath: pdf, ...(generated ? { workflowMode: "generated-output" as const } : {}) });
   if (opened.kind !== "opened") throw new Error("Expected opened");
   return { ...initial, pdf, sessionId: opened.launch.sessionId, build, advance(ms: number) { time += ms; } };
 }
@@ -202,7 +202,7 @@ describe("native two-hook admission with real broker authority", () => {
     expect(disconnected).toEqual({ schemaVersion: 1, status: "unavailable", checkedAt: new Date(1000).toISOString(), reason: "unbound", reconnect: { kind: "reopen-previous-source", pdfPath: await realpath(pdf), expiresAt: new Date(1000 + 24 * 60 * 60_000).toISOString() } });
     expect(await context.refresh({ taskSessionId: "task-b" })).toEqual({ schemaVersion: 1, status: "unavailable", checkedAt: new Date(1000).toISOString(), reason: "unbound" });
     expect(broker.taskBindings.activityCount()).toBe(0);
-    const reopened = await broker.openReview({ pdfPath: pdf, surface: "codex-native" });
+    const reopened = await broker.openDocument({ pdfPath: pdf, surface: "codex-native" });
     expect(reopened.kind).toBe("focused");
     const fresh = await activate(manager, sessionId);
     expect(fresh.active.runtimeId).not.toBe(active.runtimeId);
@@ -255,7 +255,7 @@ describe("native two-hook admission with real broker authority", () => {
     const foreign = manager.stageLaunch({ sessionId, kind: "focused" })!;
     expect(manager.claimLaunch({ ...claim, bindProof: foreign.bindProof, taskSessionId: "task-b" })).toBe(false);
     const otherPdf = pdf.replace("paper", "other"); await writeFile(otherPdf, "%PDF-1.7\nother\n%%EOF");
-    const other = await broker.openReview({ pdfPath: otherPdf }); if (other.kind !== "opened") throw new Error("Expected opened");
+    const other = await broker.openDocument({ pdfPath: otherPdf }); if (other.kind !== "opened") throw new Error("Expected opened");
     const second = manager.stageLaunch({ sessionId: other.launch.sessionId, kind: "opened" })!;
     expect(manager.claimLaunch({ ...claim, bindProof: second.bindProof, reviewSessionId: second.sessionId })).toBe(false);
     expect(manager.attestDisplay(panel.receipt, "task-a")).toBe(true);
@@ -321,8 +321,8 @@ describe("native two-hook admission with real broker authority", () => {
     await protectWork(broker, sessionId); manager.dispose(); await broker.quiesceForShutdown();
     const next = build(); await next.broker.initialize();
     expect(await next.manager.stageReconnect(reconnect(one.active))).toEqual({ status: "denied", reason: "unavailable" });
-    const offered = await next.broker.openReview({ pdfPath: pdf });
-    const reopened = offered.kind === "recovery-offered" ? await next.broker.openReview({ pdfPath: pdf,
+    const offered = await next.broker.openDocument({ pdfPath: pdf });
+    const reopened = offered.kind === "recovery-offered" ? await next.broker.openDocument({ pdfPath: pdf,
       recoveryDecision: "resume", recoveryOffer: offered.recoveryOffer, recoveryOperationId: randomUUID() }) : offered;
     if (reopened.kind !== "opened") throw new Error("Expected reopened");
     expect(reopened.launch.sessionId).toBe(sessionId);
@@ -346,7 +346,7 @@ describe("native two-hook admission with real broker authority", () => {
   it("leaves a pristine deleted review ticket unavailable after same-source reapproval", async () => {
     const { manager, broker, sessionId, build, pdf } = await fixture();
     const panel = await activate(manager, sessionId); manager.dispose(); await broker.quiesceForShutdown();
-    const next = build(); const opened = await next.broker.openReview({ pdfPath: pdf });
+    const next = build(); const opened = await next.broker.openDocument({ pdfPath: pdf });
     if (opened.kind !== "opened") throw new Error("Expected fresh review");
     expect(opened.launch.sessionId).not.toBe(sessionId);
     await next.manager.trustedTaskPrompt("task-a");
@@ -360,9 +360,9 @@ describe("native two-hook admission with real broker authority", () => {
     const { manager, broker, sessionId, build, pdf } = await fixture();
     const panel = await activate(manager, sessionId); await protectWork(broker, sessionId);
     manager.dispose(); await broker.quiesceForShutdown();
-    const next = build(); const offered = await next.broker.openReview({ pdfPath: pdf });
+    const next = build(); const offered = await next.broker.openDocument({ pdfPath: pdf });
     if (offered.kind !== "recovery-offered") throw new Error("Expected recovery offer");
-    const fork = await next.broker.openReview({ pdfPath: pdf, recoveryDecision: "fork", recoveryOffer: offered.recoveryOffer, recoveryOperationId: randomUUID() });
+    const fork = await next.broker.openDocument({ pdfPath: pdf, recoveryDecision: "fork", recoveryOffer: offered.recoveryOffer, recoveryOperationId: randomUUID() });
     if (fork.kind !== "opened") throw new Error("Expected fork");
     expect(fork.launch.sessionId).not.toBe(sessionId);
     await next.manager.trustedTaskPrompt("task-a");
@@ -378,9 +378,9 @@ describe("native two-hook admission with real broker authority", () => {
     await broker.quiesceForShutdown();
 
     const next = build();
-    const offered = await next.broker.openReview({ pdfPath: pdf });
+    const offered = await next.broker.openDocument({ pdfPath: pdf });
     if (offered.kind !== "recovery-offered") throw new Error("Expected recovery offer");
-    await next.broker.openReview({
+    await next.broker.openDocument({
       pdfPath: pdf,
       recoveryDecision: "resume",
       recoveryOffer: offered.recoveryOffer,
@@ -487,9 +487,9 @@ describe("native two-hook admission with real broker authority", () => {
   it("rechecks persisted revocation after a restart ticket was staged", async () => {
     const { manager, broker, sessionId, build, pdf } = await fixture();
     const panel = await activate(manager, sessionId); await protectWork(broker, sessionId); manager.dispose(); await broker.quiesceForShutdown();
-    const next = build(); const offered = await next.broker.openReview({ pdfPath: pdf });
+    const next = build(); const offered = await next.broker.openDocument({ pdfPath: pdf });
     if (offered.kind !== "recovery-offered") throw new Error("Expected recovery offer");
-    await next.broker.openReview({ pdfPath: pdf, recoveryDecision: "resume", recoveryOffer: offered.recoveryOffer, recoveryOperationId: randomUUID() });
+    await next.broker.openDocument({ pdfPath: pdf, recoveryDecision: "resume", recoveryOffer: offered.recoveryOffer, recoveryOperationId: randomUUID() });
     expect((await next.manager.stageReconnect(reconnect(panel.active))).status).toBe("pending");
     await next.broker.restartReconnects.revokeTask("task-a");
     await next.manager.trustedTaskPrompt("task-a");
@@ -543,7 +543,7 @@ describe("canonical native watermark", () => {
     await protectWork(broker, sessionId); advanced();
     const attachment = broker.replaceInteractionAttachment(sessionId, "author");
     const draftId = randomUUID();
-    await broker.beginReviewInteraction({ sessionId, attachment, generation: 1, interactionToken: "authoring_token_1", order: 1, draftId }); advanced();
+    await broker.beginDocumentInteraction({ sessionId, attachment, generation: 1, interactionToken: "authoring_token_1", order: 1, draftId }); advanced();
     await broker.acceptMutation(sessionId, { type: "put-draft", expectedRevision: 1, expectedDraftRevision: -1, draft: {
       id: draftId, ownerViewId: attachment.attachmentId, baseGeneration: 1, revision: 0, kind: "pageNote", pageIndex: 0,
       text: "a note", anchor: { kind: "page", pageIndex: 0, nearbyText: "source", rect: { x: 1, y: 1, width: 1, height: 1 } },
@@ -551,9 +551,9 @@ describe("canonical native watermark", () => {
     } }); advanced();
     expect(await broker.finalizeDocumentInteraction({ sessionId, attachment, interactionToken: "authoring_token_1", order: 2,
       outcome: "applied", draftId, expectedDraftRevision: 0 })).toMatchObject({ status: "finalized", outcome: "applied" }); advanced();
-    await broker.beginReviewInteraction({ sessionId, attachment, generation: 1, interactionToken: "authoring_token_2", order: 3, draftId: "draft_released" }); advanced();
+    await broker.beginDocumentInteraction({ sessionId, attachment, generation: 1, interactionToken: "authoring_token_2", order: 3, draftId: "draft_released" }); advanced();
     await broker.releaseDocumentInteraction({ sessionId, attachment, interactionToken: "authoring_token_2", order: 4 }); advanced();
-    await broker.beginReviewInteraction({ sessionId, attachment, generation: 1, interactionToken: "authoring_token_3", order: 5, draftId: "draft_disconnected" }); advanced();
+    await broker.beginDocumentInteraction({ sessionId, attachment, generation: 1, interactionToken: "authoring_token_3", order: 5, draftId: "draft_disconnected" }); advanced();
     broker.disconnectInteractionIncarnation(sessionId, "author", attachment); advanced();
     expect(events.filter((reason) => reason === "revision")).toHaveLength(3);
     expect(events.filter((reason) => reason === "presence").length).toBeGreaterThanOrEqual(6);
@@ -603,9 +603,9 @@ describe("canonical native watermark", () => {
     const resumed: string[] = []; const events: string[] = [];
     next.broker.onPhysicalSaveResume((id) => resumed.push(id));
     next.broker.onStateInvalidation((event) => events.push(event.reason));
-    const offered = await next.broker.openReview({ pdfPath: pdf });
+    const offered = await next.broker.openDocument({ pdfPath: pdf });
     if (offered.kind !== "recovery-offered") throw new Error("Expected recovery offer");
-    await next.broker.openReview({ pdfPath: pdf, recoveryDecision: "resume", recoveryOffer: offered.recoveryOffer, recoveryOperationId: randomUUID() });
+    await next.broker.openDocument({ pdfPath: pdf, recoveryDecision: "resume", recoveryOffer: offered.recoveryOffer, recoveryOperationId: randomUUID() });
     expect(next.broker.saveStatus(sessionId)!.sync.phase).toBe("saving");
     expect(resumed).toEqual([sessionId]);
     expect(events).toContain("save");
@@ -699,7 +699,7 @@ it("actual runtime ready-first releases the same genuine hook before ordinary at
   const { manager, sessionId } = await fixture(false, undefined, experiments, true);
   const panel = stage(manager, sessionId);
 
-  const event = { session_id: "task-a", hook_event_name: "PostToolUse", tool_name: "mcp__placekeeper__display_review", tool_input: { handoff: "h".repeat(43) }, tool_response: { structuredContent: panel.receipt } };
+  const event = { session_id: "task-a", hook_event_name: "PostToolUse", tool_name: "mcp__placekeeper__display_document", tool_input: { handoff: "h".repeat(43) }, tool_response: { structuredContent: panel.receipt } };
   const source = `import ${JSON.stringify(resolve("apps/service/src/cli/context-command.ts"))};
 import {runHookCommand} from ${JSON.stringify(resolve("apps/service/src/cli/hook-command.ts"))};
 const selected = new Promise(resolve => process.once('message', resolve));

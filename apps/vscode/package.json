@@ -20,6 +20,7 @@
     "onCommand:placekeeper.forwardSyncTex",
     "onCommand:placekeeper.goToSource",
     "onCommand:placekeeper.reattach",
+    "onCommand:placekeeper.exportAnnotatedDocument",
     "onCommand:placekeeper.exportReviewedPdf",
     "onCommand:placekeeper.configureLatexWorkshop",
     "onCommand:placekeeper.restoreLatexWorkshop",
@@ -58,8 +59,12 @@
         "title": "Placekeeper: Reattach Annotation"
       },
       {
-        "command": "placekeeper.exportReviewedPdf",
+        "command": "placekeeper.exportAnnotatedDocument",
         "title": "Placekeeper: Export Annotated Document"
+      },
+      {
+        "command": "placekeeper.exportReviewedPdf",
+        "title": "Placekeeper: Export Annotated Document (Deprecated)"
       },
       {
         "command": "placekeeper.configureLatexWorkshop",
@@ -117,9 +122,15 @@
           "group": "navigation"
         },
         {
-          "command": "placekeeper.exportReviewedPdf",
+          "command": "placekeeper.exportAnnotatedDocument",
           "when": "webviewId == 'placekeeper.review'",
           "group": "navigation"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "placekeeper.exportReviewedPdf",
+          "when": "false"
         }
       ]
     },

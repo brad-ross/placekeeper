@@ -73,7 +73,7 @@ it('uses live browser and editor connection ownership, requires idle desktop app
   try {
     const views = [];
     for (const surface of ['browser', 'vscode'] as const) {
-      const opened = await host.broker.openReview({ pdfPath: pdf, surface });
+      const opened = await host.broker.openDocument({ pdfPath: pdf, surface });
       if (opened.kind !== 'opened' && opened.kind !== 'focused') throw new Error('Expected live review');
       const sessionId = opened.launch.sessionId;
       const credential = host.broker.exchangeBootstrap(sessionId, opened.launch.fragment.slice('#cap='.length))!;
@@ -128,7 +128,7 @@ it('uses live browser and editor connection ownership, requires idle desktop app
     expect((await (await first.post('/upgrade/settle', { attachment: first.attachment, request })).json()).phase).toBe('preparing');
     expect(first.socket.readyState).toBe(WebSocket.OPEN); expect(editor.socket.readyState).toBe(WebSocket.OPEN);
     expect((await editor.post('/upgrade/settle', { attachment: first.attachment, request })).status).toBe(403);
-    const failedProtection = vi.spyOn(host.broker, 'protectChromeReview').mockRejectedValueOnce(new Error('disk full'));
+    const failedProtection = vi.spyOn(host.broker, 'protectChromeDocument').mockRejectedValueOnce(new Error('disk full'));
     expect((await (await editor.post('/upgrade/settle', { attachment: editor.attachment, request })).json()).phase).toBe('canceled');
     failedProtection.mockRestore();
     expect(first.socket.readyState).toBe(WebSocket.OPEN); expect(editor.socket.readyState).toBe(WebSocket.OPEN);

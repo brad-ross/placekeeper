@@ -401,7 +401,7 @@ describe("reviewed PDF conformance", () => {
       backend: { timeoutMs: 20_000 },
     });
 
-    const result = await coordinator.exportReviewedCopy({
+    const result = await coordinator.exportAnnotatedCopy({
       ...fixture.delivery,
       annotations: projections,
     });
@@ -451,7 +451,7 @@ describe("reviewed PDF conformance", () => {
       backend: { timeoutMs: 20_000 },
     });
 
-    const result = await coordinator.exportReviewedCopy(fixture.delivery);
+    const result = await coordinator.exportAnnotatedCopy(fixture.delivery);
     const inspected = await inspectPdfWithEmbedPdf(
       new Uint8Array(await readFile(result.path)),
     );
@@ -625,7 +625,7 @@ describe("reviewed PDF conformance", () => {
       capabilities: fixture.capabilities,
       backend: { timeoutMs: 20_000 },
     });
-    await expect(coordinator.exportReviewedCopy(fixture.delivery)).resolves.toMatchObject({
+    await expect(coordinator.exportAnnotatedCopy(fixture.delivery)).resolves.toMatchObject({
       kind: "reviewed-copy",
     });
   }, 60_000);
@@ -640,7 +640,7 @@ describe("reviewed PDF conformance", () => {
       capabilities: fixture.capabilities,
     });
 
-    await expect(coordinator.exportReviewedCopy(fixture.delivery)).rejects.toMatchObject({ code });
+    await expect(coordinator.exportAnnotatedCopy(fixture.delivery)).rejects.toMatchObject({ code });
     expect(await readFile(fixture.originalPath)).toEqual(Buffer.from(fixture.source));
   }, 60_000);
 

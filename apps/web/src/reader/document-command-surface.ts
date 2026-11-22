@@ -15,7 +15,7 @@ export const DOCUMENT_COMMAND_IDS = [
 ] as const;
 
 export type DocumentSemanticCommand = typeof DOCUMENT_COMMAND_IDS[number];
-export type DocumentCommandFocusContext = "review" | "editable" | "dialog";
+export type DocumentCommandFocusContext = "reader" | "editable" | "dialog";
 
 export interface DocumentCommandPresentation {
   readonly id: DocumentSemanticCommand;
@@ -64,9 +64,9 @@ export function createDocumentCommandSurface(input: {
     { id: "navigate-forward", label: "Forward", enabled: input.canNavigateForward, shortcut: "Meta+]" },
     { id: "find", label: "Find in PDF", enabled: input.canFind && input.focusContext !== "dialog", shortcut: "Meta+F" },
     { id: "open-annotations", label: "Show Annotations", enabled: input.canOpenAnnotations && input.focusContext !== "dialog", shortcut: "Control+Meta+A" },
-    { id: "open-outline", label: "Show Outline", enabled: input.canOpenOutline === true && input.focusContext === "review", shortcut: "Control+Meta+O" },
-    { id: "open-references", label: "Show References", enabled: input.canOpenReferences === true && input.focusContext === "review", shortcut: "Control+Meta+R" },
-    { id: "toggle-horizontal-scroll-lock", label: input.horizontalScrollLocked ? "Unlock Horizontal Scrolling" : "Lock Horizontal Scrolling", enabled: input.canToggleHorizontalScrollLock === true && input.focusContext === "review", shortcut: "Control+Meta+L" },
+    { id: "open-outline", label: "Show Outline", enabled: input.canOpenOutline === true && input.focusContext === "reader", shortcut: "Control+Meta+O" },
+    { id: "open-references", label: "Show References", enabled: input.canOpenReferences === true && input.focusContext === "reader", shortcut: "Control+Meta+R" },
+    { id: "toggle-horizontal-scroll-lock", label: input.horizontalScrollLocked ? "Unlock Horizontal Scrolling" : "Lock Horizontal Scrolling", enabled: input.canToggleHorizontalScrollLock === true && input.focusContext === "reader", shortcut: "Control+Meta+L" },
     { id: "save-options", label: "Save Options", enabled: input.canOpenSaveOptions && input.focusContext !== "dialog" },
     { id: "zoom-in", label: "Zoom In PDF", enabled: input.canZoom && input.focusContext !== "dialog", shortcut: "Meta+=" },
     { id: "zoom-out", label: "Zoom Out PDF", enabled: input.canZoom && input.focusContext !== "dialog", shortcut: "Meta+-" },

@@ -137,11 +137,11 @@ function activeAuthoringDraftIds(value: unknown): readonly string[] {
 function validHostCommand(value: unknown): value is HostRuntimeCommand {
   if (!isObject(value) || typeof value.command !== "string") return false;
   if (value.command === "source-navigation") return Object.keys(value).length === 2 && nativeSyncTexResponse("forwardSyncTex", value.state) !== undefined;
-  if (value.command === "review-command") {
+  if (value.command === "document-command") {
     return Object.keys(value).length === 2 && typeof value.id === "string"
       && (DOCUMENT_COMMAND_IDS as readonly string[]).includes(value.id);
   }
-  if (value.command === "reattach" || value.command === "export-reviewed-pdf"
+  if (value.command === "reattach" || value.command === "export-annotated-document"
     || value.command === "reverse-synctex" || value.command === "cancel-synctex") {
     return Object.keys(value).length === 1;
   }
@@ -688,7 +688,7 @@ export function createRpcHostRuntime(
     retrySave: () => invoke("retrySave"),
     locateSave: () => invoke("locateSave"),
     resolveReadingLocation: (input) => invoke("resolveReadingLocation", input),
-    exportReviewedCopy: (confirmPossiblyStale, fence) => invoke<ProductionExportResult>(
+    exportAnnotatedCopy: (confirmPossiblyStale, fence) => invoke<ProductionExportResult>(
       "exportReviewedCopy",
       { ...(confirmPossiblyStale === true ? { confirmPossiblyStale: true } : {}),
         ...(fence === undefined ? {} : { fence }) },

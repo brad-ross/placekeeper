@@ -513,7 +513,7 @@ export function ReaderShell(props: ReaderShellProps) {
   const [peekItemId, setPeekItemId] = useState<string>();
   const [searchFocusRequest, setSearchFocusRequest] = useState(0);
   const handledSearchFocusRequestRef = useRef(0);
-  const [commandFocusContext, setCommandFocusContext] = useState<DocumentCommandFocusContext>('review');
+  const [commandFocusContext, setCommandFocusContext] = useState<DocumentCommandFocusContext>('reader');
   const handledCommandInvocationRef = useRef(0);
   const peekHeldRef = useRef(false);
   const dismissedPeekIdRef = useRef<string | undefined>(undefined);
@@ -2014,7 +2014,7 @@ export function ReaderShell(props: ReaderShellProps) {
           event.target instanceof Element
           && event.target.closest('[role="dialog"], [aria-modal="true"]') !== null
             ? 'dialog'
-            : editable ? 'editable' : 'review',
+            : editable ? 'editable' : 'reader',
         );
       }}
       onCompositionStartCapture={(event) => inputController.compositionStart(event.target)}

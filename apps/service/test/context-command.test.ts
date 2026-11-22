@@ -9,7 +9,9 @@ import {
   parseContextSourceArguments,
   runContextCommand,
 } from "../src/cli/context-command.js";
-import type { PlacekeeperControlResponse } from "../src/host/launch-control.js";
+import { requestControl, startLaunchControlServer, type PlacekeeperControlResponse } from "../src/host/launch-control.js";
+import { isControlRequest } from "../src/host/control-protocol.js";
+import type { PlacekeeperHost } from "../src/host/placekeeper-host.js";
 
 const roots: string[] = [];
 
@@ -226,5 +228,43 @@ describe("context evidence command", () => {
       "context", "evidence", "--handle", "evidence_abcdefghijklmnop",
       "--kind", "document", "--output", outputPath,
     ], control, vi.fn())).toBe(2);
+  });
+});
+
+describe("renamed context retrieval control kinds", () => {
+  it("accepts the legacy and renamed spellings of the annotation retrieval kinds", () => {
+    for (const kind of [
+      "retrieve-review-items-by-handle", "retrieve-annotations-by-handle",
+      "retrieve-review-changes-by-handle", "retrieve-annotation-changes-by-handle",
+    ]) expect(isControlRequest({ kind, handle: "evidence_abcdefghijklmnop" })).toBe(true);
+    expect(isControlRequest({ kind: "retrieve-annotation-items-by-handle", handle: "evidence_abcdefghijklmnop" })).toBe(false);
+  });
+
+  it.skipIf(process.platform === "win32")("dispatches both spellings to the same daemon retrieval", async () => {
+    const root = await mkdtemp(join(tmpdir(), "placekeeper-control-alias-"));
+    roots.push(root);
+    const ok = (kind: string) => ({ status: "ok" as const, kind, mediaType: "application/json", bytes: Buffer.from('{"items":[]}') });
+    const evidence = {
+      retrieveAnnotationsWithHandle: vi.fn(() => ok("review-items")),
+      retrieveDocumentChangesWithHandle: vi.fn(() => ok("review-changes")),
+    };
+    const lifecycle = { runActivity: async <T>(work: () => Promise<T>) => work() };
+    const host = { context: { evidence }, lifecycle } as unknown as PlacekeeperHost;
+    const socket = join(root, "control.sock");
+    const server = await startLaunchControlServer(host, socket);
+    try {
+      for (const kind of ["retrieve-review-items-by-handle", "retrieve-annotations-by-handle"] as const) {
+        await expect(requestControl(socket, { kind, handle: "evidence_abcdefghijklmnop" }))
+          .resolves.toMatchObject({ kind: "evidence", result: { status: "ok", evidenceKind: "review-items" } });
+      }
+      for (const kind of ["retrieve-review-changes-by-handle", "retrieve-annotation-changes-by-handle"] as const) {
+        await expect(requestControl(socket, { kind, handle: "evidence_abcdefghijklmnop" }))
+          .resolves.toMatchObject({ kind: "evidence", result: { status: "ok", evidenceKind: "review-changes" } });
+      }
+      expect(evidence.retrieveAnnotationsWithHandle).toHaveBeenCalledTimes(2);
+      expect(evidence.retrieveDocumentChangesWithHandle).toHaveBeenCalledTimes(2);
+    } finally {
+      await server.close();
+    }
   });
 });

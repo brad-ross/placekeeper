@@ -66,7 +66,7 @@ export function useAnnotationExport(api: ProductionSessionApi, state: DocumentSt
       setError(eligibility.message);
       return;
     }
-    const method = api.exportReviewedCopy;
+    const method = api.exportAnnotatedCopy;
     if (!method) { setError('Annotated Document export is unavailable.'); return; }
     busyRef.current = true;
     setPending(true);

@@ -18,7 +18,7 @@ export function createUpgradeDocumentProtection(broker: SessionBroker, saving: P
       return `${state.workflow.documentGeneration}:${state.revision}`;
     },
     protect: async () => {
-      await broker.protectChromeReview(sessionId);
+      await broker.protectChromeDocument(sessionId);
       await saving.drain();
       await broker.drainWrites();
       const status = broker.saveStatus(sessionId);

@@ -12,6 +12,7 @@ describe.runIf(process.env.PLACEKEEPER_EXTENSION_HOST === "1")("Placekeeper Exte
       "placekeeper.forwardSyncTex",
       "placekeeper.goToSource",
       "placekeeper.reattach",
+      "placekeeper.exportAnnotatedDocument",
       "placekeeper.exportReviewedPdf",
     ]));
   });

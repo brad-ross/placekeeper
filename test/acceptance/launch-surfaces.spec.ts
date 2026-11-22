@@ -67,6 +67,7 @@ test("VS Code manifest is desktop-local and exposes the supported LaTeX review c
     "placekeeper.viewPdf",
     "placekeeper.forwardSyncTex",
     "placekeeper.goToSource",
+    "placekeeper.exportAnnotatedDocument",
     "placekeeper.exportReviewedPdf",
     "placekeeper.configureLatexWorkshop",
     "placekeeper.restoreLatexWorkshop",
@@ -115,6 +116,7 @@ test("only the Codex adapter requests the native Codex launch surface", async ()
   expect(skill).toContain(
     '`"$HOME/Applications/Placekeeper.app/Contents/MacOS/placekeeper" open-link --json --surface codex-native --confirmed',
   );
+  expect(skill).toContain("mcp__placekeeper__display_document");
   expect(skill).toContain("mcp__placekeeper__display_review");
   expect(skill).toContain("trusted display PostToolUse hook");
   expect(skill).toContain("rerun the same full installed-launcher command");

@@ -294,12 +294,12 @@ describe("host-neutral review runtime", () => {
       headers: expect.objectContaining({ "x-placekeeper-generation": "1" }),
     }));
     const fence = { expectedRevision: 1, documentGeneration: 1 };
-    await expect(runtime.exportReviewedCopy(true, fence)).resolves.toMatchObject({ kind: "reviewed-copy" });
+    await expect(runtime.exportAnnotatedCopy(true, fence)).resolves.toMatchObject({ kind: "reviewed-copy" });
     expect(fetch).toHaveBeenCalledWith(`/s/${state.sessionId}/export`, expect.objectContaining({
       body: JSON.stringify({ confirmPossiblyStale: true, fence }),
     }));
     fetch.mockResolvedValueOnce(Response.json({ error: { kind: "export-conflict" } }, { status: 409 }));
-    await expect(runtime.exportReviewedCopy(true, fence)).rejects.toThrow("Confirm the annotation name again");
+    await expect(runtime.exportAnnotatedCopy(true, fence)).rejects.toThrow("Confirm the annotation name again");
     expect(FakeSocket.created[0]).toMatchObject({
       protocols: [
         "placekeeper",
@@ -1371,7 +1371,7 @@ describe("host-neutral review runtime", () => {
       kind: "event",
       event: "host-command",
       panelId: "panel_identifier_1234",
-      payload: { command: "export-reviewed-pdf", path: "/Users/reader/reviewed.pdf" },
+      payload: { command: "export-annotated-document", path: "/Users/reader/reviewed.pdf" },
     });
     publish({
       protocol: DOCUMENT_RUNTIME_PROTOCOL,
@@ -1379,7 +1379,7 @@ describe("host-neutral review runtime", () => {
       kind: "event",
       event: "host-command",
       panelId: "panel_identifier_1234",
-      payload: { command: "export-reviewed-pdf" },
+      payload: { command: "export-annotated-document" },
     });
 
     publish({
@@ -1418,21 +1418,21 @@ describe("host-neutral review runtime", () => {
     for (const id of ["fit-width", "toggle-horizontal-scroll-lock", "open-outline", "open-annotations", "open-references"]) {
       publish({ protocol: DOCUMENT_RUNTIME_PROTOCOL, version: DOCUMENT_RUNTIME_VERSION,
         kind: "event", event: "host-command", panelId: "panel_identifier_1234",
-        payload: { command: "review-command", id } });
+        payload: { command: "document-command", id } });
     }
-    for (const payload of [{ command: "review-command", id: "unknown" },
-      { command: "review-command", id: "fit-width", extra: true }]) {
+    for (const payload of [{ command: "document-command", id: "unknown" },
+      { command: "document-command", id: "fit-width", extra: true }]) {
       publish({ protocol: DOCUMENT_RUNTIME_PROTOCOL, version: DOCUMENT_RUNTIME_VERSION,
         kind: "event", event: "host-command", panelId: "panel_identifier_1234", payload });
     }
 
     expect(commands).toEqual([
       { command: "reattach" },
-      { command: "export-reviewed-pdf" },
+      { command: "export-annotated-document" },
       { command: "forward-synctex", documentGeneration: 4, pageIndex: 2, point: { x: 72, y: 144 } },
       { command: "reverse-synctex" },
       ...["fit-width", "toggle-horizontal-scroll-lock", "open-outline", "open-annotations", "open-references"]
-        .map((id) => ({ command: "review-command", id })),
+        .map((id) => ({ command: "document-command", id })),
     ]);
     unsubscribe?.();
     runtime.dispose();
@@ -1480,7 +1480,7 @@ describe("host-neutral review runtime", () => {
     send({ command: "source-navigation", state });
     const commands: unknown[] = [];
     runtime.subscribeHostCommands?.(command => commands.push(command));
-    send({ command: "review-command", id: "undo" });
+    send({ command: "document-command", id: "undo" });
     send({ command: "source-navigation", state: { ...state, point: { x: Infinity, y: 10 } } });
     send({ command: "reverse-synctex" });
     expect(commands).toEqual([{ command: "source-navigation", state }, { command: "reverse-synctex" }]);

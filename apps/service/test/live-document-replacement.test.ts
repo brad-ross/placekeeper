@@ -83,7 +83,7 @@ async function fixture(
   const successor = await pdf("Validated successor output");
   await writeFile(pdfPath, original);
   const broker = new SessionBroker({ recoveryRoot: join(directory, "recovery"), ...options });
-  const opened = await broker.openReview({
+  const opened = await broker.openDocument({
     pdfPath,
     surface: "vscode",
     workflowMode,
@@ -489,8 +489,8 @@ describe("atomic live document replacement", () => {
     });
 
     const [first, second] = await Promise.all([
-      broker.openReview({ pdfPath, surface: "vscode", workflowMode: "generated-output" }),
-      broker.openReview({ pdfPath, surface: "browser", workflowMode: "generated-output" }),
+      broker.openDocument({ pdfPath, surface: "vscode", workflowMode: "generated-output" }),
+      broker.openDocument({ pdfPath, surface: "browser", workflowMode: "generated-output" }),
     ]);
 
     if (first.kind === "recovery-offered" || second.kind === "recovery-offered") {
@@ -656,7 +656,7 @@ describe("atomic live document replacement", () => {
       previousGeneration: 1,
       documentGeneration: 2,
     });
-    const joined = await value.broker.openReview({ pdfPath: value.pdfPath, surface: "browser" });
+    const joined = await value.broker.openDocument({ pdfPath: value.pdfPath, surface: "browser" });
     expect(joined).toMatchObject({
       kind: "focused",
       launch: { sessionId: value.launch.sessionId, documentGeneration: 2 },
@@ -1028,9 +1028,9 @@ describe("atomic live document replacement", () => {
     await value.broker.quiesceForShutdown();
     const restarted = new SessionBroker({ recoveryRoot: join(value.directory, "recovery") });
     expect(restarted.interactions.held(value.launch.sessionId)).toBe(false);
-    const offered = await restarted.openReview({ pdfPath: value.pdfPath, workflowMode: "standard" });
+    const offered = await restarted.openDocument({ pdfPath: value.pdfPath, workflowMode: "standard" });
     if (offered.kind !== "recovery-offered") throw new Error("Expected ordinary successor recovery offer");
-    const resumed = await restarted.openReview({
+    const resumed = await restarted.openDocument({
       pdfPath: value.pdfPath,
       workflowMode: "standard",
       recoveryDecision: "resume",
@@ -1057,11 +1057,11 @@ describe("atomic live document replacement", () => {
     }, "standard");
     const first = value.broker.replaceInteractionAttachment(value.launch.sessionId, "window-a");
     const second = value.broker.replaceInteractionAttachment(value.launch.sessionId, "window-b");
-    await value.broker.beginReviewInteraction({
+    await value.broker.beginDocumentInteraction({
       sessionId: value.launch.sessionId, attachment: first, generation: 1,
       interactionToken: "interaction_window_a", order: 1,
     });
-    await value.broker.beginReviewInteraction({
+    await value.broker.beginDocumentInteraction({
       sessionId: value.launch.sessionId, attachment: second, generation: 1,
       interactionToken: "interaction_window_b", order: 1,
     });
@@ -1117,7 +1117,7 @@ describe("atomic live document replacement", () => {
     const peer = value.broker.replaceInteractionAttachment(value.launch.sessionId, "window-b");
     const liveDraftId = "00000000-0000-4000-8000-000000000018";
     const abandonedDraftId = "00000000-0000-4000-8000-000000000019";
-    await value.broker.beginReviewInteraction({
+    await value.broker.beginDocumentInteraction({
       sessionId: value.launch.sessionId,
       attachment: owner,
       generation: 1,
@@ -1156,7 +1156,7 @@ describe("atomic live document replacement", () => {
       activeAuthoringDraftIds: [liveDraftId],
     });
 
-    await value.broker.beginReviewInteraction({
+    await value.broker.beginDocumentInteraction({
       sessionId: value.launch.sessionId,
       attachment: peer,
       generation: 1,
@@ -1189,7 +1189,7 @@ describe("atomic live document replacement", () => {
     const value = await fixture({}, "standard");
     const attachment = value.broker.replaceInteractionAttachment(value.launch.sessionId, "window-a");
     const transport = attachmentOrderedInteractionTransport({}, {
-      beginInteraction: (input) => value.broker.beginReviewInteraction({
+      beginInteraction: (input) => value.broker.beginDocumentInteraction({
         ...input, sessionId: value.launch.sessionId, attachment,
       }),
       finalizeInteraction: (input) => value.broker.finalizeDocumentInteraction({
@@ -1219,7 +1219,7 @@ describe("atomic live document replacement", () => {
     const attachment = value.broker.replaceInteractionAttachment(value.launch.sessionId, "window-a");
     const interactionToken = "interaction_cancelled_editor";
     const draftId = "00000000-0000-4000-8000-000000000009";
-    await value.broker.beginReviewInteraction({
+    await value.broker.beginDocumentInteraction({
       sessionId: value.launch.sessionId, attachment, generation: 1, interactionToken, order: 1,
     });
     await value.broker.acceptMutation(value.launch.sessionId, {
@@ -1275,7 +1275,7 @@ describe("atomic live document replacement", () => {
     const attachment = value.broker.replaceInteractionAttachment(value.launch.sessionId, "window-a");
     const interactionToken = "interaction_uncertain_cancel";
     const draftId = "00000000-0000-4000-8000-000000000010";
-    await value.broker.beginReviewInteraction({
+    await value.broker.beginDocumentInteraction({
       sessionId: value.launch.sessionId, attachment, generation: 1, interactionToken, order: 1, draftId,
     });
     await value.broker.acceptMutation(value.launch.sessionId, {
@@ -1353,7 +1353,7 @@ describe("atomic live document replacement", () => {
               },
             };
           } else if (request.method === "beginInteraction") {
-            payload = await value.broker.beginReviewInteraction({
+            payload = await value.broker.beginDocumentInteraction({
               ...(request.payload as { generation: number; interactionToken: string; order: number }),
               sessionId: value.launch.sessionId,
               attachment,
@@ -1413,7 +1413,7 @@ describe("atomic live document replacement", () => {
       reason: "presence",
     });
 
-    await expect(value.broker.beginReviewInteraction({
+    await expect(value.broker.beginDocumentInteraction({
       sessionId: value.launch.sessionId, attachment, generation: 1, interactionToken, order: 4, draftId,
     })).resolves.toMatchObject({ status: "finalized", reviewRevision: 2 });
     expect(invalidated).toHaveBeenCalledTimes(2);
@@ -1481,7 +1481,7 @@ describe("atomic live document replacement", () => {
           } else if (request.method === "command") {
             payload = await value.broker.acceptMutation(sessionId, request.payload as DocumentCommand);
           } else if (request.method === "beginInteraction") {
-            payload = await value.broker.beginReviewInteraction({
+            payload = await value.broker.beginDocumentInteraction({
               ...(request.payload as { generation: number; interactionToken: string; order: number }),
               sessionId,
               attachment,
@@ -1581,7 +1581,7 @@ describe("atomic live document replacement", () => {
     let loseBeginResponse = true;
     const transport = attachmentOrderedInteractionTransport({}, {
       beginInteraction: async (input) => {
-        const accepted = await value.broker.beginReviewInteraction({
+        const accepted = await value.broker.beginDocumentInteraction({
           ...input, sessionId: value.launch.sessionId, attachment,
         });
         if (loseBeginResponse) {
@@ -1618,7 +1618,7 @@ describe("atomic live document replacement", () => {
     const transport = attachmentOrderedInteractionTransport({}, {
       beginInteraction: (input) => {
         calls.push({ method: "begin", token: input.interactionToken, order: input.order });
-        return value.broker.beginReviewInteraction({
+        return value.broker.beginDocumentInteraction({
           ...input, sessionId: value.launch.sessionId, attachment,
         });
       },
@@ -1706,7 +1706,7 @@ describe("atomic live document replacement", () => {
       type: "add", expectedRevision: 0, item: selectionItem(ITEM_IDS.retained, "Original"),
       authoring: { ownerViewId: "panel-a", baseGeneration: 1 },
     });
-    const codex = await value.broker.openReview({ pdfPath: value.pdfPath, surface: "codex" });
+    const codex = await value.broker.openDocument({ pdfPath: value.pdfPath, surface: "codex" });
     if (codex.kind !== "focused" || codex.launch.bindProof === undefined) {
       throw new Error("Expected Codex binding proof");
     }
@@ -1780,7 +1780,7 @@ describe("atomic live document replacement", () => {
     await value.broker.quiesceForShutdown();
 
     const restarted = new SessionBroker({ recoveryRoot: join(value.directory, "recovery") });
-    const offered = await restarted.openReview({
+    const offered = await restarted.openDocument({
       pdfPath: value.pdfPath,
       workflowMode: "generated-output",
     });
@@ -1930,12 +1930,12 @@ describe("atomic live document replacement", () => {
 
     await value.broker.quiesceForShutdown();
     const restarted = new SessionBroker({ recoveryRoot: join(value.directory, "recovery") });
-    const offered = await restarted.openReview({
+    const offered = await restarted.openDocument({
       pdfPath: value.pdfPath,
       workflowMode: "generated-output",
     });
     if (offered.kind !== "recovery-offered") throw new Error("Expected successor recovery offer");
-    const resumed = await restarted.openReview({
+    const resumed = await restarted.openDocument({
       pdfPath: value.pdfPath,
       workflowMode: "generated-output",
       recoveryDecision: "resume",
@@ -1951,7 +1951,7 @@ describe("atomic live document replacement", () => {
     const value = await fixture({
       inspectGeneration: async () => ({ pageCount: 1, pages: [{ pageIndex: 0, text: "new" }] }),
     });
-    const codex = await value.broker.openReview({ pdfPath: value.pdfPath, surface: "codex" });
+    const codex = await value.broker.openDocument({ pdfPath: value.pdfPath, surface: "codex" });
     if (codex.kind !== "focused" || codex.launch.bindProof === undefined) throw new Error("Expected Codex focus");
     const capability = codex.launch.fragment.slice("#cap=".length);
     expect(value.broker.taskBindings.claim({

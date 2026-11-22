@@ -215,7 +215,7 @@ test('native destination dialog captures the invoking generation and revision be
     bridge.projection = p; bridge.active = true;
     let resolveDialog!: (path: string) => void;
     bridge.chooseDestination = () => new Promise(resolve => { resolveDialog = resolve; });
-    const pending = bridge.request({ protocol: 'placekeeper.review-runtime', version: 4, kind: 'request', runtimeId: bridge.windowId, requestId: 'request1234567890', method: 'chooseFolder', payload: {}, sessionId: p.sessionId, generation: 1, revision: 0 });
+    const pending = bridge.request({ protocol: 'placekeeper.document-runtime', version: 4, kind: 'request', runtimeId: bridge.windowId, requestId: 'request1234567890', method: 'chooseFolder', payload: {}, sessionId: p.sessionId, generation: 1, revision: 0 });
     let settled = false; const closing = bridge.settle().then(() => { settled = true; });
     await Promise.resolve(); assert.equal(settled, false);
     bridge.projection = { ...p, revision: 1 };
@@ -259,7 +259,7 @@ test('discarded interaction publishes its canonical revision after the receipt w
     }, () => 'unused');
     bridge.projection = initial; bridge.active = true;
     bridge.onInvalidation = event => { delivery.push('invalidation'); events.push(event); };
-    const receipt = await bridge.request({ protocol: 'placekeeper.review-runtime', version: 4,
+    const receipt = await bridge.request({ protocol: 'placekeeper.document-runtime', version: 4,
         kind: 'request', runtimeId: bridge.windowId, requestId: 'cancel_request_1234',
         sessionId: initial.sessionId, generation: 1, revision: 0, method: 'finalizeInteraction',
         payload: { interactionToken: 'interaction_cancel_1234', order: 2, outcome: 'discarded',
@@ -270,7 +270,7 @@ test('discarded interaction publishes its canonical revision after the receipt w
     await bridge.settle();
     assert.deepEqual(delivery, ['receipt', 'invalidation']);
     assert.equal(bridge.projection, next);
-    assert.deepEqual(events, [{ protocol: 'placekeeper.review-runtime', version: 4, kind: 'event',
+    assert.deepEqual(events, [{ protocol: 'placekeeper.document-runtime', version: 4, kind: 'event',
         runtimeId: bridge.windowId, event: 'session-invalidated',
         payload: { sessionId: initial.sessionId, generation: 1, revision: 1, reason: 'revision' } }]);
 });
@@ -286,7 +286,7 @@ test('interaction release publishes same-revision authoring changes and ignores 
         return { ...message, type: 'result', method: message.method, payload: { status: 'released' } };
     }, () => 'unused');
     bridge.projection = initial; bridge.active = true; bridge.onInvalidation = event => events.push(event);
-    const request = { protocol: 'placekeeper.review-runtime', version: 4, kind: 'request',
+    const request = { protocol: 'placekeeper.document-runtime', version: 4, kind: 'request',
         runtimeId: bridge.windowId, requestId: 'release_request_1234', sessionId: initial.sessionId,
         generation: 1, revision: 0, method: 'releaseInteraction', payload: { interactionToken: 'interaction_cancel_1234', order: 3 } };
     await bridge.request(request); await bridge.settle();
@@ -332,7 +332,7 @@ test('reverse source setup retries only after native association and keeps the r
     bridge.active = true; bridge.projection = p;
     bridge.onSourceSetup = async () => { configured = true; return true; };
     const payload = { pageIndex: 0, point: { x: 12, y: 30 } };
-    const result = await bridge.request({ protocol: 'placekeeper.review-runtime', version: 4, kind: 'request', runtimeId: bridge.windowId, requestId: 'request1234567890', method: 'reverseSyncTex', payload, sessionId: p.sessionId, generation: p.generation, revision: p.revision });
+    const result = await bridge.request({ protocol: 'placekeeper.document-runtime', version: 4, kind: 'request', runtimeId: bridge.windowId, requestId: 'request1234567890', method: 'reverseSyncTex', payload, sessionId: p.sessionId, generation: p.generation, revision: p.revision });
     assert.equal((result as { payload: { status: string } }).payload.status, 'opened');
     assert.equal(requests.length, 2);
     for (const request of requests) assert.deepEqual((request as { payload: unknown }).payload, payload);
@@ -359,7 +359,7 @@ test('native forward acknowledgements retain the renderer generation and outcome
         return { ...message, type: 'result', method: 'forwardSyncTex', payload: { status: 'applied', sequence: 5 } };
     }, () => '');
     bridge.active = true; bridge.projection = p;
-    const result = await bridge.request({ protocol: 'placekeeper.review-runtime', version: 4, kind: 'request', runtimeId: bridge.windowId, requestId: 'request1234567890', method: 'forwardSyncTex', payload, sessionId: p.sessionId, generation: p.generation, revision: p.revision });
+    const result = await bridge.request({ protocol: 'placekeeper.document-runtime', version: 4, kind: 'request', runtimeId: bridge.windowId, requestId: 'request1234567890', method: 'forwardSyncTex', payload, sessionId: p.sessionId, generation: p.generation, revision: p.revision });
     assert.deepEqual((result as { payload: unknown }).payload, { status: 'applied', sequence: 5 });
 });
 
@@ -373,7 +373,7 @@ test('canceling source setup releases close settlement without retrying the edit
     bridge.active = true; bridge.projection = p;
     const setup = Promise.withResolvers<boolean>();
     bridge.onSourceSetup = () => setup.promise;
-    const pending = bridge.request({ protocol: 'placekeeper.review-runtime', version: 4, kind: 'request', runtimeId: bridge.windowId, requestId: 'request1234567890', method: 'reverseSyncTex', payload: { pageIndex: 0, point: { x: 12, y: 30 } }, sessionId: p.sessionId, generation: p.generation, revision: p.revision });
+    const pending = bridge.request({ protocol: 'placekeeper.document-runtime', version: 4, kind: 'request', runtimeId: bridge.windowId, requestId: 'request1234567890', method: 'reverseSyncTex', payload: { pageIndex: 0, point: { x: 12, y: 30 } }, sessionId: p.sessionId, generation: p.generation, revision: p.revision });
     let settled = false;
     const close = bridge.settle().then(() => { settled = true; });
     await Promise.resolve(); await Promise.resolve();

@@ -538,7 +538,7 @@ it.each([false, true])('autosaves opaque PDFs to a chosen local copy and preserv
  const folder:any=await h.call('chooseFolder');
  expect(folder).toMatchObject({status:'ok',payload:{cancelled:false,folder:'Local folder'}});
  expect(await h.call('chooseCopy',{filename:'copy.pdf',folderSelectionId:folder.payload.selectionId})).toMatchObject({status:'ok',payload:{destination:{phase:'active',kind:'copy'}}});
- const genericExport=vi.spyOn(f.exporting,'exportReviewedCopy');
+ const genericExport=vi.spyOn(f.exporting,'exportAnnotatedCopy');
  expect(await h.call('exportReviewedCopy',{fence:{expectedRevision:f.broker.state(h.sessionId)!.revision,documentGeneration:1}})).toMatchObject({status:'denied'});
  expect(genericExport).not.toHaveBeenCalled();
  for(const comment of ['first copy note','second copy note']) {

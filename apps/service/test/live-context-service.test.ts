@@ -72,7 +72,7 @@ async function fixture(options: {
     portableReader: async () => [],
     rewriteAssessor: async () => ({ eligible: true }),
   });
-  const opened = await broker.openReview({
+  const opened = await broker.openDocument({
     pdfPath,
     surface: "codex",
     ...(options.generatedOutput === true ? { workflowMode: "generated-output" as const } : {}),
@@ -193,7 +193,7 @@ describe("atomic live-context service", () => {
       }),
     });
 
-    const opened = await broker.openReview({ pdfPath, surface: "codex" });
+    const opened = await broker.openDocument({ pdfPath, surface: "codex" });
     if (opened.kind !== "opened" || opened.launch.bindProof === undefined) {
       throw new Error("Expected a bindable Codex launch");
     }
@@ -240,7 +240,7 @@ describe("atomic live-context service", () => {
       taskBindings,
     });
 
-    const launchA = await broker.openReview({ pdfPath, surface: "codex" });
+    const launchA = await broker.openDocument({ pdfPath, surface: "codex" });
     if (launchA.kind !== "opened" || launchA.launch.bindProof === undefined) {
       throw new Error("Expected task A launch");
     }
@@ -259,7 +259,7 @@ describe("atomic live-context service", () => {
       .not.toMatchObject({ status: "unbound" });
 
     taskBindings.revokeTask("task-a");
-    const launchB = await broker.openReview({ pdfPath, surface: "codex" });
+    const launchB = await broker.openDocument({ pdfPath, surface: "codex" });
     if (launchB.kind !== "focused" || launchB.launch.bindProof === undefined) {
       throw new Error("Expected task B launch");
     }
@@ -284,7 +284,7 @@ describe("atomic live-context service", () => {
       .not.toMatchObject({ status: "unbound" });
     expect(taskBindings.bindingForTask("task-b")?.leaseExpiresAt).not.toBe(taskBExpiry);
 
-    const linked = await broker.openReview({
+    const linked = await broker.openDocument({
       pdfPath,
       surface: "browser",
       requestedLocation: { kind: "page", page: 12 },
@@ -685,7 +685,7 @@ describe("atomic live-context service", () => {
       await readFile(resolve("test/fixtures/pdfs/text-native-with-annotations.pdf")),
     );
     const broker = new SessionBroker({ recoveryRoot: join(directory, "recovery") });
-    const opened = await broker.openReview({ pdfPath, surface: "codex" });
+    const opened = await broker.openDocument({ pdfPath, surface: "codex" });
     if (opened.kind !== "opened" || opened.launch.bindProof === undefined) {
       throw new Error("Expected a bindable annotated PDF");
     }

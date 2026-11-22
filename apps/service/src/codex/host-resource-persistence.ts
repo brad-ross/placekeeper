@@ -208,7 +208,7 @@ export class HostResourcePersistence {
                         throw Error('Host authority retired');
                     await this.#persist(opened.launch.sessionId, { schemaVersion: 1, writable: t.input.writable, ...(t.input.etag ? { etag: t.input.etag } : {}), digest: t.input.sha256 });
                     await this.broker.configureImportedDestination(opened.launch.sessionId, t.input.writable && !!t.input.etag);
-                    await this.broker.protectChromeReview(opened.launch.sessionId);
+                    await this.broker.protectChromeDocument(opened.launch.sessionId);
                     if (!t.current())
                         throw Error('Host authority retired');
                 }
@@ -240,7 +240,7 @@ export class HostResourcePersistence {
                 throw Error('Independent host review unavailable');
             await this.#persist(opened.launch.sessionId, { schemaVersion: 1, writable: false, digest, forked: true });
             await this.broker.configureImportedDestination(opened.launch.sessionId, false);
-            await this.broker.protectChromeReview(opened.launch.sessionId);
+            await this.broker.protectChromeDocument(opened.launch.sessionId);
             return opened;
         }
         finally {

@@ -118,7 +118,7 @@ describe("reviewed PDF export transaction", () => {
       hooks: { beforeFinalize: async () => { entered.resolve(); await release.promise; } },
       recordSuccessfulExport: recorded,
     });
-    const pending = coordinator.exportReviewedCopy(fixture.delivery(), () => {
+    const pending = coordinator.exportAnnotatedCopy(fixture.delivery(), () => {
       if (!authorized) throw new Error("presentation-unavailable");
     });
     const rejected = expect(pending).rejects.toThrow("presentation-unavailable");
@@ -140,15 +140,15 @@ describe("reviewed PDF export transaction", () => {
       verify: async () => ({ pageCount: 1, annotationIds: [fixture.item.id] }),
     });
     const delivery = fixture.delivery();
-    const first = await coordinator.exportReviewedCopy(delivery);
-    await expect(coordinator.exportReviewedCopy(delivery)).resolves.toBe(first);
+    const first = await coordinator.exportAnnotatedCopy(delivery);
+    await expect(coordinator.exportAnnotatedCopy(delivery)).resolves.toBe(first);
     expect(write).toHaveBeenCalledOnce();
     expect(coordinator.retentionStatus()).toEqual({ sessions: 1, completed: 1, inFlight: 0 });
 
     fixture.capabilities.revokeFile(delivery.source.fileId);
     coordinator.releaseSession(delivery.sessionId);
     expect(coordinator.retentionStatus()).toEqual({ sessions: 0, completed: 0, inFlight: 0 });
-    await expect(coordinator.exportReviewedCopy(delivery)).rejects.toMatchObject({ code: "SESSION_CAPABILITY_REVOKED" });
+    await expect(coordinator.exportAnnotatedCopy(delivery)).rejects.toMatchObject({ code: "SESSION_CAPABILITY_REVOKED" });
     expect(coordinator.retentionStatus()).toEqual({ sessions: 0, completed: 0, inFlight: 0 });
     expect(write).toHaveBeenCalledOnce();
   });
@@ -163,7 +163,7 @@ describe("reviewed PDF export transaction", () => {
       verify: async () => ({ pageCount: 1, annotationIds: [fixture.item.id] }),
       recordSuccessfulExport: async () => { entered.resolve(); await resume.promise; },
     });
-    const pending = coordinator.exportReviewedCopy(fixture.delivery());
+    const pending = coordinator.exportAnnotatedCopy(fixture.delivery());
     await entered.promise;
     coordinator.releaseSession(fixture.delivery().sessionId);
     resume.resolve();
@@ -187,7 +187,7 @@ describe("reviewed PDF export transaction", () => {
       },
     };
 
-    expect(() => coordinator.exportReviewedCopy(generated)).toThrow(/reconciliation/iu);
+    expect(() => coordinator.exportAnnotatedCopy(generated)).toThrow(/reconciliation/iu);
     expect(() => coordinator.replaceOriginal({
       ...generated,
       exportEligibility: { eligible: true as const, requiresStaleConfirmation: false },
@@ -203,8 +203,8 @@ describe("reviewed PDF export transaction", () => {
       capabilities: fixture.capabilities,
       verify: async () => ({ pageCount: 1, annotationIds: [fixture.item.id] }),
     });
-    await coordinator.exportReviewedCopy(fixture.delivery(7));
-    await coordinator.exportReviewedCopy({
+    await coordinator.exportAnnotatedCopy(fixture.delivery(7));
+    await coordinator.exportAnnotatedCopy({
       ...fixture.delivery(7),
       documentGeneration: 2,
       dispositionDigest: "e".repeat(64),
@@ -258,7 +258,7 @@ describe("reviewed PDF export transaction", () => {
       },
     });
 
-    const exported = await coordinator.exportReviewedCopy({
+    const exported = await coordinator.exportAnnotatedCopy({
       sessionId: state.sessionId,
       source: state.source,
       originalDigest: state.source.digest,
@@ -296,11 +296,11 @@ describe("reviewed PDF export transaction", () => {
     });
 
     const [first, duplicate] = await Promise.all([
-      coordinator.exportReviewedCopy(fixture.delivery()),
-      coordinator.exportReviewedCopy(fixture.delivery()),
+      coordinator.exportAnnotatedCopy(fixture.delivery()),
+      coordinator.exportAnnotatedCopy(fixture.delivery()),
     ]);
-    const repeated = await coordinator.exportReviewedCopy(fixture.delivery());
-    const laterRevision = await coordinator.exportReviewedCopy(fixture.delivery(2));
+    const repeated = await coordinator.exportAnnotatedCopy(fixture.delivery());
+    const laterRevision = await coordinator.exportAnnotatedCopy(fixture.delivery(2));
 
     expect(first.path).toBe(duplicate.path);
     expect(repeated.path).toBe(first.path);
@@ -336,7 +336,7 @@ describe("reviewed PDF export transaction", () => {
       });
 
       await expect(
-        coordinator.exportReviewedCopy(fixture.delivery()),
+        coordinator.exportAnnotatedCopy(fixture.delivery()),
       ).rejects.toThrow(`${failure === "verification" ? "verification" : "finalize"} failed`);
       expect(await readFile(fixture.originalPath)).toEqual(fixture.original);
       expect(await readFile(priorPath, "utf8")).toBe("stable prior artifact");
@@ -358,7 +358,7 @@ describe("reviewed PDF export transaction", () => {
       capabilities: fixture.capabilities,
     });
 
-    expect(() => coordinator.exportReviewedCopy(fixture.delivery(0, []))).toThrow(
+    expect(() => coordinator.exportAnnotatedCopy(fixture.delivery(0, []))).toThrow(
       "There is no review feedback to deliver",
     );
     expect(writes).toBe(0);
@@ -372,7 +372,7 @@ describe("reviewed PDF export transaction", () => {
     await writeFile(originalPath, original);
     const recoveryRoot = join(directory, "recovery");
     const broker = new SessionBroker({ recoveryRoot });
-    const opened = await broker.openReview({ pdfPath: originalPath });
+    const opened = await broker.openDocument({ pdfPath: originalPath });
     if (opened.kind !== "opened") throw new Error("Expected opened review");
     const state = broker.state(opened.launch.sessionId)!;
     await broker.acceptMutation(
@@ -435,7 +435,7 @@ describe("reviewed PDF export transaction", () => {
       recordSuccessfulExport: (sessionId) => broker.recordSuccessfulExport(sessionId),
     });
 
-    await coordinator.exportReviewedCopy(frozen);
+    await coordinator.exportAnnotatedCopy(frozen);
 
     const recovered = await new DraftSnapshotStore(
       join(recoveryRoot, opened.launch.sessionId),
@@ -461,7 +461,7 @@ describe("reviewed PDF export transaction", () => {
       },
     });
 
-    await expect(coordinator.exportReviewedCopy(fixture.delivery())).rejects.toThrow(
+    await expect(coordinator.exportAnnotatedCopy(fixture.delivery())).rejects.toThrow(
       "Review session ended",
     );
     expect((await readdir(fixture.directory)).filter((name) => /reviewed.*\.pdf$/u.test(name))).toEqual([]);
@@ -485,7 +485,7 @@ describe("reviewed PDF export transaction", () => {
       },
     });
 
-    const result = await coordinator.exportReviewedCopy(fixture.delivery());
+    const result = await coordinator.exportAnnotatedCopy(fixture.delivery());
 
     expect(result.warning).toContain("reviewed copy was created");
     expect(await readFile(result.path)).toEqual(fixture.reviewed);
@@ -504,7 +504,7 @@ describe("reviewed PDF export transaction", () => {
       },
     });
 
-    const result = await coordinator.exportReviewedCopy(fixture.delivery());
+    const result = await coordinator.exportAnnotatedCopy(fixture.delivery());
 
     expect(result.warning).toContain("reviewed copy was created");
     expect(await readFile(result.path)).toEqual(fixture.reviewed);

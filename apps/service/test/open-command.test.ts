@@ -621,7 +621,7 @@ describe("open command", () => {
     await writeFile(join(assets, "app.js"), "export function start(){}\n");
     await writeFile(pdf, "%PDF-1.7\nclean\n%%EOF");
     const host = await PlacekeeperHost.start({ recoveryRoot: join(root, "recovery"), webAssets: { root: assets } });
-    const opened = await host.broker.openReview({ pdfPath: pdf });
+    const opened = await host.broker.openDocument({ pdfPath: pdf });
     if (opened.kind !== "opened") throw new Error("Expected a new review");
     host.broker.credentials.revokeSession(opened.launch.sessionId);
     const remove = vi.spyOn(DraftSnapshotStore.prototype, "remove").mockRejectedValueOnce(new Error("disk unavailable"));

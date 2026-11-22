@@ -141,7 +141,7 @@ export async function openPlacekeeperLink(
     await broker.resolveReadableSourcePath(decoded.path),
     decoded.location,
   );
-  return broker.openReview({
+  return broker.openDocument({
     pdfPath: prepared.pdfPath,
     ...(request.recovery === undefined ? {} : { recoveryDecision: request.recovery }),
     ...(request.recoveryOffer === undefined ? {} : { recoveryOffer: request.recoveryOffer }),
