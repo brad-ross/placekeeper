@@ -17,7 +17,7 @@ describe('runtime generation refresh presentation', () => {
     }));
 
     expect(initialFailure.match(/role="alert"/gu)).toHaveLength(1);
-    expect(initialFailure).toContain('This review could not be prepared.');
+    expect(initialFailure).toContain('This document could not be prepared.');
     expect(initialFailure).not.toContain('rebuilt PDF');
     expect(initialFailure).not.toContain('last successful PDF');
     expect(runtimeGenerationRefreshStatus(false, 'failed')).toBe('idle');

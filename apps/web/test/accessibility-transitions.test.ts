@@ -57,6 +57,6 @@ describe("accessibility transition coordinator", () => {
       attemptId: "attempt_new",
       visible: true,
       kind: "replacement-ready",
-    })).toMatchObject({ announcement: "The review was restored." });
+    })).toMatchObject({ announcement: "The document was restored." });
   });
 });

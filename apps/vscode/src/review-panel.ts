@@ -13,7 +13,7 @@ export type RecoveryDecision = "resume" | "discard" | "fork";
 export const RECOVERY_CHOICE_LABELS = Object.freeze([
   "Resume draft",
   "Discard draft",
-  "Start independent review",
+  "Start independent copy",
 ] as const);
 
 export function recoveryDecisionForLabel(label: string | undefined): RecoveryDecision | undefined {
@@ -168,7 +168,7 @@ export function buildReviewPanelReattachmentHtml(): string {
 <html lang="en"><head><meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline';">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Reconnect Placekeeper review</title>
+<title>Reconnect Placekeeper document</title>
 <style>
 :root{color-scheme:only light;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#333;background:#f7f7f7}
 *{box-sizing:border-box}
@@ -184,8 +184,8 @@ strong{font-weight:500}
 </style></head><body>
 <main aria-labelledby="reattach-title">
 <div class="identity" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg><span>Placekeeper</span></div>
-<h1 id="reattach-title">Reconnect this review</h1>
-<p>The saved PDF or its local review service is no longer available to this panel.</p>
+<h1 id="reattach-title">Reconnect this document</h1>
+<p>The saved PDF or its local Placekeeper service is no longer available to this panel.</p>
 <p class="next-step">Run <strong>Placekeeper: View PDF</strong> from the Command Palette to reopen the PDF and reconnect its protected annotations.</p>
 </main></body></html>`;
 }

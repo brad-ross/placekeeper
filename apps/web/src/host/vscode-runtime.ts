@@ -310,7 +310,7 @@ export function createRpcHostRuntime(
       if (current) {
         pending.delete(message.requestId);
         current.abort?.();
-        current.reject(new Error("Update Placekeeper and its host extension, then close and reopen this review."));
+        current.reject(new Error("Update Placekeeper and its host extension, then close and reopen this document."));
       }
       return;
     }
@@ -399,8 +399,8 @@ export function createRpcHostRuntime(
       const conflict = (isObject(message.error) && message.error.kind === "export-conflict") ||
         (isObject(message.payload) && message.payload.kind === "export-conflict");
       current.reject(new Error(conflict
-        ? "Review changed. Confirm the annotation name again to export the latest review."
-        : "The trusted host rejected the review action."));
+        ? "Document changed. Confirm the annotation name again to export the latest version."
+        : "The trusted host rejected the document action."));
     }
   });
 

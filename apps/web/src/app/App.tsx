@@ -1681,8 +1681,8 @@ export function App({
     <main>
       <h1>Placekeeper</h1>
       <p data-document-title>{documentTitle}</p>
-      <section aria-label="PDF review workspace">
-        <div role="toolbar" aria-label="Review tools">
+      <section aria-label="PDF document workspace">
+        <div role="toolbar" aria-label="Document tools">
           <button type="button" title="Add Page Note">Page Note</button>
         </div>
         {pageMessage ? <p data-recovery-kind="page">{pageMessage}</p> : null}

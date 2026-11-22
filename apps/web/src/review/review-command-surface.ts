@@ -58,12 +58,12 @@ export function createReviewCommandSurface(input: {
 } {
   const blockedByText = input.focusContext === "editable";
   const commands: readonly ReviewCommandPresentation[] = [
-    { id: "undo", label: "Undo Review Change", enabled: input.canUndo && !blockedByText, shortcut: "Meta+Z" },
-    { id: "redo", label: "Redo Review Change", enabled: input.canRedo && !blockedByText, shortcut: "Meta+Shift+Z" },
+    { id: "undo", label: "Undo Annotation Change", enabled: input.canUndo && !blockedByText, shortcut: "Meta+Z" },
+    { id: "redo", label: "Redo Annotation Change", enabled: input.canRedo && !blockedByText, shortcut: "Meta+Shift+Z" },
     { id: "navigate-back", label: "Back", enabled: input.canNavigateBack, shortcut: "Meta+[" },
     { id: "navigate-forward", label: "Forward", enabled: input.canNavigateForward, shortcut: "Meta+]" },
     { id: "find", label: "Find in PDF", enabled: input.canFind && input.focusContext !== "dialog", shortcut: "Meta+F" },
-    { id: "open-annotations", label: "Show Review Items", enabled: input.canOpenAnnotations && input.focusContext !== "dialog", shortcut: "Control+Meta+A" },
+    { id: "open-annotations", label: "Show Annotations", enabled: input.canOpenAnnotations && input.focusContext !== "dialog", shortcut: "Control+Meta+A" },
     { id: "open-outline", label: "Show Outline", enabled: input.canOpenOutline === true && input.focusContext === "review", shortcut: "Control+Meta+O" },
     { id: "open-references", label: "Show References", enabled: input.canOpenReferences === true && input.focusContext === "review", shortcut: "Control+Meta+R" },
     { id: "toggle-horizontal-scroll-lock", label: input.horizontalScrollLocked ? "Unlock Horizontal Scrolling" : "Lock Horizontal Scrolling", enabled: input.canToggleHorizontalScrollLock === true && input.focusContext === "review", shortcut: "Control+Meta+L" },

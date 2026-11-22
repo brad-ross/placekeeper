@@ -1,15 +1,15 @@
 {
   "name": "codex-plugin",
   "version": "0.3.2",
-  "description": "Open PDFs directly from file actions or the conversation, review and search them in Placekeeper, and control the context shared with chat.",
+  "description": "Open PDFs directly from file actions or the conversation, read, annotate, and search them in Placekeeper, and control the context shared with chat.",
   "author": {
     "name": "Placekeeper"
   },
   "skills": "./skills/",
   "interface": {
     "displayName": "Placekeeper",
-    "shortDescription": "Review PDFs, search, and discuss chosen evidence.",
-    "longDescription": "Open a PDF from its file action or open the current review or chooser from the conversation. Search and navigate the live reader, prepare editable discussion drafts from selected text or chosen annotations, and manage background context and explicitly included mention snapshots. Supported hosts provide direct extension entrypoints; existing trusted local-PDF workflows use lifecycle hooks to provide task-scoped PDF and annotation context on every prompt.",
+    "shortDescription": "Annotate PDFs, search, and discuss chosen evidence.",
+    "longDescription": "Open a PDF from its file action or open the current document or chooser from the conversation. Search and navigate the live reader, prepare editable discussion drafts from selected text or chosen annotations, and manage background context and explicitly included mention snapshots. Supported hosts provide direct extension entrypoints; existing trusted local-PDF workflows use lifecycle hooks to provide task-scoped PDF and annotation context on every prompt.",
     "developerName": "Placekeeper",
     "category": "Productivity",
     "capabilities": [],

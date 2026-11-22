@@ -238,7 +238,7 @@ export function ContextActionPalette(props: ContextActionPaletteProps) {
     <div
       ref={elementRef}
       role="toolbar"
-      aria-label="Selection review actions"
+      aria-label="Selection actions"
       className="review-context-palette"
       data-review-contextual-ui
       hidden={props.hidden}

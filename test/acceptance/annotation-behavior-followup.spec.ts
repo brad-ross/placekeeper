@@ -1308,7 +1308,7 @@ test('terminal pending composer ignores keyboard submission shortcuts', async ({
 
   await expect(root).toHaveAttribute('data-save-calls', '0');
   await expect(editor).toHaveValue('Durably saved terminal text');
-  await expect(page.getByText('Saved. Waiting for the latest review state; retrying automatically.')).toBeVisible();
+  await expect(page.getByText('Saved. Waiting for the latest document state; retrying automatically.')).toBeVisible();
 });
 
 test('uses the hover card and explicitly expands long PDF annotations in a deletable full reader', async ({ page }) => {

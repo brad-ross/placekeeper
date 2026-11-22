@@ -35,7 +35,7 @@ export function rejectedDestinationName(error: unknown, state: ReviewState | und
     message: error instanceof InvalidReviewCommandError ? error.message
       : error instanceof ReviewGenerationConflictError
         ? "The PDF was rebuilt before this name could be applied. Review the current generation and retry explicitly."
-        : "Another review window changed this draft. Review the current revision and retry explicitly.",
+        : "Another window changed this draft. Review the current revision and retry explicitly.",
     reason: error instanceof ReviewGenerationConflictError ? "generation-conflict" as const : "rejected" as const,
   };
 }

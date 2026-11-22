@@ -22,7 +22,7 @@ export class ReviewUpgradePreparation {
       if (this.#stopped) return;
       if (status.phase === 'preparing' && (status.attemptId !== this.#attempt || status.settlementRequired === true)) {
         this.#attempt = status.attemptId;
-        this.port.frozen(true, 'Preparing this review for the upgrade. Your pending input is being protected.');
+        this.port.frozen(true, 'Preparing this document for the upgrade. Your pending input is being protected.');
         let error: string | undefined;
         try {
           if (this.#protectedAttempt !== this.#attempt) {
@@ -38,13 +38,13 @@ export class ReviewUpgradePreparation {
       if (status.phase === 'canceled' || status.phase === 'none' || status.phase === 'preview') {
         this.#attempt = undefined;
         this.#protectedAttempt = undefined;
-        this.port.frozen(false, status.phase === 'canceled' ? status.reason ?? 'Upgrade canceled. Your review is still open.' : undefined);
+        this.port.frozen(false, status.phase === 'canceled' ? status.reason ?? 'Upgrade canceled. Your document is still open.' : undefined);
       } else if (status.phase === 'committed' && status.attemptId === this.#attempt) {
         const closed = await this.port.close();
         if (closed !== false) this.#stopped = true;
       }
     } catch (error) {
-      if (!this.#stopped && this.#attempt !== undefined) this.port.frozen(true, 'The upgrade connection was interrupted. Keep this review open until preparation is canceled or the connection returns.');
+      if (!this.#stopped && this.#attempt !== undefined) this.port.frozen(true, 'The upgrade connection was interrupted. Keep this document open until preparation is canceled or the connection returns.');
     } finally { this.#running = false; }
   }
   stop(): void { this.#stopped = true; }

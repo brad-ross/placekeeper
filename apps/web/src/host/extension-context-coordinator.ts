@@ -258,7 +258,7 @@ export class ExtensionContextCoordinator {
     const blocks = [...this.#foreign];
     if (this.#snapshot && !this.#paused && !this.#removed.has(backgroundContextUri)) {
       const s = this.#snapshot;
-      blocks.push(resource(backgroundContextUri, 'Current Placekeeper review', JSON.stringify({
+      blocks.push(resource(backgroundContextUri, 'Current Placekeeper document', JSON.stringify({
         documentDigest: s.source.digest, documentGeneration: s.documentGeneration, reviewRevision: s.reviewRevision, title: s.title.slice(0, 160), page: s.page, pageCount: s.pageCount,
         selection: s.selection ? { text: s.selection.text.slice(0, 1600), pages: s.selection.pages.slice(0, 8) } : null,
         annotations: s.annotations.slice(0, 20).map(item => ({ id: item.id, page: item.page, kind: item.kind, text: item.text.slice(0, 240) })),

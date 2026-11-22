@@ -501,7 +501,7 @@ export async function createStaticHostRuntime(
     },
     subscribeInvalidations: () => () => undefined,
     async command(command) {
-      if (disposed) throw new Error("This review is closed.");
+      if (disposed) throw new Error("This document is closed.");
       const nextState = reduceReview(state, command);
       projectReviewItems(nextState.items, undefined, {
         ...(nextState.annotationName === undefined ? {} : { annotationName: nextState.annotationName }),
@@ -532,7 +532,7 @@ export async function createStaticHostRuntime(
       return notSavedStatus(state, eligibility, lastExportedRevision);
     },
     async exportReviewedCopy(_confirmPossiblyStale?: true, fence?: ReviewExportFence): Promise<ProductionExportResult> {
-      if (disposed) throw new Error("This review is closed.");
+      if (disposed) throw new Error("This document is closed.");
       if (fence && (fence.expectedRevision !== state.revision || fence.documentGeneration !== state.workflow.documentGeneration)) {
         throw new ReviewExportConflictError();
       }
@@ -552,10 +552,10 @@ export async function createStaticHostRuntime(
         }, { timeoutMs: writerTimeoutMs });
       } catch (error) {
         if (isStaticOperationCancelled(error)) {
-          throw new Error("Export was cancelled. Your in-memory review is still available; try again.");
+          throw new Error("Export was cancelled. Your in-memory annotations are still available; try again.");
         }
         if (error instanceof BrowserDocumentSessionError && error.code === "timeout") {
-          throw new Error("PDF export timed out. Your in-memory review is still available; try again.");
+          throw new Error("PDF export timed out. Your in-memory annotations are still available; try again.");
         }
         throw error;
       }
@@ -565,7 +565,7 @@ export async function createStaticHostRuntime(
       lastExportedRevision = Math.max(lastExportedRevision, exportState.revision);
       updateUnloadGuard();
       const newerEdits = state.revision > exportState.revision;
-      const structuralCheck = "Placekeeper confirmed the copy opens and contains the exported review marks; other PDF content was not comprehensively checked, and the browser was only asked to start the download.";
+      const structuralCheck = "Placekeeper confirmed the copy opens and contains the exported annotations; other PDF content was not comprehensively checked, and the browser was only asked to start the download.";
       return {
         kind: "reviewed-copy",
         path: filename,

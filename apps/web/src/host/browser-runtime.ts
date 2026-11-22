@@ -261,7 +261,7 @@ export function createBrowserHostRuntime(session: ProductionSession): HostRuntim
     },
     async exportReviewedCopy(confirmPossiblyStale?: true, fence?: ReviewExportFence): Promise<ProductionExportResult> {
       const method = (await ensureLoaded()).api.exportReviewedCopy;
-      if (method === undefined) throw new Error("Reviewed export is unavailable.");
+      if (method === undefined) throw new Error("Annotated Document export is unavailable.");
       return method(confirmPossiblyStale, fence);
     },
     async scope(signal?: AbortSignal): Promise<ProductionScope> {

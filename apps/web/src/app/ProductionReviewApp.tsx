@@ -2888,9 +2888,9 @@ export function ProductionReviewApp(props: ProductionReviewAppProps) {
           });
         }}
         save={{
-          savedLabel: saveStatus.destination.phase === 'host' && !saveStatus.destination.writable ? 'Protected review state' : exportOnly
+          savedLabel: saveStatus.destination.phase === 'host' && !saveStatus.destination.writable ? 'Protected document state' : exportOnly
             ? 'Export to keep your annotations'
-            : state.workflow.mode === 'generated-output' ? 'Protected review state' : 'Saved',
+            : state.workflow.mode === 'generated-output' ? 'Protected document state' : 'Saved',
           savePhase: exportOnly
             ? 'not-saved'
             : state.workflow.mode === 'generated-output' ? 'clean' : saveStatus.sync.phase,

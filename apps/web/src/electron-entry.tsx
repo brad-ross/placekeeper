@@ -69,7 +69,7 @@ function ElectronReview({ bridge, identity }: { bridge: ElectronShellBridge; ide
             sourceModalOpen.current = false; setSourceEndpoint(undefined);
             flushSync(() => setClosing(true));
             void (async () => {
-                try { if (!settle.current) throw new Error('The review is still opening. Try closing it again after it loads.'); await settle.current(); await bridge.closeSettled(identity, message.token); }
+                try { if (!settle.current) throw new Error('The document is still opening. Try closing it again after it loads.'); await settle.current(); await bridge.closeSettled(identity, message.token); }
                 catch (error) { setClosing(false); await bridge.closeSettled(identity, message.token, error instanceof Error ? error.message : 'Input could not be protected').catch(() => undefined); }
             })();
         }

@@ -274,7 +274,7 @@ async function start() {
         if (typeof token !== 'string' || e.closeToken !== token) throw new Error('Stale close');
         delete e.closeToken;
         try { if (error !== undefined) throw new Error(typeof error === 'string' ? error : 'Review input could not be protected'); await e.bridge.settle(); if (e.bridge.retired || entries.get(event.sender.id) !== e) throw new Error('Retired close attempt'); e.permitClose = true; timing('close-protected', e.bridge); e.window.destroy(); }
-        catch (failure) { quitState.active = false; dialog.showErrorBox('Review remains open', String(failure)); throw failure; }
+        catch (failure) { quitState.active = false; dialog.showErrorBox('Document remains open', String(failure)); throw failure; }
     });
     const assetRoot = join(root, 'electron-web');
     const inventory = new Set<string>();
@@ -356,7 +356,7 @@ async function start() {
         entry.failureShown = true;
         await retire().catch(() => undefined);
         if (window.isDestroyed()) return;
-        const result = await dialog.showMessageBox(window, { type: 'error', title: 'Review interrupted', message: 'This document could not continue. Acknowledged work remains recoverable.', detail: String(reason), buttons: ['Retry', 'Close'], defaultId: 0, cancelId: 1 });
+        const result = await dialog.showMessageBox(window, { type: 'error', title: 'Document interrupted', message: 'This document could not continue. Acknowledged work remains recoverable.', detail: String(reason), buttons: ['Retry', 'Close'], defaultId: 0, cancelId: 1 });
         const intent = entry.intent;
         registry.remove(window); window.destroy();
         if (result.response === 0) void openDocument(sourcePath, intent).catch(showFailure);
@@ -404,7 +404,7 @@ async function start() {
         await windowRegistration;
         await bridge.admit(sourcePath, async offer => {
             const labels = { resume: 'Resume Draft', discard: 'Use PDF', fork: 'Recover Copy' };
-            const result = await dialog.showMessageBox(window, { type: 'question', title: 'Protected draft', message: 'This PDF has a protected review draft.', detail: 'Resume it, discard it and use the PDF, or open a separate recovered copy.', buttons: [...offer.choices.map(choice => labels[choice]), 'Cancel'], defaultId: 0, cancelId: offer.choices.length });
+            const result = await dialog.showMessageBox(window, { type: 'question', title: 'Protected draft', message: 'This PDF has a protected annotation draft.', detail: 'Resume it, discard it and use the PDF, or open a separate recovered copy.', buttons: [...offer.choices.map(choice => labels[choice]), 'Cancel'], defaultId: 0, cancelId: offer.choices.length });
             const decision = offer.choices[result.response];
             if (decision === undefined) throw new Error('Recovery canceled; protected draft retained');
             return decision;
@@ -465,7 +465,7 @@ async function start() {
                 confirm: async path => (await dialog.showMessageBox({ type: 'question', title: 'Open Placekeeper link', message: `Open ${basename(path)}?`, detail: path, buttons: ['Open PDF', 'Cancel'], cancelId: 1 })).response === 0,
                 recover: async offer => {
                     const labels = { resume: 'Resume Draft', discard: 'Use PDF', fork: 'Recover Copy' };
-                    const result = await dialog.showMessageBox({ type: 'question', title: 'Protected draft', message: 'This linked PDF has a protected review draft.', buttons: [...offer.choices.map(choice => labels[choice]), 'Cancel'], cancelId: offer.choices.length });
+                    const result = await dialog.showMessageBox({ type: 'question', title: 'Protected draft', message: 'This linked PDF has a protected annotation draft.', buttons: [...offer.choices.map(choice => labels[choice]), 'Cancel'], cancelId: offer.choices.length });
                     return offer.choices[result.response];
                 },
             });

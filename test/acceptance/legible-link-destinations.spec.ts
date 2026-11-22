@@ -515,7 +515,7 @@ test("Covers AE6. a banded destination is neither listed as an annotation nor ex
 
   await page.getByRole("button", { name: /Open document actions$/u }).click();
   await page.getByRole("menuitem", { name: "Export", exact: true }).click();
-  const dialog = page.getByRole("dialog", { name: "Export reviewed PDF", exact: true });
+  const dialog = page.getByRole("dialog", { name: "Export Annotated Document", exact: true });
   const exported = page.waitForResponse((response) => response.url().endsWith("/export") && response.ok());
   await dialog.getByRole("button", { name: "Export", exact: true }).click();
   const result = await (await exported).json() as { path: string };

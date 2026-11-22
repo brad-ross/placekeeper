@@ -403,7 +403,7 @@ function safeState(value: unknown): unknown {
 function safeSaveStatus(value: unknown): unknown {
   if (!isObject(value) || !isObject(value.destination) || value.destination.phase !== "active") return value;
   const { targetPath: _targetPath, capabilityId: _capabilityId, fingerprint: _fingerprint, ...destination } = value.destination;
-  return { ...value, destination: { ...destination, targetPath: "Reviewed PDF" } };
+  return { ...value, destination: { ...destination, targetPath: "Annotated Document" } };
 }
 
 function safeResult(method: ReviewRuntimeBrokerMethod, value: unknown): unknown {
@@ -431,7 +431,7 @@ function safeResult(method: ReviewRuntimeBrokerMethod, value: unknown): unknown 
       return safe;
     }
     case "exportReviewedCopy":
-      return isObject(value) ? { ...value, path: "Reviewed PDF" } : value;
+      return isObject(value) ? { ...value, path: "Annotated Document" } : value;
     case "upgradePoll":
     case "upgradeSettle":
     case "command":
@@ -643,7 +643,7 @@ export function createLoopbackRuntimeClient(options: LoopbackRuntimeClientOption
               state: safeState(currentState),
               message: generationConflict
                 ? "The PDF was rebuilt before this command could be applied. Review the current generation and retry explicitly."
-                : "Another review window changed this draft. Review the current revision and retry explicitly.",
+                : "Another window changed this draft. Review the current revision and retry explicitly.",
               ...(generationConflict ? { reason: "generation-conflict" } : {}),
             };
           } else {

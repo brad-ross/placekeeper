@@ -392,7 +392,7 @@ describe("reviewed PDF export transaction", () => {
     const acknowledged = broker.state(opened.launch.sessionId)!;
     const fence = { expectedRevision: acknowledged.revision, documentGeneration: acknowledged.workflow.documentGeneration };
     await broker.acceptMutation(opened.launch.sessionId, setAnnotationName(acknowledged, "Other Window"));
-    await expect(broker.freezeDelivery(opened.launch.sessionId, fence)).rejects.toThrow("Review changed");
+    await expect(broker.freezeDelivery(opened.launch.sessionId, fence)).rejects.toThrow("Document changed");
     await broker.acceptMutation(opened.launch.sessionId, setAnnotationName(broker.state(opened.launch.sessionId)!, "Brad Ross"));
     const retry = broker.state(opened.launch.sessionId)!;
     const frozen = await broker.freezeDelivery(opened.launch.sessionId, {

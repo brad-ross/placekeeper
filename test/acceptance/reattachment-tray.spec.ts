@@ -400,7 +400,7 @@ for (const viewport of viewports) {
     const trigger = row.getByRole('button', {
       name: /Reattach previous Highlight annotation on page 1/u,
     });
-    const selectionActions = page.getByRole('toolbar', { name: 'Selection review actions' });
+    const selectionActions = page.getByRole('toolbar', { name: 'Selection actions' });
     await page.mouse.move(0, 0);
     const restingSurface = await rowSurface(row);
     await expect(selectionActions).toBeVisible();
@@ -560,7 +560,7 @@ test('reattachment suppresses PDF caret and action shortcuts until the reader ex
   await expect(caret).toBeVisible();
 
   await page.getByRole('button', { name: 'Use selection' }).click();
-  const selectionActions = page.getByRole('toolbar', { name: 'Selection review actions' });
+  const selectionActions = page.getByRole('toolbar', { name: 'Selection actions' });
   await expect(selectionActions).toBeVisible();
   const stateOutput = page.locator('output[data-revision]');
   const beforeShortcuts = await stateOutput.evaluate((element) => ({

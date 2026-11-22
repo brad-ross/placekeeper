@@ -158,7 +158,7 @@ describe("Chrome PDF handler controller", () => {
 
     expect(controller.state()).toBe("update-required");
     expect(status).toHaveBeenLastCalledWith(
-      "Placekeeper needs to be updated before this protected review can reopen.",
+      "Placekeeper needs to be updated before this protected document can reopen.",
     );
     expect(ports.fallback).not.toHaveBeenCalled();
   });

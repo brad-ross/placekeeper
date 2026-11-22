@@ -102,8 +102,8 @@ for (const mode of ['browser', 'electron', 'failed']) test(`actual composer upgr
           expect(await surface.evaluate(() => (window as typeof window & { __upgradeLifecycle: unknown }).__upgradeLifecycle)).toEqual({ disposed: 0, closeRequested: 0 });
         }
       } else {
-        await expect(page.getByText('This review was protected and closed for the upgrade.', { exact: false })).toBeVisible();
-        await expect(peer.getByText('This review was protected and closed for the upgrade.', { exact: false })).toBeVisible();
+        await expect(page.getByText('This document was protected and closed for the upgrade.', { exact: false })).toBeVisible();
+        await expect(peer.getByText('This document was protected and closed for the upgrade.', { exact: false })).toBeVisible();
       }
       await Promise.all([page.close(), peer.close()]);
       await host.close();
