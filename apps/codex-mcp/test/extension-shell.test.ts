@@ -1409,9 +1409,10 @@ describe('plain MCP Apps host (Claude Desktop)', () => {
             const f = contextHost({ text: {} });
             await f.shell.receive({ status: 'provisional', grant });
             f.updateModelContext.mockRejectedValue(new Error('declined'));
-            const adding = host.mounts[0][4].addContext({ kind: 'selection', snapshot, note: '' });
+            // Attach the handler before the timers run so the rejection is never unhandled.
+            const failed = expect(host.mounts[0][4].addContext({ kind: 'selection', snapshot, note: '' })).rejects.toThrow('could not be attached');
             await vi.advanceTimersByTimeAsync(0);
-            await expect(adding).rejects.toThrow('could not be attached');
+            await failed;
             await f.shell.teardown();
         });
 
