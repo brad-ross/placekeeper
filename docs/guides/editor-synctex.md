@@ -38,7 +38,7 @@ Check that `build/main.pdf` and `build/main.synctex.gz` (or `.synctex`) exist. M
 
 Identify the root PDF separately from the current source file: `chapters/results.tex` still navigates to `build/main.pdf`. The approved source root must contain every source file to which inverse search may return. It is not inferred from the PDF directory.
 
-For a first round trip, create a profile below, register the source root, and run `forward-search`. In the PDF, Command-click on macOS or Ctrl-click on Windows/Linux at typeset text to return to source. **Review → Go to Source** (`Cmd/Ctrl+Shift+J`) is also available. Directly opened PDFs can use **Review → Configure Source Navigation…** to choose the profile and source folder.
+For a first round trip, create a profile below, register the source root, and run `forward-search`. In the PDF, Command-click on macOS or Ctrl-click on Windows/Linux at typeset text to return to source. **Document → Go to Source** (`Cmd/Ctrl+Shift+J`) is also available. Directly opened PDFs can use **Document → Configure Source Navigation…** to choose the profile and source folder.
 
 The final local macOS arm64 package passed all 12 installed checks; all 2,184 canonical unit/integration tests and final typechecking passed. Current browser and native Windows/Linux evidence remain pending in the [qualification record](../testing/electron-migration-qualification.md). Its genuine PDF/SyncTeX fixture and real recording-editor child process check mapping and process delivery; they do not establish placement in a named editor's UI or native source-dialog qualification. Earlier editor checks in the [acceptance record](../../test/acceptance/editor-synctex.md) apply to their historical AppKit revision. Neovim, Sublime Text, and Emacs recipes remain unverified live.
 
@@ -201,7 +201,7 @@ For a named server, add fixed `--socket-name` and server-name arguments to the t
 
 ## PDFs opened directly in the desktop app
 
-Choose **Review → Go to Source**, or Command-click (macOS) / Ctrl-click (Windows/Linux) a PDF location. On first use, select a saved profile and source folder. Neovim also needs its listening socket path. Canceling leaves the PDF open and changes no association. Use **Review → Configure Source Navigation…** to change the selection. If there are no profiles, create one with `editor add`, then reopen the chooser.
+Choose **Document → Go to Source**, or Command-click (macOS) / Ctrl-click (Windows/Linux) a PDF location. On first use, select a saved profile and source folder. Neovim also needs its listening socket path. Canceling leaves the PDF open and changes no association. Use **Document → Configure Source Navigation…** to change the selection. If there are no profiles, create one with `editor add`, then reopen the chooser.
 
 Setup applies only to that desktop window. A later explicit editor request can replace its return editor. Ordinary Finder opens and public document links do not supply editor configuration or source-root authority.
 

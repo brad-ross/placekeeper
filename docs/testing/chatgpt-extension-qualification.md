@@ -2,9 +2,9 @@
 
 ## Current result
 
-The final source UI uses a centered launcher with **Recent Documents**, inline **Resume / Open Copy** actions, automatic current-review/selection context, and bot actions that attach captured evidence with an optional note without editing or sending the prompt. Sharing settings, cross-chat snapshot discovery, the snapshot picker, and manual Close review are no longer part of the product. File-entry recovery offers **Continue / Open Copy**. This summary supersedes older UI descriptions in the chronological evidence below (updated November 6, 2026).
+The final source UI uses a centered launcher with **Recent Documents**, inline **Resume / Open Copy** actions, automatic current-document/selection context, and bot actions that attach captured evidence with an optional note without editing or sending the prompt. Sharing settings, cross-chat snapshot discovery, the snapshot picker, and the manual Close review control are no longer part of the product. File-entry recovery offers **Continue / Open Copy**. This summary supersedes older UI descriptions in the chronological evidence below (updated November 6, 2026).
 
-Native checks have established file/conversation entry, live inspection/search/navigation, collapse-to-navigation expansion, opaque conditional save/conflict, autosave to a chosen local copy, explicit recovery, a successful sleep/wake cycle, independent reviews in two chats, and installed legacy-hook compatibility. Each result is bounded by its recorded artifact and route below; it is not blanket qualification of every later revision. The latest ordinary preview includes the launcher-centering correction, which the user confirmed after restarting Codex.
+Native checks have established file/conversation entry, live inspection/search/navigation, collapse-to-navigation expansion, opaque conditional save/conflict, autosave to a chosen local copy, explicit recovery, a successful sleep/wake cycle, independent documents in two chats, and installed legacy-hook compatibility. Each result is bounded by its recorded artifact and route below; it is not blanket qualification of every later revision. The latest ordinary preview includes the launcher-centering correction, which the user confirmed after restarting Codex.
 
 **Remaining limits:** native context removal across an actual same-invocation remount remains unqualified because the tested restart did not restore the reader. Automated tests cover removal/publication races and remount coordination. Host download is optional and unsupported on the tested host. Native composer mention discovery is no longer an acceptance requirement because the feature was removed. Repeated **New Document / Cancel** can make the native picker progressively slow; investigation is explicitly deferred, and no latency fix is claimed.
 
@@ -23,7 +23,7 @@ Record host version, OS, pinned extension SDK version, candidate artifact digest
 | Case | Required observation |
 |---|---|
 | File entrypoint | A disposable PDF opens through its native file-menu action without a chat message; record opaque URI versus trusted-path availability without recording the URI/path itself. |
-| Conversation entrypoint | Current review or chooser opens directly; cancel preserves the prior view. |
+| Conversation entrypoint | Current document or chooser opens directly; cancel preserves the prior view. |
 | Private result delivery | Initial activation and remount deliver the intended private app data without exposing it in model content. |
 | Continuation | Lost response retry, remount, and old/new simultaneous instances have defined outcomes; retired authority cannot mutate. |
 | Host resources | Read, update subscription, writable metadata, conditional ETag save, and conflict outcomes work on a disposable fixture. |
@@ -78,7 +78,7 @@ The user confirmed that the panel automatically expanded during the 23:44:53Z li
 
 ## Production reader qualification preparation
 
-The focused browser suite is `test/acceptance/chatgpt-extension.spec.ts`, registered in the native and Chromium CI suites. It instantiates the actual `ExtensionShell`, canonical production reader, PDF search/navigation and service review backend. The host entry grant, preferences, model-context, mention-catalogue and draft-message APIs are simulated at the boundary. Each evidence attachment explicitly reports `actualHost: false`.
+The focused browser suite is `test/acceptance/chatgpt-extension.spec.ts`, registered in the native and Chromium CI suites. It instantiates the actual `ExtensionShell`, canonical production reader, PDF search/navigation and service document backend. The host entry grant, preferences, model-context, mention-catalogue and draft-message APIs are simulated at the boundary. Each evidence attachment explicitly reports `actualHost: false`.
 
 The suite checks preference loading before reader/context publication; accepted annotation identities; exact search and result reveal; stale generation rejection; editable annotation discussion draft with `send: false`; partial context removal followed by another publication; explicit mention include/update/remove controls; compact-to-fullscreen tool navigation; real pointer selection into a captured discussion draft without annotation mutation; external sharing-off while publication is pending; and desktop/narrow screenshots with sharing and discussion controls open. Browser tests do not establish native composer delivery, host resource conditional writes, or native settings event ordering. Existing service/shell and lifecycle tests provide separate coverage for save/conflict/recovery and preference races.
 
@@ -113,12 +113,12 @@ The tested bundle SHA256 is `cbe66248ab63712021e6ae05f02dac0f92bec2d3fa5e5a85c0e
 
 ### Remaining actual-host checklist
 
-- Open only a disposable fixture through the native PDF file-menu entry; verify the production candidate identity and readable PDF. Open the conversation entry independently and verify current-review/chooser/cancel behavior.
+- Open only a disposable fixture through the native PDF file-menu entry; verify the production candidate identity and readable PDF. Open the conversation entry independently and verify current-document/chooser/cancel behavior.
 - Confirm private activation and explicit fresh reopen. Exercise reconnect with protected annotation/draft identities, and verify old authority cannot mutate after continuation. Do not use browser-page reload as a recovery shortcut.
 - Inspect and search the accepted live PDF; reveal an exact search result, navigate to a page, and repeat from a user-collapsed panel. Record visible completion, not merely a successful tool response.
 - Select text and prepare a discussion draft; choose a subset of annotations and prepare another. Verify editable native composer text, chosen evidence and no automatic send.
 - Remove one context group, then change page/selection and verify it remains absent; remove all groups and verify background sharing stays paused until explicitly resumed.
-- Change global sharing settings through native controls while publication is pending; verify off remains effective. Enable mention snapshots, explicitly include/update/remove one review and inspect the captured revision from another chat.
+- Change global sharing settings through native controls while publication is pending; verify off remains effective. Enable mention snapshots, explicitly include/update/remove one document and inspect the captured revision from another chat.
 - Exercise resource notification refresh, read-only export, conditional save, conflict and protected recovery using disposable copies only. Verify source bytes and accepted item identities at each boundary.
 - Inspect desktop and narrow layouts for horizontal overflow, clipped controls, discussion-palette overlap and keyboard access in the actual host.
 - Recheck the existing trusted local-PDF workflow, then stop the isolated daemon and remove the candidate through the supported plugin flow after retaining evidence.

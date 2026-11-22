@@ -4,14 +4,14 @@ Shared domain vocabulary for this project — entities, named processes, and sta
 
 ## Naming
 
-People see **Document** for an open PDF and its annotations, **Annotations** for what they add to it, and **Annotated Document** for an exported copy. In code the same ideas are `DocumentSession`, `Annotation`, `AnnotationRevision`, and `annotated-copy`, and the UI layer (shell, chrome, toolbar) is the **Reader**. Older `review*` identifiers, protocol names, and saved-data keys are being renamed in phases; saved-data keys keep their original spelling on disk.
+People see **Document** for an open PDF and its annotations, **Annotations** for what they add to it, and **Annotated Document** for an exported copy. In code the same ideas are `DocumentSession`, `Annotation`, `AnnotationRevision`, and `annotated-copy`, and the UI layer (shell, chrome, toolbar) is the **Reader**. Code identifiers, file and folder names, CSS classes, and protocol names now use these terms. Serialized fields, some wire values, and saved-data keys such as `reviewSessionId`, `reviewRevision`, `reviewItems`, and the `reviewed-copy` export kind keep their original spelling on disk and on the wire, and the older `display_review` MCP tool and `placekeeper.exportReviewedPdf` VS Code command remain as deprecated aliases.
 *Avoid:* Review, Review Item, Reviewed PDF, reviewer
 
 ## Live document context
 
 ### Document Session
 A live Placekeeper session for one PDF, carrying its annotation state and serving the host views that participate in it. Shown to people simply as the Document.
-*Avoid:* Review Session, Review (`reviewSessionId` and other `review*` code names are being renamed)
+*Avoid:* Review Session, Review (`reviewSessionId` survives as a serialized field name)
 
 ### Document Generation
 The identity boundary separating successive document versions within a Document Session, so observations and evidence from an earlier version cannot silently authorize work on its replacement.

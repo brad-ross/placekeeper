@@ -47,11 +47,11 @@ All local candidate tests use explicit `--isolated-installed-smoke --http-port P
 | Renderer has no Node globals; wrong-window, arbitrary-method and path injection requests rejected | Passed | `electron-installed.spec.ts` |
 | Two documents; duplicate open focuses existing window without replacing its identity | Passed | `electron-lifecycle.spec.ts` |
 | Closing one window protects the exact current unsaved editor text and leaves the other usable | Passed | `electron-lifecycle.spec.ts`; exact recovery-file assertion and original PDF-byte comparison |
-| Edit, undo, redo, publish to original; reopen portable annotation from a separate recovery root | Passed | `electron-review-workflow.spec.ts` |
-| External source replacement observed; subsequent save preserves successor pages and metadata | Passed | `electron-review-workflow.spec.ts` |
+| Edit, undo, redo, publish to original; reopen portable annotation from a separate recovery root | Passed | `electron-document-workflow.spec.ts` |
+| External source replacement observed; subsequent save preserves successor pages and metadata | Passed | `electron-document-workflow.spec.ts` |
 | Native launchers and bundled MCP discovery without system Node | Passed | `electron-launcher.spec.ts`; malformed/unauthorized launch rejection and real MCP discovery |
 | Focused native link navigates an existing window before task activation; Copy Link remains available | Passed | `electron-focused-link.spec.ts`; same window/attempt, page 3, task unavailable before navigation and current afterward |
-| Cancel protected draft without a save destination | Passed | `electron-review-workflow.spec.ts`; composer closes, canonical draft clears and original PDF bytes remain unchanged |
+| Cancel protected draft without a save destination | Passed | `electron-document-workflow.spec.ts`; composer closes, canonical draft clears and original PDF bytes remain unchanged |
 | Renderer crash followed by native Retry | Passed on local macOS arm64 | Actual CDP renderer crash after exact-text protection; native Retry restores protected draft under a new attempt and leaves the second document usable |
 | Native Close after a renderer crash; normal Quit and reopen | Passed on local macOS arm64 | [Artifact identities and observed results](electron-lifecycle-2026-11-02.json): Close left the peer interactive and the exact protected draft recoverable. Normal Quit restored page 2, 125% zoom and bounds. |
 | Electron → retained Mac → Electron recovery-compatible service switching | Passed | `desktop-service-rollback.spec.ts` |
@@ -69,7 +69,7 @@ The corrected local package passes all nine installed workflow tests. The focuse
 | Requirement | Implemented mechanism and evidence boundary |
 | --- | --- |
 | R1 | Native Forge targets for macOS arm64/x64 ZIP, Windows x64 Setup.exe and Ubuntu x64 deb; independent Node, PDFium and service packaged. Native artifact results are recorded below. |
-| R2 | One production React review tree, shared CSS/icons, native window chrome. Paired AppKit/Electron document-layout comparison above; additional sizes, DPI settings, states and OS desktops remain unqualified. |
+| R2 | One production React reader tree, shared CSS/icons, native window chrome. Paired AppKit/Electron document-layout comparison above; additional sizes, DPI settings, states and OS desktops remain unqualified. |
 | R3 | Separate candidate name/identifier; no automatic handler or integration registration. Explicit registration uses ownership receipts and refuses existing configuration. |
 | R4 | Shared navigation, authoring, source/save/export model. Actual packaged save/edit/undo/redo/source-refresh tests pass; native clipboard, dialogs and every navigation modality still need interactive OS qualification. |
 | R5 | Per-window bridges, duplicate-open registry, bounded presentation restoration, renderer failure retry. Two-window and close isolation pass; native Retry and Close after real renderer crashes pass; normal Quit restores bounds, page and zoom on macOS arm64. |
@@ -88,7 +88,7 @@ AE1 is exercised in the packaged lifecycle test. AE2 native Retry after renderer
 
 | Platform | Evidence status |
 | --- | --- |
-| Local macOS arm64 | Actual packaged review tests above; native macOS 15 arm64 CI ZIP and all nine packaged tests passed in run `41580676334` at `228566a3`; no installation over the user's app |
+| Local macOS arm64 | Actual packaged document tests above; native macOS 15 arm64 CI ZIP and all nine packaged tests passed in run `41580676334` at `228566a3`; no installation over the user's app |
 | macOS x64 | Native macOS 15 Intel CI ZIP and all nine packaged tests passed in run `41580676334` at `228566a3` |
 | macOS 13 | Untested; compatible minimum version is not execution evidence |
 | Windows Server 2025 x64 | Native run `41580676334` at `228566a3`: 85 platform unit/integration tests, locked-save/retry acceptance, installer build, and all nine packaged workflow tests passed. Setup.exe is a candidate artifact; an interactive Windows 11 install was not tested. |

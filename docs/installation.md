@@ -1,6 +1,6 @@
 # Install and uninstall
 
-Placekeeper's desktop application uses Electron on macOS, Windows, and Linux. Desktop installers include the review client, service, PDFium assets and pinned Node runtime. Running an installed app requires no Node.js, pnpm or compiler. Installation leaves your default PDF reader alone.
+Placekeeper's desktop application uses Electron on macOS, Windows, and Linux. Desktop installers include the reader client, service, PDFium assets and pinned Node runtime. Running an installed app requires no Node.js, pnpm or compiler. Installation leaves your default PDF reader alone.
 
 ## Download availability
 
@@ -34,7 +34,7 @@ On Ubuntu/Debian, the package manager may ask for administrator authentication a
 
 ### When installation is blocked
 
-Source installation is an alternative only where local builds and execution are permitted. It is not a policy bypass. Ask your administrator if unsigned or locally built software is prohibited. Where neither desktop route is allowed, the web reader offers one local PDF or a compatible public HTTPS PDF, annotations, and reviewed-copy export. It has **no autosave or reload recovery**: export before closing or reloading. It does not supply desktop integrations or shared-service recovery. Use non-confidential PDFs; remote URLs and normal request metadata reach the remote host. The [web beta runbook](web-beta.md) still governs publication and browser qualification.
+Source installation is an alternative only where local builds and execution are permitted. It is not a policy bypass. Ask your administrator if unsigned or locally built software is prohibited. Where neither desktop route is allowed, the web reader offers one local PDF or a compatible public HTTPS PDF, annotations, and annotated-copy export. It has **no autosave or reload recovery**: export before closing or reloading. It does not supply desktop integrations or shared-service recovery. Use non-confidential PDFs; remote URLs and normal request metadata reach the remote host. The [web beta runbook](web-beta.md) still governs publication and browser qualification.
 
 ## Install from a checkout
 
@@ -94,6 +94,6 @@ The installed CLI's `doctor --json --chrome` checks registration. `pnpm test:chr
 
 ## Uninstall
 
-Close reviews and end bound tasks first. On Windows use the installed **Uninstall.exe** (also registered with Windows Apps). On macOS, open **Install Placekeeper.app** in the mounted DMG and choose **Uninstall existing installation** when offered. See [Manual upgrades and recovery](desktop-upgrades.md) for custom destinations. Removing the Mac/source app directory through the file manager removes that app, but does not perform integration cleanup. The source scripts have no `--uninstall` flag. On Debian use the package manager to remove `placekeeper`; both removal and purge retain potentially active runtime/recovery resources.
+Close open documents and end bound tasks first. On Windows use the installed **Uninstall.exe** (also registered with Windows Apps). On macOS, open **Install Placekeeper.app** in the mounted DMG and choose **Uninstall existing installation** when offered. See [Manual upgrades and recovery](desktop-upgrades.md) for custom destinations. Removing the Mac/source app directory through the file manager removes that app, but does not perform integration cleanup. The source scripts have no `--uninstall` flag. On Debian use the package manager to remove `placekeeper`; both removal and purge retain potentially active runtime/recovery resources.
 
 Remove optional extensions/plugins through their hosts. Only owned unchanged registrations can be removed automatically; inspect any retained-registration report. PDFs, exports, settings and Protected Recovery are preserved. See [Privacy and recovery](privacy-and-recovery.md) before deleting user data. Retained app versions and Debian runtimes are recovery resources; cleanup is an explicit later action after all sessions are closed, never a traversal of user-state directories.
