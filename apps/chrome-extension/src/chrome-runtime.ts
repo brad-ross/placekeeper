@@ -1,15 +1,15 @@
 import {
-  REVIEW_RUNTIME_PROTOCOL,
-  REVIEW_RUNTIME_VERSION,
-  isReviewRuntimeMethodForHost,
-  sanitizeChromeReviewRuntimeRequest,
-  sanitizeChromeReviewRuntimeResponse,
-  type ReviewRuntimeBrokerMethod,
-  type ReviewRuntimeMethod,
+  DOCUMENT_RUNTIME_PROTOCOL,
+  DOCUMENT_RUNTIME_VERSION,
+  isDocumentRuntimeMethodForHost,
+  sanitizeChromeDocumentRuntimeRequest,
+  sanitizeChromeDocumentRuntimeResponse,
+  type DocumentRuntimeBrokerMethod,
+  type DocumentRuntimeMethod,
 } from "../../../packages/core/src/review-runtime-protocol.js";
 import { sha256Hex } from "../../../packages/core/src/sha256.js";
 import { deadlineWasSubstantiallyDelayed } from "../../../packages/core/src/suspend-aware-deadline.js";
-import type { EmbeddedReviewLifecycleEvent, PdfStreamInfo } from "./handler-controller.js";
+import type { EmbeddedDocumentLifecycleEvent, PdfStreamInfo } from "./handler-controller.js";
 import type { NativePort } from "./chrome-api.js";
 import {
   CHROME_RUNTIME_PROTOCOL,
@@ -39,7 +39,7 @@ const TERMINAL_REFRESH_FAILURES = new Set([
   "invalid-state",
   "connection-closed",
 ]);
-const NON_IDEMPOTENT = new Set<ReviewRuntimeBrokerMethod>([
+const NON_IDEMPOTENT = new Set<DocumentRuntimeBrokerMethod>([
   "command",
   "beginInteraction",
   "finalizeInteraction",
@@ -53,7 +53,7 @@ const NON_IDEMPOTENT = new Set<ReviewRuntimeBrokerMethod>([
   "exportReviewedCopy",
 ]);
 
-interface ReviewRuntimeMessagePort {
+interface DocumentRuntimeMessagePort {
   readonly runtimeId: string;
   postMessage(message: unknown): unknown;
   subscribe(listener: (message: unknown) => void): () => void;
@@ -77,19 +77,19 @@ interface RuntimeProjection {
   };
 }
 
-export interface NativeEmbeddedReviewSession {
+export interface NativeEmbeddedDocumentSession {
   readonly displayName: string;
-  readonly runtimePort: ReviewRuntimeMessagePort;
+  readonly runtimePort: DocumentRuntimeMessagePort;
   readonly protected: boolean;
   activate(signal?: AbortSignal): Promise<void>;
   confirmDocumentReady(generation: number): void;
   reportViewerFailure(): void;
   release(): Promise<void>;
   dispose(): void;
-  subscribeLifecycle(listener: (event: EmbeddedReviewLifecycleEvent) => void): () => void;
+  subscribeLifecycle(listener: (event: EmbeddedDocumentLifecycleEvent) => void): () => void;
 }
 
-export interface NativeEmbeddedReviewOptions {
+export interface NativeEmbeddedDocumentOptions {
   connectNative(): NativePort;
   fetchStream(url: string, signal?: AbortSignal): Promise<Response>;
   createId(): string;
@@ -298,7 +298,7 @@ class NativeRuntimeChannel {
   async negotiate(interactionOwnerSecret?: string, signal?: AbortSignal): Promise<boolean> {
     const reply = await this.#requestInternal({
       type: "hello",
-      reviewRuntimeVersion: REVIEW_RUNTIME_VERSION,
+      reviewRuntimeVersion: DOCUMENT_RUNTIME_VERSION,
       protocol: CHROME_RUNTIME_PROTOCOL,
       protocolVersion: CHROME_RUNTIME_PROTOCOL_VERSION,
       connectionId: this.connectionId,
@@ -592,15 +592,15 @@ async function readProjectedDocument(
   return concatenate(chunks, byteLength);
 }
 
-function reviewResponse(
+function documentResponse(
   request: Record<string, unknown>,
   projection: RuntimeProjection,
   ok: boolean,
   payload: unknown,
 ): Record<string, unknown> {
   return {
-    protocol: REVIEW_RUNTIME_PROTOCOL,
-    version: REVIEW_RUNTIME_VERSION,
+    protocol: DOCUMENT_RUNTIME_PROTOCOL,
+    version: DOCUMENT_RUNTIME_VERSION,
     kind: "response",
     runtimeId: request.runtimeId,
     sessionId: typeof request.sessionId === "string" ? request.sessionId : projection.sessionId,
@@ -612,10 +612,10 @@ function reviewResponse(
   };
 }
 
-export function createNativeEmbeddedReview(options: NativeEmbeddedReviewOptions) {
+export function createNativeEmbeddedDocument(options: NativeEmbeddedDocumentOptions) {
   const timeoutMs = options.timeoutMs ?? 15_000;
   const maxDocumentBytes = options.maxDocumentBytes ?? MAX_DOCUMENT_BYTES;
-  return async (info: PdfStreamInfo, signal?: AbortSignal): Promise<NativeEmbeddedReviewSession> => {
+  return async (info: PdfStreamInfo, signal?: AbortSignal): Promise<NativeEmbeddedDocumentSession> => {
     let response: Response | undefined;
     const connectionId = options.createId();
     const transferId = options.createId();
@@ -704,7 +704,7 @@ export function createNativeEmbeddedReview(options: NativeEmbeddedReviewOptions)
       ], { type: "application/pdf" }));
       const pdfiumWasm = options.getExtensionURL("shared/pdfium.wasm");
       const worker = options.getExtensionURL("shared/pdfium-worker.js");
-      const initialBootstrap = sanitizeChromeReviewRuntimeResponse("bootstrap", {
+      const initialBootstrap = sanitizeChromeDocumentRuntimeResponse("bootstrap", {
         ...projection,
         resources: { document: documentUrl, pdfiumWasm, worker },
       });
@@ -712,7 +712,7 @@ export function createNativeEmbeddedReview(options: NativeEmbeddedReviewOptions)
 
       let bootstrap = initialBootstrap;
       let active = false;
-      let protectedReview = projection.protected;
+      let protectedDocument = projection.protected;
       let adoptedDocumentUrl: string | undefined = documentUrl;
       let pendingDocumentUrl: string | undefined;
       const operationKeys = new Map<string, string>();
@@ -727,7 +727,7 @@ export function createNativeEmbeddedReview(options: NativeEmbeddedReviewOptions)
       let pendingRefreshes = 0;
       const deferredRuntimeRequests: Record<string, unknown>[] = [];
       const runtimeListeners = new Set<(message: unknown) => void>();
-      const lifecycleListeners = new Set<(event: EmbeddedReviewLifecycleEvent) => void>();
+      const lifecycleListeners = new Set<(event: EmbeddedDocumentLifecycleEvent) => void>();
       let lifecycleFailurePublished = false;
       const emitRuntime = (message: unknown) => {
         for (const listener of runtimeListeners) listener(message);
@@ -745,7 +745,7 @@ export function createNativeEmbeddedReview(options: NativeEmbeddedReviewOptions)
         stopRefreshTimers();
         for (const listener of lifecycleListeners) listener({
           type: "disconnected",
-          protected: protectedReview,
+          protected: protectedDocument,
         });
       };
       const terminalRefreshFailure = (error: unknown): boolean => error instanceof NativeRuntimeError &&
@@ -802,7 +802,7 @@ export function createNativeEmbeddedReview(options: NativeEmbeddedReviewOptions)
           if (nextDocumentUrl === undefined) {
             throw new NativeRuntimeError("invalid-service-response", "The refreshed PDF resource was unavailable.");
           }
-          const nextBootstrap = sanitizeChromeReviewRuntimeResponse("bootstrap", {
+          const nextBootstrap = sanitizeChromeDocumentRuntimeResponse("bootstrap", {
             ...next,
             resources: {
               document: nextDocumentUrl,
@@ -824,10 +824,10 @@ export function createNativeEmbeddedReview(options: NativeEmbeddedReviewOptions)
           documentUrl = nextDocumentUrl;
           projection = next;
           bootstrap = nextBootstrap;
-          if (next.protected || reason === "save" || next.revision > previous.revision) protectedReview = true;
+          if (next.protected || reason === "save" || next.revision > previous.revision) protectedDocument = true;
           emitRuntime({
-            protocol: REVIEW_RUNTIME_PROTOCOL,
-            version: REVIEW_RUNTIME_VERSION,
+            protocol: DOCUMENT_RUNTIME_PROTOCOL,
+            version: DOCUMENT_RUNTIME_VERSION,
             kind: "event",
             event: "session-invalidated",
             runtimeId: connectionId,
@@ -920,7 +920,7 @@ export function createNativeEmbeddedReview(options: NativeEmbeddedReviewOptions)
           stopRefreshTimers();
           for (const listener of lifecycleListeners) listener({
             type: "update-required",
-            protected: protectedReview,
+            protected: protectedDocument,
           });
         }
       });
@@ -944,34 +944,34 @@ export function createNativeEmbeddedReview(options: NativeEmbeddedReviewOptions)
         channel.close();
       };
 
-      const runtimePort: ReviewRuntimeMessagePort = {
+      const runtimePort: DocumentRuntimeMessagePort = {
         runtimeId: connectionId,
         subscribe(listener) {
           runtimeListeners.add(listener);
           return () => runtimeListeners.delete(listener);
         },
         postMessage(raw) {
-          if (!record(raw) || raw.protocol !== REVIEW_RUNTIME_PROTOCOL ||
-            raw.version !== REVIEW_RUNTIME_VERSION || raw.runtimeId !== connectionId ||
+          if (!record(raw) || raw.protocol !== DOCUMENT_RUNTIME_PROTOCOL ||
+            raw.version !== DOCUMENT_RUNTIME_VERSION || raw.runtimeId !== connectionId ||
             typeof raw.requestId !== "string") return;
           if (raw.kind === "cancel") return;
-          if (raw.kind !== "request" || !isReviewRuntimeMethodForHost("chrome", raw.method)) return;
-          const method = raw.method as ReviewRuntimeMethod;
+          if (raw.kind !== "request" || !isDocumentRuntimeMethodForHost("chrome", raw.method)) return;
+          const method = raw.method as DocumentRuntimeMethod;
           if (method === "bootstrap") {
-            queueMicrotask(() => emitRuntime(reviewResponse(raw, projection!, true, bootstrap)));
+            queueMicrotask(() => emitRuntime(documentResponse(raw, projection!, true, bootstrap)));
             return;
           }
           if (method === "presence") {
-            queueMicrotask(() => emitRuntime(reviewResponse(raw, projection!, true, {})));
+            queueMicrotask(() => emitRuntime(documentResponse(raw, projection!, true, {})));
             return;
           }
           if (method === "detach") {
-            void release().then(() => emitRuntime(reviewResponse(raw, projection!, true, {})));
+            void release().then(() => emitRuntime(documentResponse(raw, projection!, true, {})));
             return;
           }
-          const payload = sanitizeChromeReviewRuntimeRequest(method, raw.payload);
+          const payload = sanitizeChromeDocumentRuntimeRequest(method, raw.payload);
           if (payload === undefined || !active || released || disposed || lifecycleFailurePublished) {
-            queueMicrotask(() => emitRuntime(reviewResponse(raw, projection!, false, {})));
+            queueMicrotask(() => emitRuntime(documentResponse(raw, projection!, false, {})));
             return;
           }
           if (pendingRefreshes > 0) {
@@ -988,7 +988,7 @@ export function createNativeEmbeddedReview(options: NativeEmbeddedReviewOptions)
           if (operationFingerprint !== undefined) {
             operationKeys.set(operationFingerprint, idempotencyKey!);
             // A missing reply cannot prove that a side effect did not commit.
-            protectedReview = true;
+            protectedDocument = true;
           }
           runtimeInvokes += 1;
           void channel.request({
@@ -1006,7 +1006,7 @@ export function createNativeEmbeddedReview(options: NativeEmbeddedReviewOptions)
             ? INTERACTIVE_REQUEST_TIMEOUT_MS
             : timeoutMs).then((result) => {
               if (result.type !== "result") throw new Error("Unexpected native runtime response.");
-              const safe = sanitizeChromeReviewRuntimeResponse(method, result.payload);
+              const safe = sanitizeChromeDocumentRuntimeResponse(method, result.payload);
               if (safe === undefined) throw new Error("Invalid native runtime response.");
               if (operationFingerprint !== undefined) operationKeys.delete(operationFingerprint);
               if (method === "command" && record(safe) && safe.accepted !== false &&
@@ -1017,25 +1017,25 @@ export function createNativeEmbeddedReview(options: NativeEmbeddedReviewOptions)
                   revision: safe.revision as number,
                 };
                 bootstrap = { ...bootstrap, state: safe, revision: safe.revision };
-                protectedReview = true;
+                protectedDocument = true;
               } else if (method === "finalizeInteraction" && record(safe) &&
                 Number.isSafeInteger(safe.reviewRevision)) {
                 projection = { ...projection!, revision: safe.reviewRevision as number };
                 bootstrap = { ...bootstrap, revision: safe.reviewRevision };
-                protectedReview = true;
+                protectedDocument = true;
               } else if (["chooseCopy", "chooseOriginal", "retrySave", "locateSave"].includes(method)) {
                 bootstrap = { ...bootstrap, saveStatus: safe };
-                protectedReview = true;
+                protectedDocument = true;
               } else if (method === "exportReviewedCopy") {
-                protectedReview = true;
+                protectedDocument = true;
               } else if (method === "saveStatus") {
                 bootstrap = { ...bootstrap, saveStatus: safe };
               } else if (method === "scope" && record(safe)) {
                 bootstrap = { ...bootstrap, scope: safe };
               }
-              emitRuntime(reviewResponse(raw, projection!, true, safe));
+              emitRuntime(documentResponse(raw, projection!, true, safe));
             }, (error: unknown) => {
-              emitRuntime(reviewResponse(raw, projection!, false,
+              emitRuntime(documentResponse(raw, projection!, false,
                 error instanceof Error && error.message.startsWith("Document changed.") ? { kind: "export-conflict" } : {}));
             }).finally(() => {
               runtimeInvokes = Math.max(0, runtimeInvokes - 1);
@@ -1048,7 +1048,7 @@ export function createNativeEmbeddedReview(options: NativeEmbeddedReviewOptions)
       return {
         displayName,
         runtimePort,
-        get protected() { return protectedReview; },
+        get protected() { return protectedDocument; },
         confirmDocumentReady,
         reportViewerFailure: publishLifecycleFailure,
         subscribeLifecycle(listener) {
@@ -1102,7 +1102,7 @@ export function createNativeEmbeddedReview(options: NativeEmbeddedReviewOptions)
             if (nextDocumentUrl === undefined) {
               throw new NativeRuntimeError("invalid-service-response", "The active PDF resource was unavailable.");
             }
-            const nextBootstrap = sanitizeChromeReviewRuntimeResponse("bootstrap", {
+            const nextBootstrap = sanitizeChromeDocumentRuntimeResponse("bootstrap", {
               ...next,
               resources: { document: nextDocumentUrl, pdfiumWasm, worker },
             });
@@ -1125,13 +1125,13 @@ export function createNativeEmbeddedReview(options: NativeEmbeddedReviewOptions)
             throw error;
           }
           if (released || disposed || lifecycleFailurePublished) return;
-          if (next.protected) protectedReview = true;
+          if (next.protected) protectedDocument = true;
           active = true;
           const reason = chromeRuntimeProjectionChangeReason(previous, next);
           if (reason !== undefined) {
             emitRuntime({
-              protocol: REVIEW_RUNTIME_PROTOCOL,
-              version: REVIEW_RUNTIME_VERSION,
+              protocol: DOCUMENT_RUNTIME_PROTOCOL,
+              version: DOCUMENT_RUNTIME_VERSION,
               kind: "event",
               event: "session-invalidated",
               runtimeId: connectionId,

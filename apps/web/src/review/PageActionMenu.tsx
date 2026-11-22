@@ -1,9 +1,9 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type RefObject } from 'react';
 
 import type { ContextPlacement } from './ContextActionPalette.js';
-import { ReviewIcon } from './ReviewIcon.js';
-import { ReviewTooltipButton } from './ReviewTooltipButton.js';
-import { shortcutForReviewAction } from './review-actions.js';
+import { ReaderIcon } from './ReviewIcon.js';
+import { ReaderTooltipButton } from './ReviewTooltipButton.js';
+import { shortcutForDocumentAction } from './review-actions.js';
 
 export interface PageActionMenuProps {
   readonly placement: ContextPlacement;
@@ -73,10 +73,10 @@ export function PageActionMenu(props: PageActionMenuProps) {
           title="Go to LaTeX Source"
           onClick={props.onGoToSource}
         >
-          <ReviewIcon name="locate" />Go to Source
+          <ReaderIcon name="locate" />Go to Source
         </button>
       ) : null}
-      <ReviewTooltipButton
+      <ReaderTooltipButton
         ref={props.triggerRef}
         type="button"
         role="menuitem"
@@ -84,11 +84,11 @@ export function PageActionMenu(props: PageActionMenuProps) {
         label="Add Page Note"
         tooltip="Page Note"
         autoFocus={props.onGoToSource === undefined}
-        aria-keyshortcuts={shortcutForReviewAction('pageNote')}
+        aria-keyshortcuts={shortcutForDocumentAction('pageNote')}
         onClick={props.onAddPageNote}
       >
-        <ReviewIcon name="note" />
-      </ReviewTooltipButton>
+        <ReaderIcon name="note" />
+      </ReaderTooltipButton>
     </div>
   );
 }

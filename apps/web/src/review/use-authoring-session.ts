@@ -1,29 +1,29 @@
 import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
-import { addHighlight, addInsert, addPageNote, addReplace, editReviewItem } from '../../../../packages/core/src/review-commands.js';
-import type { ReviewCommand, ReviewStateView } from '../../../../packages/core/src/review-model.js';
-import type { ReviewShellAuthoringModel } from './authoring-model.js';
-import type { RejectedReviewCommand } from './review-command-result.js';
+import { addHighlight, addInsert, addPageNote, addReplace, editAnnotation } from '../../../../packages/core/src/review-commands.js';
+import type { DocumentCommand, DocumentStateView } from '../../../../packages/core/src/review-model.js';
+import type { ReaderShellAuthoringModel } from './authoring-model.js';
+import type { RejectedDocumentCommand } from './review-command-result.js';
 import { isVisibleFocusTarget } from './focus-target.js';
 import {
   authoringAuthorityFor, authoringAuthorityMatches, authoringAnchorSnapshot,
   authoringPreviewAnnotations, authoringSessionIsCurrent, canStartAuthoringSession,
-  beginReviewInteraction, createAuthoringSession, pendingDraftForAuthoring, mutableField, initialAuthoringValue,
+  beginDocumentInteraction, createAuthoringSession, pendingDraftForAuthoring, mutableField, initialAuthoringValue,
   type AuthoringAuthority, type AuthoringOriginKind, type AuthoringSession,
   type AuthoringOrigin, type AuthoringSource, type AuthoringWorkspaceSnapshot,
-  type ReviewInteractionHandle, type ReviewInteractionReceipt,
+  type DocumentInteractionHandle, type DocumentInteractionReceipt,
 } from './authoring-session.js';
 
 function cssAttributeValue(value: string): string {
   return value.replace(/\\/gu, '\\\\').replace(/"/gu, '\\"');
 }
 
-export function referenceAnnotationTargetSelector(tabIdentity: string, reviewId: string): string {
-  return `[data-annotation-surface="reference"][data-reference-tab-identity="${cssAttributeValue(tabIdentity)}"] ${ownedAnnotationFragmentSelector(reviewId)}`;
+export function referenceAnnotationTargetSelector(tabIdentity: string, documentId: string): string {
+  return `[data-annotation-surface="reference"][data-reference-tab-identity="${cssAttributeValue(tabIdentity)}"] ${ownedAnnotationFragmentSelector(documentId)}`;
 }
 
 /** Selects visible geometry for both projected owned marks and owned native PDF fragments. */
-export function ownedAnnotationFragmentSelector(reviewId: string): string {
-  return `:is([data-owned-mark], [data-source-reader-mark], [data-owned-native-geometry])[data-review-id="${cssAttributeValue(reviewId)}"]`;
+export function ownedAnnotationFragmentSelector(documentId: string): string {
+  return `:is([data-owned-mark], [data-source-reader-mark], [data-owned-native-geometry])[data-review-id="${cssAttributeValue(documentId)}"]`;
 }
 
 export function referenceAnnotationScrollportSelector(tabIdentity: string): string {
@@ -35,7 +35,7 @@ export type AuthoringSessionInvalidReason = 'document' | 'edit-target';
 export function authoringSessionInvalidReason(
   session: AuthoringSession,
   currentAuthority: AuthoringAuthority,
-  items: readonly ReviewStateView['items'][number][],
+  items: readonly DocumentStateView['items'][number][],
 ): AuthoringSessionInvalidReason | null {
   if (!authoringSessionIsCurrent(session, currentAuthority)) return 'document';
   if (session.source.kind === 'edit') {
@@ -46,7 +46,7 @@ export function authoringSessionInvalidReason(
 }
 
 export function authoringCommandDisposition(
-  result: ReviewStateView | RejectedReviewCommand,
+  result: DocumentStateView | RejectedDocumentCommand,
 ): 'accepted' | 'rejected' | 'persistence-pending' {
   if (!('accepted' in result)) return 'accepted';
   return result.reason === 'persistence-pending' ? 'persistence-pending' : 'rejected';
@@ -68,7 +68,7 @@ export function authoringPersistenceCanClose(input: {
   readonly session: AuthoringSession;
   readonly pending: AuthoringPendingPersistence | null;
   readonly currentAuthority: AuthoringAuthority;
-  readonly items: readonly ReviewStateView['items'][number][];
+  readonly items: readonly DocumentStateView['items'][number][];
   readonly forcedInvalidToken: number | null;
   readonly persistedRevision: number | undefined;
 }): boolean {
@@ -107,8 +107,8 @@ export function interactionReceiptRequiresPersistence(input: {
 }
 
 interface AuthoringOptions {
-  state: ReviewStateView;
-  authoring: ReviewShellAuthoringModel;
+  state: DocumentStateView;
+  authoring: ReaderShellAuthoringModel;
   documentGeneration: number;
   saveOptionsOpen: boolean | undefined;
   shellRef: RefObject<HTMLElement | null>;
@@ -120,17 +120,17 @@ interface AuthoringOptions {
   clearInputDraft(): void;
   openNested(): void;
   closeNestedSurface(): void;
-  restoreReaderAfterAuthoring(session: AuthoringSession, reason: 'accepted' | 'cancelled' | 'source-replaced', state?: ReviewStateView): boolean;
+  restoreReaderAfterAuthoring(session: AuthoringSession, reason: 'accepted' | 'cancelled' | 'source-replaced', state?: DocumentStateView): boolean;
 }
 
 interface PendingAcknowledgement {
-  readonly interaction: ReviewInteractionHandle;
-  readonly receipt: ReviewInteractionReceipt;
+  readonly interaction: DocumentInteractionHandle;
+  readonly receipt: DocumentInteractionReceipt;
 }
 
 interface PendingCanonicalFinalization {
   readonly session: AuthoringSession;
-  readonly receipt: ReviewInteractionReceipt;
+  readonly receipt: DocumentInteractionReceipt;
   readonly outcome: 'applied' | 'discarded';
   readonly settled: Promise<void>;
   readonly resolve: () => void;
@@ -152,7 +152,7 @@ export class AuthoringAcknowledgementQueue {
   #retryAttempt = 0;
   #disposed = false;
 
-  enqueue(interaction: ReviewInteractionHandle, receipt: ReviewInteractionReceipt): void {
+  enqueue(interaction: DocumentInteractionHandle, receipt: DocumentInteractionReceipt): void {
     this.#pending.set(receipt.interactionToken, { interaction, receipt });
   }
 
@@ -202,7 +202,7 @@ export class AuthoringAcknowledgementQueue {
 
 /** A deleted edit may leave the UI only after its hold is released or durably queued for release. */
 export async function releaseDeletedAuthoringInteraction(
-  interaction: ReviewInteractionHandle | undefined,
+  interaction: DocumentInteractionHandle | undefined,
   settle: () => void,
 ): Promise<void> {
   try {
@@ -215,11 +215,11 @@ export async function releaseDeletedAuthoringInteraction(
 }
 
 export async function finalizeReacquiredInteraction(
-  interaction: ReviewInteractionHandle,
+  interaction: DocumentInteractionHandle,
   outcome: 'applied' | 'discarded',
   draftId: string,
   expectedDraftRevision: number,
-): Promise<ReviewInteractionReceipt> {
+): Promise<DocumentInteractionReceipt> {
   const recovered = await interaction.reacquire();
   if (recovered !== undefined && recovered.outcome !== outcome) {
     throw new Error('The recovered annotation receipt does not match the pending completion.');
@@ -229,11 +229,11 @@ export async function finalizeReacquiredInteraction(
 
 /** A finalization receipt may paint from its exact revision or authoritative session successor. */
 export function canonicalStateForFinalizedInteraction(
-  state: ReviewStateView,
+  state: DocumentStateView,
   documentGeneration: number,
-  receipt: ReviewInteractionReceipt,
+  receipt: DocumentInteractionReceipt,
   authority: AuthoringAuthority,
-): ReviewStateView | undefined {
+): DocumentStateView | undefined {
   if (state.sessionId !== authority.sessionId) return undefined;
   const canonicalGeneration = state.workflow.documentGeneration;
   // The finalized receipt authorizes an already-published successor even when
@@ -252,13 +252,13 @@ export function canonicalStateForFinalizedInteraction(
 }
 
 export function consumeFinalizedInteractionState(input: {
-  readonly state: ReviewStateView;
+  readonly state: DocumentStateView;
   readonly documentGeneration: number;
-  readonly receipt: ReviewInteractionReceipt;
+  readonly receipt: DocumentInteractionReceipt;
   readonly authority: AuthoringAuthority;
   readonly outcome: 'applied' | 'discarded';
   readonly announce: (message: string) => void;
-  readonly close: (reason: 'accepted' | 'cancelled' | 'source-replaced', state?: ReviewStateView) => void;
+  readonly close: (reason: 'accepted' | 'cancelled' | 'source-replaced', state?: DocumentStateView) => void;
 }): boolean {
   const canonical = canonicalStateForFinalizedInteraction(
     input.state,
@@ -281,7 +281,7 @@ export function consumeFinalizedInteractionState(input: {
 }
 
 /** A prior protected draft is not evidence that the latest input was accepted. */
-export function requireProtectedAuthoringInput(state: ReviewStateView, draftId: string, text: string, accepted: boolean): ReviewStateView {
+export function requireProtectedAuthoringInput(state: DocumentStateView, draftId: string, text: string, accepted: boolean): DocumentStateView {
   if (!accepted || !state.pendingDrafts.some(draft => draft.id === draftId && draft.text === text)) {
     throw new Error('The protected authoring draft was not acknowledged.');
   }
@@ -437,7 +437,7 @@ export function useAuthoringSession({
     };
   }, [authoringSurfaceElement, authoring.onAuthoringViewportChange]);
   const acknowledgedRef = useRef(state);
-  const commandTailRef = useRef<Promise<ReviewStateView>>(Promise.resolve(state));
+  const commandTailRef = useRef<Promise<DocumentStateView>>(Promise.resolve(state));
   const acknowledgedAuthority = authoringAuthorityFor(
     acknowledgedRef.current,
     documentGeneration,
@@ -450,14 +450,14 @@ export function useAuthoringSession({
   }
 
   const submit = (
-    build: (state: ReviewStateView) => ReviewCommand,
+    build: (state: DocumentStateView) => DocumentCommand,
     options?: {
       readonly authority?: AuthoringAuthority;
       readonly onAccepted?: () => void;
       readonly onPersistencePending?: (revision: number) => void;
       readonly onStale?: () => void;
     },
-  ): Promise<ReviewStateView> => {
+  ): Promise<DocumentStateView> => {
     const result = commandTailRef.current.then(async () => {
       if (
         options?.authority !== undefined
@@ -479,13 +479,13 @@ export function useAuthoringSession({
       }
       const disposition = authoringCommandDisposition(result);
       const accepted = disposition === 'accepted';
-      const next = accepted ? result as ReviewStateView : (result as RejectedReviewCommand).state;
+      const next = accepted ? result as DocumentStateView : (result as RejectedDocumentCommand).state;
       acknowledgedRef.current = next;
       setAnnouncement(accepted
         ? `Revision ${next.revision} saved.`
         : disposition === 'persistence-pending'
           ? 'The annotation is waiting to be saved to the PDF.'
-          : (result as RejectedReviewCommand).message);
+          : (result as RejectedDocumentCommand).message);
       if (accepted) options?.onAccepted?.();
       if (disposition === 'persistence-pending') options?.onPersistencePending?.(next.revision);
       return next;
@@ -512,7 +512,7 @@ export function useAuthoringSession({
         throw new Error('The annotation safety connection is still starting. Try again.');
       }
       if (authoring.interactionLifecycle !== undefined) {
-        interaction = await beginReviewInteraction(
+        interaction = await beginDocumentInteraction(
           authoring.interactionLifecycle,
           authority.documentGeneration,
           `authoring_${crypto.randomUUID()}`,
@@ -575,7 +575,7 @@ export function useAuthoringSession({
   const closeAuthoringSession = (
     token: number,
     reason: 'accepted' | 'cancelled' | 'source-replaced',
-    acceptedState?: ReviewStateView,
+    acceptedState?: DocumentStateView,
   ) => {
     const current = authoringSessionRef.current;
     if (current === null || current.token !== token) return;
@@ -627,9 +627,9 @@ export function useAuthoringSession({
   };
   const settleCanonicalAuthoring = (
     session: AuthoringSession,
-    receipt: ReviewInteractionReceipt,
+    receipt: DocumentInteractionReceipt,
     outcome: 'applied' | 'discarded',
-    canonical: ReviewStateView,
+    canonical: DocumentStateView,
   ) => {
     if (interactionReceiptRequiresPersistence({
       outcome,
@@ -855,7 +855,7 @@ export function useAuthoringSession({
   }, [authoring.persistedRevision, forcedInvalidToken, pendingPersistence, state.items]);
   const submitAuthoring = async (
     session: AuthoringSession,
-    build: (state: ReviewStateView) => ReviewCommand,
+    build: (state: DocumentStateView) => DocumentCommand,
     onAccepted?: () => void,
   ) => {
     let accepted = false;
@@ -878,7 +878,7 @@ export function useAuthoringSession({
   const protectAuthoringDraft = (
     session: AuthoringSession,
     value: string,
-  ): Promise<ReviewStateView> => {
+  ): Promise<DocumentStateView> => {
     if (authoringValueRef.current?.token === session.token) authoringValueRef.current.value = value;
     let accepted = false;
     return submit((state) => {
@@ -983,8 +983,8 @@ export function useAuthoringSession({
 
   async function settleFinalizedInteraction(
     session: AuthoringSession,
-    interaction: ReviewInteractionHandle,
-    receipt: ReviewInteractionReceipt,
+    interaction: DocumentInteractionHandle,
+    receipt: DocumentInteractionReceipt,
     outcome: 'applied' | 'discarded',
     onAccepted?: () => void,
   ): Promise<void> {
@@ -1211,7 +1211,7 @@ export function useAuthoringSession({
     if (field === undefined) return;
     await submitAuthoring(
       session,
-      (state) => editReviewItem(state, source.item.id, { [field]: value }),
+      (state) => editAnnotation(state, source.item.id, { [field]: value }),
     );
   };
 

@@ -1,7 +1,7 @@
 import {
-  anchorEvidenceFromReviewItem,
-  normalizeReviewSelectionAnchor,
-  type ReviewItem,
+  anchorEvidenceFromAnnotation,
+  normalizeDocumentSelectionAnchor,
+  type Annotation,
 } from '../../../../packages/core/src/review-model.js';
 import { existingAnnotationKey, type ExistingAnnotation } from '../pdf/existing-annotations.js';
 import {
@@ -32,14 +32,14 @@ export function canDeriveAnnotationOutlineLabels(input: {
     && input.navigationGeneration === input.outlineGeneration;
 }
 
-export function reviewItemNavigationTarget(item: ReviewItem): {
+export function annotationNavigationTarget(item: Annotation): {
   readonly pageIndex: number;
   readonly point: { readonly x: number; readonly y: number };
 } | null {
   try {
-    const anchor = anchorEvidenceFromReviewItem(item);
+    const anchor = anchorEvidenceFromAnnotation(item);
     const page = anchor.kind === 'selection'
-      ? normalizeReviewSelectionAnchor(anchor).pages[0]
+      ? normalizeDocumentSelectionAnchor(anchor).pages[0]
       : undefined;
     const pageIndex = page?.pageIndex ?? anchor.pageIndex;
     const rect = page?.rect ?? anchor.rect;
@@ -71,7 +71,7 @@ export function deriveAnnotationOutlineLabels(input: {
   readonly documentGeneration: number;
   readonly outline: PdfOutlineDiscovery;
   readonly pages: readonly PdfDocumentOrderPage[];
-  readonly owned: readonly ReviewItem[];
+  readonly owned: readonly Annotation[];
   readonly source: readonly ExistingAnnotation[];
 }): AnnotationOutlineLabels {
   const owned = new Map<string, string>();
@@ -102,7 +102,7 @@ export function deriveAnnotationOutlineLabels(input: {
     resolveTarget,
   });
   for (const item of input.owned) {
-    const target = reviewItemNavigationTarget(item);
+    const target = annotationNavigationTarget(item);
     if (target === null) continue;
     const label = annotationLabel({
       ...target,

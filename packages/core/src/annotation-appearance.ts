@@ -1,4 +1,4 @@
-import type { ReviewAnnotation } from './pdf-writer.js';
+import type { PdfWriterAnnotation } from './pdf-writer.js';
 
 export const READER_APPEARANCE_KEY = 'PlacekeeperStyleVersion';
 
@@ -26,7 +26,7 @@ export const ANNOTATION_CSS_VARIABLES = {
   '--pdf-mark-radius': `${p.radius}px`,
 } as const;
 
-export function annotationAppearance(annotation: Pick<ReviewAnnotation, 'kind' | 'contents'>) {
+export function annotationAppearance(annotation: Pick<PdfWriterAnnotation, 'kind' | 'contents'>) {
   const attached = annotation.contents.trim().length > 0;
   switch (annotation.kind) {
     case 'highlight': return { ink: p.noteInk, fill: p.noteFill, opacity: attached ? p.commentOpacity : p.noteOpacity, underline: attached };

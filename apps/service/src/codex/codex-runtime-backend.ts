@@ -1,21 +1,21 @@
-import { createUpgradeReviewProtection, type UpgradeReviewParticipants } from "../host/upgrade-review-participants.js";
-import type { UpgradeReviewSettlement } from "../../../../packages/core/src/upgrade-review-protocol.js";
+import { createUpgradeDocumentProtection, type UpgradeDocumentParticipants } from "../host/upgrade-review-participants.js";
+import type { UpgradeDocumentSettlement } from "../../../../packages/core/src/upgrade-review-protocol.js";
 import { createHash, randomBytes } from "node:crypto";
 import { readFile, realpath } from "node:fs/promises";
 import { join, sep } from "node:path";
-import { reviewSemanticDigest, type LiveContextBindingStatus } from "../../../../packages/core/src/live-context.js";
+import { documentSemanticDigest, type LiveContextBindingStatus } from "../../../../packages/core/src/live-context.js";
 import { encodePlacekeeperLinkFragment, type PlacekeeperLinkLocation } from "../../../../packages/core/src/placekeeper-link.js";
 import type { CodexAppRequest, CodexResourceDescriptor } from "../../../../packages/core/src/codex-mcp-protocol.js";
-import { sanitizeCodexReviewRuntimeResponse, type ReviewRuntimeBrokerMethod } from "../../../../packages/core/src/review-runtime-protocol.js";
+import { sanitizeCodexDocumentRuntimeResponse, type DocumentRuntimeBrokerMethod } from "../../../../packages/core/src/review-runtime-protocol.js";
 import { ChromeRuntimeOperationJournal } from "../browser/runtime-operation-journal.js";
-import { isReviewSideEffectMethod, LocalReviewBackend } from "../runtime/local-review-backend.js";
+import { isDocumentSideEffectMethod, LocalDocumentBackend } from "../runtime/local-review-backend.js";
 import type { SessionBroker } from "../sessions/session-broker.js";
-import type { ReviewInteractionAttachment } from "../sessions/review-interactions.js";
+import type { DocumentInteractionAttachment } from "../sessions/review-interactions.js";
 import { defaultAnnotatedFilename } from "../saving/save-destination.js";
 import type { PdfSaveCoordinator } from "../saving/pdf-save-coordinator.js";
 import type { ExportCoordinator } from "../export/export-coordinator.js";
 
-const interactionActions: Partial<Record<ReviewRuntimeBrokerMethod, Parameters<LocalReviewBackend["interaction"]>[2]>> = {
+const interactionActions: Partial<Record<DocumentRuntimeBrokerMethod, Parameters<LocalDocumentBackend["interaction"]>[2]>> = {
   beginInteraction: "begin",
   finalizeInteraction: "finalize",
   releaseInteraction: "release",
@@ -37,7 +37,7 @@ interface Resource {
 interface Presentation {
   readonly scope: CodexActiveScope;
   readonly ownerKey: string;
-  readonly attachment: ReviewInteractionAttachment;
+  readonly attachment: DocumentInteractionAttachment;
   resources?: Record<"document" | "pdfiumWasm" | "worker", Resource>;
   materializing?: Promise<Record<"document" | "pdfiumWasm" | "worker", Resource>>;
 }
@@ -45,10 +45,10 @@ interface Presentation {
 /** Trusted native effects and immutable resource handles. No path or service
  * credential crosses this boundary; the caller fences authority around awaits. */
 export class CodexServiceRuntimeBackend {
-  upgradeParticipants?: UpgradeReviewParticipants;
+  upgradeParticipants?: UpgradeDocumentParticipants;
   readonly #broker: SessionBroker;
   readonly #saving: PdfSaveCoordinator;
-  readonly #review: LocalReviewBackend;
+  readonly #documentSession: LocalDocumentBackend;
   readonly #assetRoot: string | undefined;
   readonly #presentations = new Map<string, Presentation>();
   readonly #activeRequests = new Map<string, number>();
@@ -62,7 +62,7 @@ export class CodexServiceRuntimeBackend {
   }) {
     this.#broker = options.broker;
     this.#saving = options.saving;
-    this.#review = new LocalReviewBackend(options);
+    this.#documentSession = new LocalDocumentBackend(options);
     this.#assetRoot = options.assetRoot;
     this.#journal = new ChromeRuntimeOperationJournal({ scope: (sessionId) => {
       if (this.#broker.state(sessionId) === undefined) throw new Error("canonical-review-unavailable");
@@ -75,7 +75,7 @@ export class CodexServiceRuntimeBackend {
   attach(scope: CodexActiveScope): void {
     this.detach(scope.runtimeId);
     const ownerKey = `codex:${scope.runtimeId}`;
-    this.upgradeParticipants?.attach(ownerKey, createUpgradeReviewProtection(this.#broker, this.#saving, scope.sessionId));
+    this.upgradeParticipants?.attach(ownerKey, createUpgradeDocumentProtection(this.#broker, this.#saving, scope.sessionId));
     this.#presentations.set(scope.runtimeId, {
       scope, ownerKey,
       attachment: this.#broker.replaceInteractionAttachment(scope.sessionId, ownerKey),
@@ -127,7 +127,7 @@ export class CodexServiceRuntimeBackend {
     };
     if (request.method === 'upgradePoll' || request.method === 'upgradeSettle') {
       if (!this.upgradeParticipants) throw new Error('Upgrade preparation unavailable');
-      return request.method === 'upgradePoll' ? this.upgradeParticipants.poll(`codex:${scope.runtimeId}`) : this.upgradeParticipants.settle(`codex:${scope.runtimeId}`, request.payload as UpgradeReviewSettlement);
+      return request.method === 'upgradePoll' ? this.upgradeParticipants.poll(`codex:${scope.runtimeId}`) : this.upgradeParticipants.settle(`codex:${scope.runtimeId}`, request.payload as UpgradeDocumentSettlement);
     }
     if (['command', 'beginInteraction', 'finalizeInteraction', 'chooseCopy', 'chooseOriginal', 'chooseFolder', 'retrySave', 'locateSave', 'exportReviewedCopy'].includes(request.method)) this.upgradeParticipants?.assertAuthoring(`codex:${scope.runtimeId}`);
     if (request.method === "bootstrap") {
@@ -135,7 +135,7 @@ export class CodexServiceRuntimeBackend {
       if (!current()) throw new Error("presentation-unavailable");
       const runtime = await this.#broker.runtimeState(scope.sessionId);
       const scopeValue = await this.#scope(scope, current);
-      const projected = sanitizeCodexReviewRuntimeResponse("bootstrap", {
+      const projected = sanitizeCodexDocumentRuntimeResponse("bootstrap", {
         sessionId: scope.sessionId, generation: scope.generation, revision: runtime?.state.revision,
         state: runtime?.state, activeAuthoringDraftIds: runtime?.activeAuthoringDraftIds,
         scope: scopeValue, saveStatus: this.#broker.saveStatus(scope.sessionId),
@@ -171,7 +171,7 @@ export class CodexServiceRuntimeBackend {
       return { link: `${base}#${encodePlacekeeperLinkFragment(location)}` };
     }
     if (request.method === "presence") return {};
-    const method = request.method as ReviewRuntimeBrokerMethod;
+    const method = request.method as DocumentRuntimeBrokerMethod;
     if ((method === "exportReviewedCopy" && this.#broker.sourceDisposition(scope.sessionId) === "remote-temporary") ||
       (this.#broker.saveStatus(scope.sessionId)?.destination.phase === "host" &&
       ["chooseOriginal", "retrySave", "locateSave"].includes(method))) {
@@ -182,7 +182,7 @@ export class CodexServiceRuntimeBackend {
       assertAuthority();
       let result: unknown;
       if (interactionAction !== undefined) {
-        result = await this.#review.interaction(scope.sessionId, record.attachment, interactionAction, request.payload, assertAuthority);
+        result = await this.#documentSession.interaction(scope.sessionId, record.attachment, interactionAction, request.payload, assertAuthority);
       } else if (method === "scope") {
         result = await this.#scope(scope, current);
       } else if (method === "saveProposal") {
@@ -193,18 +193,18 @@ export class CodexServiceRuntimeBackend {
           result = { sourceDisposition: 'remote-temporary', filename: defaultAnnotatedFilename(source?.sourceDisplayName ?? 'review.pdf') };
         }
       } else {
-        result = await this.#review.invoke(scope.sessionId, scope.generation, method as Exclude<ReviewRuntimeBrokerMethod, "saveProposal">, request.payload, {
+        result = await this.#documentSession.invoke(scope.sessionId, scope.generation, method as Exclude<DocumentRuntimeBrokerMethod, "saveProposal">, request.payload, {
           expectedDocumentGeneration: scope.generation,
           assertAuthority,
         });
       }
-      const projected = sanitizeCodexReviewRuntimeResponse(method, result);
+      const projected = sanitizeCodexDocumentRuntimeResponse(method, result);
       if (projected === undefined) throw new Error("invalid-service-response");
       return projected;
     };
     // Finalization uses canonical persisted receipts, whose outcome must remain
     // recoverable independently of this adapter's operation journal.
-    return isReviewSideEffectMethod(method)
+    return isDocumentSideEffectMethod(method)
       ? this.#journal.commit(scope.sessionId, request.requestId, { generation: scope.generation, method, payload: request.payload }, invoke)
       : invoke();
   }
@@ -223,7 +223,7 @@ export class CodexServiceRuntimeBackend {
       const matches = verified?.placekeeperSessionId === scope.sessionId &&
         verified.documentGeneration === scope.generation && verified.reviewRevision === state.revision &&
         verified.source.fileId === state.source.fileId && verified.source.digest === state.source.digest &&
-        verified.source.byteLength === state.source.byteLength && verified.stateDigest === reviewSemanticDigest(state.items);
+        verified.source.byteLength === state.source.byteLength && verified.stateDigest === documentSemanticDigest(state.items);
       codexContext = matches
         ? { status: "current", identity: verified, leaseExpiresAt: binding.leaseExpiresAt }
         : { status: "refreshing", placekeeperSessionId: scope.sessionId, documentGeneration: scope.generation,

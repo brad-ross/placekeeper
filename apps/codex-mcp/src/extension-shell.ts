@@ -1,15 +1,15 @@
 import { externalWebUrl } from '../../../packages/core/src/external-web-url.js';
 import { LiveReaderTools, type DocumentModelContext } from './live-reader-tools.js';
 import { ExtensionContextCoordinator } from '../../web/src/host/extension-context-coordinator.js';
-import type { ReviewContextSnapshot } from '../../web/src/host/review-context-snapshot.js';
-import { prepareReviewContext } from './review-context-attachment.js';
-import type { ReviewAgentBridge, ReviewAgentContextInput } from '../../web/src/host/review-agent-bridge.js';
+import type { DocumentContextSnapshot } from '../../web/src/host/review-context-snapshot.js';
+import { prepareDocumentContext } from './review-context-attachment.js';
+import type { DocumentAgentBridge, DocumentAgentContextInput } from '../../web/src/host/review-agent-bridge.js';
 import { documentContextSourceKey, INACTIVE_DOCUMENT_CONTEXT, sameDocumentContextVersion, type DocumentContextMember, type DocumentContextPublicationStatus, type DocumentContextSource, type DocumentContextState } from '../../web/src/host/document-in-context.js';
 import type { OpenAIModelContext, OpenAIResources } from '@openai/mcp-extensions/app';
 import { HostResourceAdapter } from './host-resource-adapter.js';
 import type { App } from '@modelcontextprotocol/ext-apps';
 import { createCodexHostRuntime } from '../../web/src/host/codex-runtime.js';
-import { mountCodexProductionReview } from '../../web/src/codex-entry.js';
+import { mountCodexProductionDocument } from '../../web/src/codex-entry.js';
 import type { HostRuntimeInvalidation } from '../../web/src/host/runtime.js';
 import { NativeOperationError, parseCodexAppResponse, type CodexAppRequest, type CodexAppResponse } from '../../../packages/core/src/codex-mcp-protocol.js';
 import { EXTENSION_META_KEY, EXTENSION_TOOL, extensionPickerTimeouts, parseExtensionResult, type ExtensionRequest, type ExtensionResult, type ExtensionPresentation } from '../../../packages/core/src/extension-protocol.js';
@@ -47,7 +47,7 @@ export class ExtensionShell {
     #readerTools: LiveReaderTools | undefined;
     readonly #readerVisibilityListeners = new Set<() => void>();
     #openReader: HTMLElement | undefined;
-    #snapshot: ReviewContextSnapshot | undefined;
+    #snapshot: DocumentContextSnapshot | undefined;
     #title: string | undefined;
     #displayMode: string | undefined;
     #message = '';
@@ -433,7 +433,7 @@ export class ExtensionShell {
         this.controls.append(dialog);
         dialog.showModal();
     }
-    #contextBridge(tools: LiveReaderTools, epoch: number): ReviewAgentBridge {
+    #contextBridge(tools: LiveReaderTools, epoch: number): DocumentAgentBridge {
         const grant = this.#grant;
         const mounted = () => epoch === this.#epoch && grant === this.#grant && !this.#closed;
         return {
@@ -541,11 +541,11 @@ export class ExtensionShell {
             this.#setDocumentState({ version, status, canActivate: false });
         }
     }
-    async #addContext(input: ReviewAgentContextInput, epoch: number) {
+    async #addContext(input: DocumentAgentContextInput, epoch: number) {
         const grant = this.#grant;
         const current = () => grant && grant === this.#grant && epoch === this.#epoch && !this.#closed && this.#connected && input.snapshot.documentGeneration === this.#active?.generation;
         if (!current() || !this.#context || !this.modelContext()) throw Error('Context sharing is unavailable. Reconnect and try again.');
-        const attachment = await prepareReviewContext(input);
+        const attachment = await prepareDocumentContext(input);
         if (!current()) throw Error('The review changed. Select the evidence again.');
         await this.#context.includeAttachment(attachment);
     }
@@ -655,7 +655,7 @@ export class ExtensionShell {
             }
         } catch { if (current()) this.#show('Recent reviews are unavailable. You can still choose a PDF.'); }
     }
-    #rememberPage(snapshot: ReviewContextSnapshot) {
+    #rememberPage(snapshot: DocumentContextSnapshot) {
         if(!this.#grant||!this.#connected||this.#readingPage===snapshot.page)return;
         const grant=this.#grant;this.#readingPage=snapshot.page;
         void this.#request({action:'reading-position',grant,page:snapshot.page}).then(result=>{
@@ -706,7 +706,7 @@ export class ExtensionShell {
         }, subscribeInvalidations: listener => { this.#listeners.add(listener); return () => this.#listeners.delete(listener); } });
         this.#beginLoading();
         this.#show('');
-        this.#unmount = mountCodexProductionReview(this.root, runtime, () => { if (epoch === this.#epoch) {
+        this.#unmount = mountCodexProductionDocument(this.root, runtime, () => { if (epoch === this.#epoch) {
             this.#clearLoading();
             this.#show('The PDF could not be loaded. Reopen it through the file menu; protected work is retained.'); } }, () => { if (epoch === this.#epoch) {
             this.#clearLoading();

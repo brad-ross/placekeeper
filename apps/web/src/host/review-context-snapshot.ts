@@ -1,8 +1,8 @@
-import { anchorEvidenceFromReviewItem, type ReviewStateView } from '../../../../packages/core/src/review-model.js';
+import { anchorEvidenceFromAnnotation, type DocumentStateView } from '../../../../packages/core/src/review-model.js';
 import type { SelectionUpdate } from '../pdf/selection-state.js';
 
 /** Document-derived strings are data. The host adapter supplies their trust boundary. */
-export interface ReviewContextSnapshot {
+export interface DocumentContextSnapshot {
   readonly documentGeneration: number;
   readonly reviewRevision: number;
   readonly title: string;
@@ -15,15 +15,15 @@ export interface ReviewContextSnapshot {
   readonly annotations: readonly { readonly id: string; readonly page: number; readonly kind: string; readonly text: string }[];
 }
 
-export function reviewContextSnapshot(input: {
-  readonly state: ReviewStateView;
+export function documentContextSnapshot(input: {
+  readonly state: DocumentStateView;
   readonly title: string;
   readonly page: number;
   readonly pageCount: number;
   readonly selection: SelectionUpdate;
   readonly selectionIsCurrent: boolean;
   readonly activeAnnotationId?: string;
-}): ReviewContextSnapshot {
+}): DocumentContextSnapshot {
   const { state, selection } = input;
   return {
     documentGeneration: state.workflow.documentGeneration,
@@ -37,7 +37,7 @@ export function reviewContextSnapshot(input: {
       : null,
     ...(input.activeAnnotationId === undefined ? {} : { activeAnnotationId: input.activeAnnotationId }),
     annotations: state.items.map(item => {
-      const anchor = anchorEvidenceFromReviewItem(item);
+      const anchor = anchorEvidenceFromAnnotation(item);
       const comment = item.payload[item.kind === 'replace' || item.kind === 'insert' ? 'proposedText' : 'comment'];
       const quote = anchor.kind === 'selection' ? anchor.quote : '';
       return { id: item.id, page: item.pageIndex + 1, kind: item.kind,

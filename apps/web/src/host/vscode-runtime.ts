@@ -1,28 +1,28 @@
 import { externalWebUrl } from "../../../../packages/core/src/external-web-url.js";
 import { nativeSyncTexResponse } from "../../../../packages/core/src/native-synctex-protocol.js";
-import { REVIEW_COMMAND_IDS } from "../review/review-command-surface.js";
+import { DOCUMENT_COMMAND_IDS } from "../review/review-command-surface.js";
 import type { SaveDestinationResult } from "./session-contracts.js";
 import type { SaveStatus } from "../../../../packages/core/src/save-status.js";
-import type { ReviewCommand, ReviewStateView } from "../../../../packages/core/src/review-model.js";
+import type { DocumentCommand, DocumentStateView } from "../../../../packages/core/src/review-model.js";
 import type { PlacekeeperLinkLocation } from "../../../../packages/core/src/placekeeper-link.js";
 import {
-  REVIEW_RUNTIME_PROTOCOL,
-  REVIEW_RUNTIME_VERSION,
-  isReviewRuntimeMethodForHost,
-  sanitizeChromeReviewRuntimeRequest,
-  sanitizeChromeReviewRuntimeResponse,
-  sanitizeNativeReviewRuntimeRequest,
-  sanitizeNativeReviewRuntimeResponse,
-  sanitizeCodexReviewRuntimeResponse,
-  type ReviewRuntimeHost,
-  type ReviewRuntimeMethod,
+  DOCUMENT_RUNTIME_PROTOCOL,
+  DOCUMENT_RUNTIME_VERSION,
+  isDocumentRuntimeMethodForHost,
+  sanitizeChromeDocumentRuntimeRequest,
+  sanitizeChromeDocumentRuntimeResponse,
+  sanitizeNativeDocumentRuntimeRequest,
+  sanitizeNativeDocumentRuntimeResponse,
+  sanitizeCodexDocumentRuntimeResponse,
+  type DocumentRuntimeHost,
+  type DocumentRuntimeMethod,
 } from "../../../../packages/core/src/review-runtime-protocol.js";
 import type {
   ProductionExportResult,
   ProductionScope,
   SaveCopyProposal,
 } from "./session-contracts.js";
-import type { RejectedReviewCommand } from "../review/review-command-result.js";
+import type { RejectedDocumentCommand } from "../review/review-command-result.js";
 import {
   type HostRuntime,
   type HostRuntimeBootstrap,
@@ -30,7 +30,7 @@ import {
   type HostRuntimeIdentity,
   type HostRuntimeInvalidation,
 } from "./runtime.js";
-import { MemoryReviewLocationHistory } from "../review/review-location-history.js";
+import { MemoryDocumentLocationHistory } from "../review/review-location-history.js";
 
 const ID = /^[A-Za-z0-9_-]{16,128}$/u;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
@@ -48,7 +48,7 @@ export interface MaterializedViewerResource {
 
 export interface RpcHostRuntimeOptions {
   readonly openExternalUrl?: (url: string) => Promise<void>;
-  readonly host?: ReviewRuntimeHost;
+  readonly host?: DocumentRuntimeHost;
   readonly extensionOrigin?: string;
   readonly materializeDocument?: (sourceUrl: string) => Promise<MaterializedViewerResource>;
   readonly materializePdfiumWasm?: (sourceUrl: string) => Promise<MaterializedViewerResource>;
@@ -103,7 +103,7 @@ export async function materializeVscodeWorkerResource(
 }
 
 interface PendingRequest {
-  readonly method: ReviewRuntimeMethod;
+  readonly method: DocumentRuntimeMethod;
   readonly identity?: HostRuntimeIdentity;
   readonly resolve: (value: unknown) => void;
   readonly reject: (error: Error) => void;
@@ -139,7 +139,7 @@ function validHostCommand(value: unknown): value is HostRuntimeCommand {
   if (value.command === "source-navigation") return Object.keys(value).length === 2 && nativeSyncTexResponse("forwardSyncTex", value.state) !== undefined;
   if (value.command === "review-command") {
     return Object.keys(value).length === 2 && typeof value.id === "string"
-      && (REVIEW_COMMAND_IDS as readonly string[]).includes(value.id);
+      && (DOCUMENT_COMMAND_IDS as readonly string[]).includes(value.id);
   }
   if (value.command === "reattach" || value.command === "export-reviewed-pdf"
     || value.command === "reverse-synctex" || value.command === "cancel-synctex") {
@@ -187,7 +187,7 @@ export function createRpcHostRuntime(
   let deferredCommandInvalidation: HostRuntimeInvalidation | undefined;
   let pendingHostCommand: HostRuntimeCommand | undefined;
   let disposed = false;
-  let nativeLocationHistory: MemoryReviewLocationHistory | undefined;
+  let nativeLocationHistory: MemoryDocumentLocationHistory | undefined;
   let bootstrapped = false;
   let bootstrapEpoch = 0;
   const committedCodexResources: Array<{ document: string; wasm: string; worker: string }> = [];
@@ -300,12 +300,12 @@ export function createRpcHostRuntime(
   };
 
   const unsubscribe = port.subscribe((message) => {
-    if (!isObject(message) || message.protocol !== REVIEW_RUNTIME_PROTOCOL ||
+    if (!isObject(message) || message.protocol !== DOCUMENT_RUNTIME_PROTOCOL ||
       (host === "chrome" || host === "electron" || host === "codex"
         ? message.runtimeId !== runtimeId
         : message.panelId !== runtimeId)) return;
     if (message.kind === "response" && typeof message.requestId === "string" &&
-      (message.version !== REVIEW_RUNTIME_VERSION || (isObject(message.error) && message.error.kind === "runtime-version-mismatch"))) {
+      (message.version !== DOCUMENT_RUNTIME_VERSION || (isObject(message.error) && message.error.kind === "runtime-version-mismatch"))) {
       const current = pending.get(message.requestId);
       if (current) {
         pending.delete(message.requestId);
@@ -319,14 +319,14 @@ export function createRpcHostRuntime(
       if (request === undefined) return;
       externalRequests.delete(message.requestId);
       clearTimeout(request.timer);
-      if (message.version === REVIEW_RUNTIME_VERSION && message.ok === true &&
+      if (message.version === DOCUMENT_RUNTIME_VERSION && message.ok === true &&
         message.sessionId === request.identity.sessionId && message.generation === request.identity.generation &&
         message.revision === request.identity.revision && identity?.sessionId === request.identity.sessionId &&
         identity.generation === request.identity.generation) request.resolve();
       else request.reject(new Error("The host could not open this web link."));
       return;
     }
-    if (message.version !== REVIEW_RUNTIME_VERSION) return;
+    if (message.version !== DOCUMENT_RUNTIME_VERSION) return;
     if (message.kind === "event" && message.event === "host-command") {
       if (!validHostCommand(message.payload)) return;
       if (host === "electron" ? !["source-navigation", "reverse-synctex"].includes(message.payload.command) : host !== "vscode" || message.payload.command === "source-navigation") return;
@@ -386,11 +386,11 @@ export function createRpcHostRuntime(
     current.abort?.();
     if (message.ok === true) {
       const payload = host === "chrome"
-        ? sanitizeChromeReviewRuntimeResponse(current.method, message.payload)
+        ? sanitizeChromeDocumentRuntimeResponse(current.method, message.payload)
         : host === "codex"
-          ? sanitizeCodexReviewRuntimeResponse(current.method, message.payload)
+          ? sanitizeCodexDocumentRuntimeResponse(current.method, message.payload)
         : host === "electron"
-          ? sanitizeNativeReviewRuntimeResponse("electron", current.method, message.payload)
+          ? sanitizeNativeDocumentRuntimeResponse("electron", current.method, message.payload)
           : message.payload;
       if (payload === undefined) current.reject(new Error("The trusted host returned an invalid response."));
       else current.resolve((host === "codex" || host === "electron") && current.method === "bootstrap" && isObject(payload) && isObject(message.payload) && isObject(message.payload.capabilities)
@@ -404,14 +404,14 @@ export function createRpcHostRuntime(
     }
   });
 
-  const invoke = <T>(method: ReviewRuntimeMethod, payload: unknown = {}, signal?: AbortSignal): Promise<T> => {
+  const invoke = <T>(method: DocumentRuntimeMethod, payload: unknown = {}, signal?: AbortSignal): Promise<T> => {
     if (disposed) return Promise.reject(new Error("The review runtime is disposed."));
-    if (!isReviewRuntimeMethodForHost(host, method)) {
+    if (!isDocumentRuntimeMethodForHost(host, method)) {
       return Promise.reject(new Error(`The ${method} capability is unavailable in ${host === "chrome" ? "Chrome" : "this host"}.`));
     }
     const outboundPayload = host === "chrome" || host === "codex"
-      ? sanitizeChromeReviewRuntimeRequest(method, payload)
-      : host === "electron" ? sanitizeNativeReviewRuntimeRequest("electron", method, payload) : payload;
+      ? sanitizeChromeDocumentRuntimeRequest(method, payload)
+      : host === "electron" ? sanitizeNativeDocumentRuntimeRequest("electron", method, payload) : payload;
     if (outboundPayload === undefined) {
       return Promise.reject(new Error("The review runtime request was invalid."));
     }
@@ -424,8 +424,8 @@ export function createRpcHostRuntime(
       const onAbort = signal === undefined ? undefined : () => {
         if (!pending.delete(id)) return;
         port.postMessage({
-          protocol: REVIEW_RUNTIME_PROTOCOL,
-          version: REVIEW_RUNTIME_VERSION,
+          protocol: DOCUMENT_RUNTIME_PROTOCOL,
+          version: DOCUMENT_RUNTIME_VERSION,
           kind: "cancel",
           ...envelopeIdentity,
           requestId: id,
@@ -441,8 +441,8 @@ export function createRpcHostRuntime(
         ...(onAbort === undefined ? {} : { abort: () => signal!.removeEventListener("abort", onAbort) }),
       });
       port.postMessage({
-        protocol: REVIEW_RUNTIME_PROTOCOL,
-        version: REVIEW_RUNTIME_VERSION,
+        protocol: DOCUMENT_RUNTIME_PROTOCOL,
+        version: DOCUMENT_RUNTIME_VERSION,
         kind: "request",
         ...envelopeIdentity,
         requestId: id,
@@ -516,7 +516,7 @@ export function createRpcHostRuntime(
         }, 10_000);
         externalRequests.set(id, { identity: requestIdentity, resolve, reject, timer });
         try {
-          port.postMessage({ protocol: REVIEW_RUNTIME_PROTOCOL, version: REVIEW_RUNTIME_VERSION,
+          port.postMessage({ protocol: DOCUMENT_RUNTIME_PROTOCOL, version: DOCUMENT_RUNTIME_VERSION,
             kind: "external-link-request", panelId: runtimeId, requestId: id, ...requestIdentity, url });
         } catch (error) {
           clearTimeout(timer); externalRequests.delete(id); reject(error);
@@ -613,7 +613,7 @@ export function createRpcHostRuntime(
         throw new Error("The trusted host returned incomplete packaged resources.");
       }
       if ((host === "chrome" || host === "electron" || host === "codex") && nativeLocationHistory === undefined) {
-        nativeLocationHistory = new MemoryReviewLocationHistory(
+        nativeLocationHistory = new MemoryDocumentLocationHistory(
           isObject(value.location)
             ? value.location as unknown as PlacekeeperLinkLocation
             : { kind: "page", page: 1 },
@@ -631,7 +631,7 @@ export function createRpcHostRuntime(
         ...value,
         activeAuthoringDraftIds: activeAuthoringDraftIds(value.activeAuthoringDraftIds),
         session: { sessionId: value.sessionId },
-        state: value.state as unknown as ReviewStateView,
+        state: value.state as unknown as DocumentStateView,
         scope: value.scope as unknown as ProductionScope,
         saveStatus: value.saveStatus as unknown as SaveStatus,
         viewerAssets: {
@@ -664,9 +664,9 @@ export function createRpcHostRuntime(
       void invoke("presence").catch(() => undefined);
       return () => { void invoke("detach").catch(() => undefined); };
     },
-    async command(command: ReviewCommand): Promise<ReviewStateView | RejectedReviewCommand> {
+    async command(command: DocumentCommand): Promise<DocumentStateView | RejectedDocumentCommand> {
       try {
-        const value = await invoke<ReviewStateView | RejectedReviewCommand>("command", command);
+        const value = await invoke<DocumentStateView | RejectedDocumentCommand>("command", command);
         const conflictInvalidation = updateIdentityFromState(value);
         if (conflictInvalidation !== undefined) {
           publishInvalidation(conflictInvalidation);

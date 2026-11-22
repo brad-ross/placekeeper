@@ -4,8 +4,8 @@ import type {
 } from '../pdf/pdf-outline.js';
 import type { PdfDestinationCopyLink } from './copy-link-model.js';
 import { RowActionGroup, type RowAction } from './RowActionGroup.js';
-import { ReviewIcon } from './ReviewIcon.js';
-import { ReviewTooltipButton } from './ReviewTooltipButton.js';
+import { ReaderIcon } from './ReviewIcon.js';
+import { ReaderTooltipButton } from './ReviewTooltipButton.js';
 
 export interface OutlineNavigatorProps {
   readonly discovery: PdfOutlineDiscovery;
@@ -32,7 +32,7 @@ export function OutlineNavigator({
     return <div className="outline-navigator">
       <p className="workspace-empty outline-navigator__loading" data-outline-state="loading" role="status">
         <span>Outline is loading</span>
-        <ReviewIcon name="loading" />
+        <ReaderIcon name="loading" />
       </p>
     </div>;
   }
@@ -104,7 +104,7 @@ export function OutlineNavigator({
               data-current={highlightedItemId === item.id ? 'true' : undefined}
             >
               {hasChildren ? (
-                <ReviewTooltipButton
+                <ReaderTooltipButton
                   label={`${isExpanded ? 'Collapse' : 'Expand'} ${item.label}`}
                   type="button"
                   className="outline-navigator__disclosure"
@@ -113,8 +113,8 @@ export function OutlineNavigator({
                   aria-controls={childrenId}
                   onClick={() => toggle(item.id)}
                 >
-                  <ReviewIcon name="chevron-right" />
-                </ReviewTooltipButton>
+                  <ReaderIcon name="chevron-right" />
+                </ReaderTooltipButton>
               ) : flat ? null : <span className="outline-navigator__disclosure-spacer" aria-hidden="true" />}
               <button
                 type="button"

@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { InstalledCandidate } from './electron-installed-harness.js';
-import { REVIEW_RUNTIME_PROTOCOL, REVIEW_RUNTIME_VERSION } from '../../packages/core/src/review-runtime-protocol.js';
+import { DOCUMENT_RUNTIME_PROTOCOL, DOCUMENT_RUNTIME_VERSION } from '../../packages/core/src/review-runtime-protocol.js';
 
 test('packaged candidate renders and activates a real PDF without system Node', async ({}, testInfo) => {
   const candidate = await InstalledCandidate.create();
@@ -91,7 +91,7 @@ test('packaged candidate renders and activates a real PDF without system Node', 
         ...common, requestId: crypto.randomUUID(), method: 'scope', payload: {},
         sessionId: bootstrap.sessionId, generation: bootstrap.generation, revision: bootstrap.revision,
       });
-    }, { protocol: REVIEW_RUNTIME_PROTOCOL, version: REVIEW_RUNTIME_VERSION });
+    }, { protocol: DOCUMENT_RUNTIME_PROTOCOL, version: DOCUMENT_RUNTIME_VERSION });
     expect(scope).toMatchObject({ ok: true, method: 'scope' });
     const isolation = await page.evaluate(async ({ protocol, version }) => {
       const shell = window.placekeeper;
@@ -109,7 +109,7 @@ test('packaged candidate renders and activates a real PDF without system Node', 
         arbitraryMethod: await rejected(() => shell.request(identity, { ...request, method: 'readFile', payload: { path: '/etc/passwd' } })),
         pathInjection: await rejected(() => shell.request(identity, { ...request, path: '/etc/passwd' })),
       };
-    }, { protocol: REVIEW_RUNTIME_PROTOCOL, version: REVIEW_RUNTIME_VERSION });
+    }, { protocol: DOCUMENT_RUNTIME_PROTOCOL, version: DOCUMENT_RUNTIME_VERSION });
     expect(isolation).toEqual({ node: false, wrongWindow: true, foreignToolbar: true, invalidToolbar: true, arbitraryMethod: true, pathInjection: true });
     await page.screenshot({ path: testInfo.outputPath('review.png') });
     await testInfo.attach('review', { path: testInfo.outputPath('review.png'), contentType: 'image/png' });

@@ -1,4 +1,4 @@
-import { reviewEdgeGeometry } from '../../scripts/testing/review-edge-geometry.js';
+import { documentEdgeGeometry } from '../../scripts/testing/review-edge-geometry.js';
 import { copyFile, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -57,7 +57,7 @@ test('workspace fade follows the opening tray without another pointer or scroll 
   await page.getByRole('button', { name: 'Show Workspace', exact: true }).click();
   // Do not move the pointer after opening: the transition itself must publish geometry.
   await page.waitForTimeout(240);
-  const geometry = await page.locator('[data-review-stage]').evaluate(reviewEdgeGeometry);
+  const geometry = await page.locator('[data-review-stage]').evaluate(documentEdgeGeometry);
   const tray = (await page.locator('#review-tools-workspace').boundingBox())!;
   expect(tray.x - geometry.rightStart).toBeCloseTo(12, 2);
   expect(geometry).toMatchObject({ fadeSize: 12, display: 'block' });

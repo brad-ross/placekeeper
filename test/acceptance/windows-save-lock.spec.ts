@@ -18,10 +18,10 @@ const sha = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("he
 const encode = (script: string) => Buffer.from(windowsPowerShellScript(script), "utf16le").toString("base64");
 
 interface FixtureWrite { readonly revision: number; readonly annotationCount: number }
-function fixtureWriter(original: Uint8Array, reviewed: Uint8Array, calls: FixtureWrite[]): PdfWriter {
+function fixtureWriter(original: Uint8Array, annotated: Uint8Array, calls: FixtureWrite[]): PdfWriter {
   return { write: async request => {
     if (calls.length < 16) calls.push({ revision: request.revision, annotationCount: request.annotations.length });
-    const bytes = request.revision > 0 && request.annotations.length > 0 ? reviewed : original;
+    const bytes = request.revision > 0 && request.annotations.length > 0 ? annotated : original;
     return {
       pdfBytes: bytes,
       evidence: { backend: "embedpdf", backendVersion: "test", originalSha256: request.sourceSha256,
@@ -66,7 +66,7 @@ test("a Windows sharing lock preserves original bytes and accepted recovery, the
   const target = join(directory, "paper.pdf");
   const releasePath = join(directory, `release-${randomUUID()}`);
   const original = Buffer.from("%PDF-1.7\noriginal\n%%EOF");
-  const reviewed = Buffer.from("%PDF-1.7\nreviewed note\n%%EOF");
+  const annotated = Buffer.from("%PDF-1.7\nreviewed note\n%%EOF");
   const writerCalls: FixtureWrite[] = [];
   await writeFile(target, original);
   const broker = new SessionBroker({ recoveryRoot: join(directory, "recovery"), portableReader: async () => [] });
@@ -95,7 +95,7 @@ test("a Windows sharing lock preserves original bytes and accepted recovery, the
     const opened = await broker.openReview({ pdfPath: target });
     if (opened.kind !== "opened") throw new Error("Expected fresh review");
     const sessionId = opened.launch.sessionId;
-    const writer = fixtureWriter(original, reviewed, writerCalls);
+    const writer = fixtureWriter(original, annotated, writerCalls);
     const coordinator = new PdfSaveCoordinator({ broker, writer,
       verify: async ({ annotations }) => ({ pageCount: 1, annotationIds: annotations.map(item => item.id) }) });
     await coordinator.chooseOriginal(sessionId);
@@ -151,7 +151,7 @@ try {
     await releaseHolder();
     expect(lockProcess.exitCode, "lock holder must exit cleanly after explicit release").toBe(0);
     await coordinator.retry(sessionId);
-    expect(await readFile(target)).toEqual(reviewed);
+    expect(await readFile(target)).toEqual(annotated);
     expect(broker.saveStatus(sessionId)?.sync).toMatchObject({ phase: "clean", savedRevision: 1 });
     const { stdout } = await promisify(execFile)(powershell,
       ["-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", encode("(Get-Acl -LiteralPath $env:PLACEKEEPER_LOCK_TARGET).Sddl")],

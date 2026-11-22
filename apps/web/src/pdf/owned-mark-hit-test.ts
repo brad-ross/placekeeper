@@ -1,6 +1,6 @@
 import { boundingRectOrEmpty } from '@embedpdf/models';
-import type { ReviewAnnotation } from '../../../../packages/core/src/pdf-writer.js';
-import { reviewItemIdForAnnotation } from '../review/annotation-projection.js';
+import type { PdfWriterAnnotation } from '../../../../packages/core/src/pdf-writer.js';
+import { annotationIdForPdfAnnotation } from '../review/annotation-projection.js';
 
 export interface OwnedMarkPoint {
   readonly x: number;
@@ -22,24 +22,24 @@ export interface OwnedMarkGeometry {
 }
 
 export function groupOwnedMarkGeometry(
-  annotations: readonly ReviewAnnotation[],
+  annotations: readonly PdfWriterAnnotation[],
   paintOrderForIndex: (index: number) => number = (index) => index,
 ): OwnedMarkGeometry[] {
   const groups = new Map<string, OwnedMarkGeometry>();
   annotations.forEach((annotation, index) => {
-    const reviewItemId = reviewItemIdForAnnotation(annotation);
+    const annotationId = annotationIdForPdfAnnotation(annotation);
     const rects = annotation.quadPoints?.length ? annotation.quadPoints : [annotation.rect];
-    const current = groups.get(reviewItemId);
+    const current = groups.get(annotationId);
     if (current) {
-      groups.set(reviewItemId, {
+      groups.set(annotationId, {
         ...current,
         rects: [...current.rects, ...rects],
         paintOrder: Math.max(current.paintOrder, paintOrderForIndex(index)),
       });
       return;
     }
-    groups.set(reviewItemId, {
-      id: reviewItemId,
+    groups.set(annotationId, {
+      id: annotationId,
       pageIndex: annotation.pageIndex,
       rects: rects.map((rect) => ({ ...rect })),
       paintOrder: paintOrderForIndex(index),
@@ -57,9 +57,9 @@ export function groupOwnedMarkGeometry(
 }
 
 export function groupOwnedMarkGeometryByPage(
-  annotations: readonly ReviewAnnotation[],
+  annotations: readonly PdfWriterAnnotation[],
 ): ReadonlyMap<number, readonly OwnedMarkGeometry[]> {
-  const annotationsByPage = new Map<number, ReviewAnnotation[]>();
+  const annotationsByPage = new Map<number, PdfWriterAnnotation[]>();
   for (const annotation of annotations) {
     const page = annotationsByPage.get(annotation.pageIndex);
     if (page) page.push(annotation);

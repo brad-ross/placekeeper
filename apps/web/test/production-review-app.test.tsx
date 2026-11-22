@@ -4,8 +4,8 @@ import { PdfZoomMode } from "@embedpdf/models";
 import { describe, expect, it, vi } from "vitest";
 
 import type { ProductionScope } from "../src/host/session-contracts.js";
-import { createReviewState } from "../../../packages/core/src/review-model.js";
-import { createReviewStateSummary } from "../../../packages/core/src/live-context.js";
+import { createDocumentState } from "../../../packages/core/src/review-model.js";
+import { createDocumentStateSummary } from "../../../packages/core/src/live-context.js";
 import {
   applyHostForwardSyncTex,
   ReverseSyncTexRequestCoordinator,
@@ -16,7 +16,7 @@ import {
   forwardSyncTexRequestReady,
 } from "../src/host/synctex-navigation.js";
 import { initiallyPortableItemIds } from "../src/save/portable-checkpoint.js";
-import { canonicalStateSupersedes, firstUnresolvedReviewItemId } from "../src/review/canonical-state.js";
+import { canonicalStateSupersedes, firstUnresolvedAnnotationId } from "../src/review/canonical-state.js";
 import {
   annotationReferenceRequest,
   authoringReferenceTarget,
@@ -25,7 +25,7 @@ import {
   ownedAnnotationCorrespondence,
   pinReferenceInspection,
   pdfAnnotationSurfaceIsCurrent,
-  ProductionReviewApp,
+  ProductionReaderApp,
   referenceInspectionShouldReuse,
   referenceInspectionShouldPreserveSelection,
   referenceInspectionCorrespondenceAuthority,
@@ -41,13 +41,13 @@ import {
   viewerAssetUrlsEqual,
   viewerResourcePoliciesEqual,
 } from "../src/host/viewer-resource-equivalence.js";
-import { reviewStateRequestKey, visibleCodexContext, updateProductionScope } from "../src/host/context-projection.js";
+import { documentStateRequestKey, visibleCodexContext, updateProductionScope } from "../src/host/context-projection.js";
 import type { DestinationBandPresentationState } from "../src/review/navigation-coordinator.js";
 import { SaveDestinationDialog } from "../src/save/SaveDestinationDialog.js";
 import {
   canDeriveAnnotationOutlineLabels,
   deriveAnnotationOutlineLabels,
-  reviewItemNavigationTarget,
+  annotationNavigationTarget,
 } from "../src/review/annotation-outline-context.js";
 import {
   buildReattachmentCommand,
@@ -62,9 +62,9 @@ import {
   type ReconciliationSummaryPresentation,
 } from "../src/review/ReconciliationWorkspace.js";
 import {
-  reviewExportPresentation,
+  documentExportPresentation,
 } from "../src/review/DocumentActionsMenu.js";
-import { MemoryReviewLocationHistory } from "../src/review/review-location-history.js";
+import { MemoryDocumentLocationHistory } from "../src/review/review-location-history.js";
 import type { ReferenceTab } from "../src/review/reference-navigation-state.js";
 
 describe('owned annotation correspondence', () => {
@@ -368,7 +368,7 @@ describe('scope polling identity', () => {
 
 describe("Destination Band projection boundary", () => {
   it("Covers AE6. keeps bands out of the review state that feeds Codex context and export", () => {
-    const state = createReviewState({
+    const state = createDocumentState({
       sessionId: "00000000-0000-4000-8000-0000000000b1",
       source: { fileId: "00000000-0000-4000-8000-0000000000b2", digest: "e".repeat(64), byteLength: 1 },
     });
@@ -385,8 +385,8 @@ describe("Destination Band projection boundary", () => {
     // Bands live beside navigation presentation, never inside ReviewState.
     expect(Object.keys(state).some((key) => /band|destination|navigation/iu.test(key))).toBe(false);
     const projections = [
-      reviewStateRequestKey(state),
-      JSON.stringify(createReviewStateSummary(state)),
+      documentStateRequestKey(state),
+      JSON.stringify(createDocumentStateSummary(state)),
       JSON.stringify(state),
     ];
     for (const projection of projections) {
@@ -642,7 +642,7 @@ describe("one production review tree", () => {
   });
 
   it('navigates a cross-page item once through its canonical first segment', () => {
-    expect(reviewItemNavigationTarget({
+    expect(annotationNavigationTarget({
       id: 'cross-page',
       kind: 'highlight',
       pageIndex: 2,
@@ -882,8 +882,8 @@ describe("one production review tree", () => {
     const resolved = { id: "resolved", reconciliation: { disposition: { kind: "resolved" } } };
     const ambiguous = { id: "ambiguous", reconciliation: { disposition: { kind: "ambiguous" } } };
     const missing = { id: "missing", reconciliation: { disposition: { kind: "missing" } } };
-    expect(firstUnresolvedReviewItemId([resolved, ambiguous, missing])).toBe("ambiguous");
-    expect(firstUnresolvedReviewItemId([resolved])).toBeUndefined();
+    expect(firstUnresolvedAnnotationId([resolved, ambiguous, missing])).toBe("ambiguous");
+    expect(firstUnresolvedAnnotationId([resolved])).toBeUndefined();
   });
 
   it("adopts same-generation canonical freshness without requiring a review revision", () => {
@@ -894,7 +894,7 @@ describe("one production review tree", () => {
     expect(canonicalStateSupersedes(current, current)).toBe(false);
   });
   it("renders canonical unresolved work, frozen drafts, freshness, and export gates", () => {
-    const base = createReviewState({
+    const base = createDocumentState({
       sessionId: "00000000-0000-4000-8000-000000000071",
       source: { fileId: "00000000-0000-4000-8000-000000000072", digest: "d".repeat(64), byteLength: 10 },
       workflowMode: "generated-output",
@@ -1067,15 +1067,15 @@ describe("one production review tree", () => {
 
   it("explains reconciling, unresolved, stale-confirmation, and eligible export states", () => {
     const summary = (unresolvedItems: number, pendingDrafts: number, freshness: "current" | "possibly-stale") => ({
-      ...createReviewStateSummary({
-        ...createReviewState({
+      ...createDocumentStateSummary({
+        ...createDocumentState({
           sessionId: "00000000-0000-4000-8000-000000000099",
           source: { fileId: "00000000-0000-4000-8000-000000000098", digest: "f".repeat(64), byteLength: 1 },
           workflowMode: "generated-output",
           documentGeneration: 1,
         }),
         workflow: {
-          ...createReviewState({
+          ...createDocumentState({
             sessionId: "00000000-0000-4000-8000-000000000099",
             source: { fileId: "00000000-0000-4000-8000-000000000098", digest: "f".repeat(64), byteLength: 1 },
             workflowMode: "generated-output",
@@ -1096,33 +1096,33 @@ describe("one production review tree", () => {
           ? { eligible: false as const, requiresStaleConfirmation: true as const, reasons: ["possibly-stale" as const] }
           : { eligible: true as const, requiresStaleConfirmation: false as const },
     });
-    expect(reviewExportPresentation({
+    expect(documentExportPresentation({
       refreshStatus: "reconciling",
       summary: summary(0, 0, "current"),
     }).message).toContain("reconciliation finishes");
-    expect(reviewExportPresentation({
+    expect(documentExportPresentation({
       refreshStatus: "idle",
       summary: summary(2, 0, "current"),
     }).message).toBe("2 annotations to resolve.");
-    expect(reviewExportPresentation({
+    expect(documentExportPresentation({
       refreshStatus: "idle",
       summary: summary(0, 0, "possibly-stale"),
     })).toMatchObject({ canExport: true, requiresStaleConfirmation: true });
-    expect(reviewExportPresentation({
+    expect(documentExportPresentation({
       refreshStatus: "idle",
       summary: summary(0, 0, "current"),
     })).toMatchObject({ canExport: true, requiresStaleConfirmation: false });
   });
 
   it("integrates generated-output reconciliation and export without automatic-save controls", () => {
-    const state = createReviewState({
+    const state = createDocumentState({
       sessionId: "00000000-0000-4000-8000-000000000081",
       source: { fileId: "00000000-0000-4000-8000-000000000082", digest: "e".repeat(64), byteLength: 20 },
       workflowMode: "generated-output",
       documentGeneration: 8,
     });
     const renderSurface = (launchSurface: "browser" | "vscode") => renderToStaticMarkup(
-      <ProductionReviewApp
+      <ProductionReaderApp
         session={{ sessionId: state.sessionId }}
         initialState={state}
         scope={{ documentTitle: "paper.pdf", launchSurface }}
@@ -1162,7 +1162,7 @@ describe("one production review tree", () => {
   });
 
   it("keeps rebuild progress and failure notices out of the attention tray", () => {
-    const state = createReviewState({
+    const state = createDocumentState({
       sessionId: "00000000-0000-4000-8000-000000000091",
       source: { fileId: "00000000-0000-4000-8000-000000000092", digest: "d".repeat(64), byteLength: 1 },
       workflowMode: "generated-output",
@@ -1189,7 +1189,7 @@ describe("one production review tree", () => {
   });
 
   it("suppresses only exact active protected authoring drafts across peer surfaces", () => {
-    const base = createReviewState({
+    const base = createDocumentState({
       sessionId: "00000000-0000-4000-8000-000000000093",
       source: { fileId: "00000000-0000-4000-8000-000000000094", digest: "e".repeat(64), byteLength: 1 },
       documentGeneration: 2,
@@ -1353,7 +1353,7 @@ describe("one production review tree", () => {
 
   it("keeps clean imported review items portable without an active save destination", () => {
     const state = {
-      ...createReviewState({
+      ...createDocumentState({
         sessionId: "00000000-0000-4000-8000-000000000031",
         source: { fileId: "00000000-0000-4000-8000-000000000032", digest: "a".repeat(64), byteLength: 12 },
       }),
@@ -1582,13 +1582,13 @@ describe("one production review tree", () => {
 
   it("enables undo and redo from compact native history without receiving snapshots", () => {
     const state = {
-      ...createReviewState({
+      ...createDocumentState({
         sessionId: "00000000-0000-4000-8000-000000000001",
         source: { fileId: "00000000-0000-4000-8000-000000000002", digest: "a".repeat(64), byteLength: 12 },
       }),
       history: { length: 300 }, historyCursor: 299, revision: 301,
     };
-    const html = renderToStaticMarkup(<ProductionReviewApp
+    const html = renderToStaticMarkup(<ProductionReaderApp
       session={{ sessionId: state.sessionId, credential: "secret" }}
       initialState={state}
       scope={{ documentTitle: "paper.pdf" }}
@@ -1605,7 +1605,7 @@ describe("one production review tree", () => {
 
   it("keeps the ordinary-browser review free of Codex controls or ambient status", () => {
     const state = {
-      ...createReviewState({
+      ...createDocumentState({
         sessionId: "00000000-0000-4000-8000-000000000001",
         source: { fileId: "00000000-0000-4000-8000-000000000002", digest: "a".repeat(64), byteLength: 12 },
         sourceRootId: "00000000-0000-4000-8000-000000000003",
@@ -1617,7 +1617,7 @@ describe("one production review tree", () => {
         payload: { position: { x: 1, y: 2, width: 3, height: 4 }, comment: "Fix" },
       }],
     };
-    const html = renderToStaticMarkup(<ProductionReviewApp
+    const html = renderToStaticMarkup(<ProductionReaderApp
       session={{ sessionId: state.sessionId, credential: "secret" }}
       initialState={state}
       scope={{ documentTitle: "paper.pdf", sourceRootPath: "/tmp/source" }}
@@ -1660,7 +1660,7 @@ describe("one production review tree", () => {
   });
 
   it("omits copy-link buttons on app-hosted and Chrome surfaces", () => {
-    const state = createReviewState({
+    const state = createDocumentState({
       sessionId: "00000000-0000-4000-8000-000000000101",
       source: { fileId: "00000000-0000-4000-8000-000000000102", digest: "a".repeat(64), byteLength: 12 },
     });
@@ -1670,12 +1670,12 @@ describe("one production review tree", () => {
       scope: vi.fn(),
     };
     const renderSurface = (launchSurface: NonNullable<ProductionScope["launchSurface"]>) => renderToStaticMarkup(
-      <ProductionReviewApp
+      <ProductionReaderApp
         session={{ sessionId: state.sessionId, appLinkBase: "placekeeper:///tmp/paper.pdf" }}
         initialState={state}
         scope={{ documentTitle: "paper.pdf", launchSurface }}
         api={api}
-        locationHistory={new MemoryReviewLocationHistory()}
+        locationHistory={new MemoryDocumentLocationHistory()}
         viewer={<div>Viewer</div>}
       />,
     );
@@ -1694,11 +1694,11 @@ describe("one production review tree", () => {
     { writable: false, phase: 'not-saved' as const },
     { writable: false, phase: 'not-saved' as const, download: false },
   ])('offers automatic save options for a host destination ($writable, $phase)', ({ writable, phase, download }) => {
-    const state = createReviewState({
+    const state = createDocumentState({
       sessionId: '00000000-0000-4000-8000-000000000103',
       source: { fileId: '00000000-0000-4000-8000-000000000104', digest: 'a'.repeat(64), byteLength: 12 },
     });
-    const html = renderToStaticMarkup(<ProductionReviewApp
+    const html = renderToStaticMarkup(<ProductionReaderApp
       session={{ sessionId: state.sessionId }} initialState={state}
       scope={{ documentTitle: 'host.pdf', launchSurface: 'codex', sourceDisposition: 'remote-temporary' }}
       initialSaveStatus={{
@@ -1726,7 +1726,7 @@ describe("one production review tree", () => {
   });
 
   it('shows actionable save failure only for an established local save destination', () => {
-    const state = createReviewState({
+    const state = createDocumentState({
       sessionId: '00000000-0000-4000-8000-000000000101',
       source: { fileId: '00000000-0000-4000-8000-000000000102', digest: 'a'.repeat(64), byteLength: 12 },
     });
@@ -1735,7 +1735,7 @@ describe("one production review tree", () => {
       chooseFolder: vi.fn(), chooseOriginal: vi.fn(), retrySave: vi.fn(), locateSave: vi.fn(), scope: vi.fn(),
     };
     const renderFailure = (phase: 'clean' | 'saving' | 'not-saved', configured = true, exportOnly = false) =>
-      renderToStaticMarkup(<ProductionReviewApp
+      renderToStaticMarkup(<ProductionReaderApp
         session={{ sessionId: state.sessionId }} initialState={state} api={api}
         scope={{ documentTitle: 'paper.pdf', ...(exportOnly ? { persistenceMode: 'export-only' as const } : {}) }}
         initialSaveStatus={{
@@ -1758,7 +1758,7 @@ describe("one production review tree", () => {
   });
 
   it("shows passive status only for a trusted Codex launch scope", () => {
-    const state = createReviewState({
+    const state = createDocumentState({
       sessionId: "00000000-0000-4000-8000-000000000011",
       source: { fileId: "00000000-0000-4000-8000-000000000012", digest: "a".repeat(64), byteLength: 12 },
     });
@@ -1767,7 +1767,7 @@ describe("one production review tree", () => {
       chooseFolder: vi.fn(), chooseOriginal: vi.fn(), retrySave: vi.fn(), locateSave: vi.fn(),
       scope: vi.fn(),
     };
-    const codex = renderToStaticMarkup(<ProductionReviewApp
+    const codex = renderToStaticMarkup(<ProductionReaderApp
       session={{ sessionId: state.sessionId, credential: "secret" }}
       initialState={state}
       scope={{
@@ -1778,7 +1778,7 @@ describe("one production review tree", () => {
       api={api}
       viewer={<div>Viewer</div>}
     />);
-    const finder = renderToStaticMarkup(<ProductionReviewApp
+    const finder = renderToStaticMarkup(<ProductionReaderApp
       session={{ sessionId: state.sessionId, credential: "secret" }}
       initialState={state}
       scope={{ documentTitle: "paper.pdf", launchSurface: "finder" }}
@@ -1795,11 +1795,11 @@ describe("one production review tree", () => {
   });
 
   it('omits the legacy task-binding badge only for an app-owned Codex reader', () => {
-    const state = createReviewState({
+    const state = createDocumentState({
       sessionId: '00000000-0000-4000-8000-000000000011',
       source: { fileId: '00000000-0000-4000-8000-000000000012', digest: 'a'.repeat(64), byteLength: 12 },
     });
-    const renderReader = (contextOwner?: 'app') => renderToStaticMarkup(<ProductionReviewApp
+    const renderReader = (contextOwner?: 'app') => renderToStaticMarkup(<ProductionReaderApp
       session={{ sessionId: state.sessionId }}
       initialState={state}
       scope={{ documentTitle: 'paper.pdf', launchSurface: 'codex', ...(contextOwner === undefined ? {} : { contextOwner }) }}
@@ -1817,7 +1817,7 @@ describe("one production review tree", () => {
   });
 
   it("renders a previously current Codex identity as refreshing as soon as local review state advances", () => {
-    const initial = createReviewState({
+    const initial = createDocumentState({
       sessionId: "00000000-0000-4000-8000-000000000021",
       source: { fileId: "00000000-0000-4000-8000-000000000022", digest: "a".repeat(64), byteLength: 12 },
     });
@@ -1838,7 +1838,7 @@ describe("one production review tree", () => {
       lastVerified: { reviewRevision: 0 },
     });
 
-    const html = renderToStaticMarkup(<ProductionReviewApp
+    const html = renderToStaticMarkup(<ProductionReaderApp
       session={{ sessionId: advanced.sessionId, credential: "secret" }}
       initialState={advanced}
       scope={{ documentTitle: "paper.pdf", launchSurface: "codex", codexContext: current }}
@@ -1897,7 +1897,7 @@ describe("one production review tree", () => {
 
   it("shows a cancelled remote annotation as Protected Recovery with Save available to retry", () => {
     const state = {
-      ...createReviewState({
+      ...createDocumentState({
         sessionId: "00000000-0000-4000-8000-000000000041",
         source: {
           fileId: "00000000-0000-4000-8000-000000000042",
@@ -1915,7 +1915,7 @@ describe("one production review tree", () => {
         payload: { position: { x: 1, y: 2, width: 3, height: 4 }, comment: "Protected" },
       }],
     };
-    const html = renderToStaticMarkup(<ProductionReviewApp
+    const html = renderToStaticMarkup(<ProductionReaderApp
       session={{ sessionId: state.sessionId, credential: "secret" }}
       initialState={state}
       initialSaveStatus={{
@@ -2006,11 +2006,11 @@ it('renders captured evidence and an editable note before offering to add contex
 });
 
 it('projects a pending PDF status only for the same displayed source', () => {
-  const state = createReviewState({
+  const state = createDocumentState({
     sessionId: '00000000-0000-4000-8000-000000000011',
     source: { fileId: '00000000-0000-4000-8000-000000000012', digest: 'a'.repeat(64), byteLength: 12 },
   });
-  const renderReader = (fileId: string) => renderToStaticMarkup(<ProductionReviewApp
+  const renderReader = (fileId: string) => renderToStaticMarkup(<ProductionReaderApp
     session={{ sessionId: state.sessionId }}
     initialState={state}
     scope={{ documentTitle: 'paper.pdf', launchSurface: 'codex', contextOwner: 'app' }}

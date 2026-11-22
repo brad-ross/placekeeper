@@ -9,7 +9,7 @@ import { PlacekeeperHost } from '../../apps/service/src/host/placekeeper-host.js
 import {
   addHighlight,
   addPageNote,
-  removeReviewItem,
+  removeAnnotation,
 } from '../../packages/core/src/review-commands.js';
 import {
   expectFirstVisibleReferenceCard,
@@ -1347,7 +1347,7 @@ test('closes a deleted passive reader and preserves a stale edit with Save disab
   await expect(page.locator('[data-reference-annotation-inspection]')).toBeVisible();
   await host.broker.acceptMutation(
     sessionId,
-    removeReviewItem(host.broker.state(sessionId)!, passive.id),
+    removeAnnotation(host.broker.state(sessionId)!, passive.id),
   );
   await expect(page.locator('[data-reference-annotation-inspection]')).toHaveCount(0);
 
@@ -1370,7 +1370,7 @@ test('closes a deleted passive reader and preserves a stale edit with Save disab
   )?.text).toBe(recoverableDraft);
   await host.broker.acceptMutation(
     sessionId,
-    removeReviewItem(host.broker.state(sessionId)!, stale.id),
+    removeAnnotation(host.broker.state(sessionId)!, stale.id),
   );
   await expect(editor).toHaveValue(recoverableDraft);
   await expect(composer.getByRole('button', { name: 'Apply', exact: true })).toBeDisabled();

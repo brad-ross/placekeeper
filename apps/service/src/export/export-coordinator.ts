@@ -9,14 +9,14 @@ import { dirname, join } from "node:path";
 
 import type {
   PdfWriter,
-  ReviewAnnotation,
+  PdfWriterAnnotation,
 } from "../../../../packages/core/src/pdf-writer.js";
 import type {
-  ReviewItem,
-  ReviewSourceIdentity,
-  ReviewWorkflowMode,
+  Annotation,
+  DocumentSourceIdentity,
+  DocumentWorkflowMode,
 } from "../../../../packages/core/src/review-model.js";
-import type { ReviewStateSummaryV1 } from "../../../../packages/core/src/live-context.js";
+import type { DocumentStateSummaryV1 } from "../../../../packages/core/src/live-context.js";
 import {
   runPdfBackend,
   type PdfBackendRunOptions,
@@ -28,38 +28,38 @@ import {
 import { syncDirectory } from "../files/durability.js";
 import { preserveReplacementPermissions, publishFile, stagePublication, syncPublishedFile, type FilePublication } from "../platform/file-publication.js";
 import { SessionControlRegistry } from "../sessions/control-socket.js";
-import { reviewedPdfFilename } from "./output-names.js";
+import { annotatedPdfFilename } from "./output-names.js";
 import {
-  verifyReviewedPdf,
+  verifyAnnotatedPdf,
   type PdfExportVerifier,
   type PdfVerificationReport,
 } from "./pdf-verifier.js";
 
-export interface FrozenReviewDelivery {
+export interface FrozenDocumentDelivery {
   readonly manageNativeAnnotations?: boolean;
   readonly sessionId: string;
-  readonly source: ReviewSourceIdentity;
+  readonly source: DocumentSourceIdentity;
   readonly originalDigest: string;
   readonly revision: number;
   readonly sourceSnapshotPath: string;
-  readonly annotations: readonly ReviewAnnotation[];
+  readonly annotations: readonly PdfWriterAnnotation[];
   /** Canonical semantic evidence from the same frozen revision as annotations. */
-  readonly items: readonly ReviewItem[];
+  readonly items: readonly Annotation[];
   readonly sourceRootId?: string;
   readonly sourceRootPath?: string;
-  readonly workflowMode: ReviewWorkflowMode;
+  readonly workflowMode: DocumentWorkflowMode;
   readonly documentGeneration: number;
   readonly dispositionDigest: string;
   readonly stateDigest: string;
-  readonly exportEligibility: ReviewStateSummaryV1["export"];
+  readonly exportEligibility: DocumentStateSummaryV1["export"];
   readonly staleConfirmed?: true;
 }
 
 export type FrozenPdfDelivery = Omit<
-  FrozenReviewDelivery,
+  FrozenDocumentDelivery,
   "items" | "sourceRootId" | "sourceRootPath" | "workflowMode" | "documentGeneration" | "dispositionDigest" | "stateDigest" | "exportEligibility" | "staleConfirmed"
 > &
-  Partial<Pick<FrozenReviewDelivery, "items" | "sourceRootId" | "sourceRootPath" | "workflowMode" | "documentGeneration" | "dispositionDigest" | "stateDigest" | "exportEligibility" | "staleConfirmed">>;
+  Partial<Pick<FrozenDocumentDelivery, "items" | "sourceRootId" | "sourceRootPath" | "workflowMode" | "documentGeneration" | "dispositionDigest" | "stateDigest" | "exportEligibility" | "staleConfirmed">>;
 
 export interface PdfExportResult {
   readonly kind: "reviewed-copy" | "original-replacement";
@@ -158,7 +158,7 @@ export class ExportCoordinator {
     this.#writer = options.writer;
     this.#capabilities = options.capabilities;
     this.#controls = options.controls ?? new SessionControlRegistry();
-    this.#verify = options.verify ?? verifyReviewedPdf;
+    this.#verify = options.verify ?? verifyAnnotatedPdf;
     this.#backend = options.backend ?? {};
     this.#recordSuccessfulExport =
       options.recordSuccessfulExport ?? (async () => undefined);
@@ -366,7 +366,7 @@ export class ExportCoordinator {
       for (;;) {
         outputPath = join(
           directory,
-          reviewedPdfFilename(originalPath, collisionIndex),
+          annotatedPdfFilename(originalPath, collisionIndex),
         );
         try {
           lease.signal.throwIfAborted();

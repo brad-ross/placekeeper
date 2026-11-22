@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
 import { isVisibleFocusTarget } from './focus-target.js';
-import type { ReviewItem, ReviewStateView } from '../../../../packages/core/src/review-model.js';
+import type { Annotation, DocumentStateView } from '../../../../packages/core/src/review-model.js';
 import { existingAnnotationKey, type ExistingAnnotation, type ExistingAnnotationsDiscovery } from '../pdf/existing-annotations.js';
 import type { PdfViewerNavigation } from '../pdf/viewer-navigation-adapter.js';
 import type { PdfTargetVisibility } from '../pdf/viewer-navigation.js';
@@ -8,7 +8,7 @@ import type { PdfAnnotationSurface } from '../pdf/annotation-surface.js';
 import type { ViewerClientPlacement } from '../pdf/viewer-interaction-events.js';
 import { authoringAuthorityMatches, type AuthoringAuthority, type AuthoringSession } from './authoring-session.js';
 import { annotationReaderIdentityMatches, resolveAnnotationReader, type AnnotationReaderIdentity, type AnnotationReaderRecord } from './annotation-reader.js';
-import { reviewItemNavigationTarget } from './annotation-outline-context.js';
+import { annotationNavigationTarget } from './annotation-outline-context.js';
 
 interface FullAnnotationReaderSession {
   readonly identity: AnnotationReaderIdentity;
@@ -20,8 +20,8 @@ interface FullAnnotationReaderSession {
 }
 
 interface AnnotationReaderOptions {
-  state: ReviewStateView;
-  items: readonly ReviewItem[];
+  state: DocumentStateView;
+  items: readonly Annotation[];
   existingAnnotations: ExistingAnnotationsDiscovery;
   documentGeneration: number;
   currentAuthoringAuthority: AuthoringAuthority;
@@ -45,7 +45,7 @@ interface AnnotationReaderOptions {
   setActiveItem(id: string | undefined): void;
   setActiveExistingAnnotationKey(key: string | undefined): void;
   markUserIntent(): void;
-  onNavigate: ((item: ReviewItem) => void) | undefined;
+  onNavigate: ((item: Annotation) => void) | undefined;
   onNavigateExisting: ((item: ExistingAnnotation) => void) | undefined;
 }
 
@@ -116,7 +116,7 @@ export function useAnnotationReader({
           const item = items.find(
             ({ id }) => id === annotationSourceIdentity.itemId,
           );
-          return item === undefined ? null : reviewItemNavigationTarget(item);
+          return item === undefined ? null : annotationNavigationTarget(item);
         })()
       : existingAnnotations.status === 'ready'
         ? (() => {
@@ -136,7 +136,7 @@ export function useAnnotationReader({
       ? (() => {
           const itemId = referenceInspectionIdentity.itemId;
           const item = items.find(({ id }) => id === itemId);
-          return item === undefined ? null : reviewItemNavigationTarget(item);
+          return item === undefined ? null : annotationNavigationTarget(item);
         })()
       : existingAnnotations.status === 'ready'
         ? (() => {
@@ -502,7 +502,7 @@ export function useAnnotationReader({
   const restoreReaderAfterAuthoring = (
     current: AuthoringSession,
     reason: 'accepted' | 'cancelled' | 'source-replaced',
-    acceptedState?: ReviewStateView,
+    acceptedState?: DocumentStateView,
   ): boolean => {
     const readerOrigin = current.origin.kind === 'reader-edit'
       && current.origin.surface?.kind !== 'reference'

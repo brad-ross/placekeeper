@@ -4,8 +4,8 @@ import type { PdfTargetVisibility } from '../pdf/viewer-navigation.js';
 import type { AnnotationReaderRecord } from './annotation-reader.js';
 import { AnnotationQuoteInContext } from './AnnotationExcerpt.js';
 import { annotationKindIcon } from './AnnotationMetadata.js';
-import { ReviewIcon } from './ReviewIcon.js';
-import { ReviewTooltipButton } from './ReviewTooltipButton.js';
+import { ReaderIcon } from './ReviewIcon.js';
+import { ReaderTooltipButton } from './ReviewTooltipButton.js';
 
 export interface FullAnnotationReaderSourceNavigation {
   readonly visibility: PdfTargetVisibility;
@@ -67,7 +67,7 @@ export function FullAnnotationReaderMetadata({
     : `Previously pages ${record.pageNumber}–${record.lastPageNumber}`;
   return <div className="full-annotation-reader__metadata annotation-item__meta" aria-label="Annotation details">
     <span className="annotation-item__kind-icon" title={record.typeLabel}>
-      <ReviewIcon name={annotationKindIcon(record.kind)} size={16} />
+      <ReaderIcon name={annotationKindIcon(record.kind)} size={16} />
     </span>
     <span
       className="annotation-item__page"
@@ -155,7 +155,7 @@ export function FullAnnotationReaderActions({
   deleteRef,
 }: FullAnnotationReaderActionsProps) {
   return <>
-    <ReviewTooltipButton
+    <ReaderTooltipButton
       ref={backRef}
       type="button"
       className="full-annotation-reader__back"
@@ -164,10 +164,10 @@ export function FullAnnotationReaderActions({
       tooltip="Back to annotations"
       onClick={(event) => onBack(event.detail === 0)}
     >
-      <ReviewIcon name="arrow-left" size={16} />
-    </ReviewTooltipButton>
+      <ReaderIcon name="arrow-left" size={16} />
+    </ReaderTooltipButton>
     {onEdit === undefined ? null : (
-      <ReviewTooltipButton
+      <ReaderTooltipButton
         ref={editRef}
         type="button"
         className="full-annotation-reader__edit"
@@ -176,11 +176,11 @@ export function FullAnnotationReaderActions({
         tooltip="Edit annotation"
         onClick={(event) => onEdit(event.currentTarget)}
       >
-        <ReviewIcon name="edit" size={16} />
-      </ReviewTooltipButton>
+        <ReaderIcon name="edit" size={16} />
+      </ReaderTooltipButton>
     )}
     {onOpenReference === undefined ? null : (
-      <ReviewTooltipButton
+      <ReaderTooltipButton
         type="button"
         className="full-annotation-reader__open-reference"
         data-full-annotation-action="open-reference"
@@ -188,11 +188,11 @@ export function FullAnnotationReaderActions({
         tooltip="Open in References"
         onClick={onOpenReference}
       >
-        <ReviewIcon name="references" size={16} />
-      </ReviewTooltipButton>
+        <ReaderIcon name="references" size={16} />
+      </ReaderTooltipButton>
     )}
     {onDelete === undefined ? null : (
-      <ReviewTooltipButton
+      <ReaderTooltipButton
         ref={deleteRef}
         type="button"
         className="full-annotation-reader__delete"
@@ -201,8 +201,8 @@ export function FullAnnotationReaderActions({
         tooltip="Delete annotation"
         onClick={(event) => { void onDelete(event.currentTarget); }}
       >
-        <ReviewIcon name="remove" size={16} />
-      </ReviewTooltipButton>
+        <ReaderIcon name="remove" size={16} />
+      </ReaderTooltipButton>
     )}
   </>;
 }
@@ -247,23 +247,23 @@ export function FullAnnotationReader({
         </div>
         <FullAnnotationReaderMetadata record={record} readonly={record.origin === 'source'} />
         <div className="full-annotation-reader__header-actions">
-          {onAddContext === undefined ? null : <ReviewTooltipButton
+          {onAddContext === undefined ? null : <ReaderTooltipButton
             type="button"
             className="full-annotation-reader__add-context"
             data-full-annotation-action="add-context"
             label="Add annotation to chat"
             aria-haspopup="dialog"
             onClick={onAddContext}
-          ><ReviewIcon name="agent" size={16} /></ReviewTooltipButton>}
-          {onOpenReference === undefined ? null : <ReviewTooltipButton
+          ><ReaderIcon name="agent" size={16} /></ReaderTooltipButton>}
+          {onOpenReference === undefined ? null : <ReaderTooltipButton
             type="button"
             className="full-annotation-reader__open-reference"
             data-full-annotation-action="open-reference"
             label="Open in References"
             tooltip="Open in References"
             onClick={onOpenReference}
-          ><ReviewIcon name="references" size={16} /></ReviewTooltipButton>}
-          {showLocate ? <ReviewTooltipButton
+          ><ReaderIcon name="references" size={16} /></ReaderTooltipButton>}
+          {showLocate ? <ReaderTooltipButton
             type="button"
             className="full-annotation-reader__locate"
             data-full-annotation-action="locate"
@@ -275,23 +275,23 @@ export function FullAnnotationReader({
               locateHeldFocus.current = true;
               sourceNavigation?.onReturn();
             }}
-          ><ReviewIcon name={sourceNavigation?.pending ? 'loading' : 'locate'} size={16} /></ReviewTooltipButton> : null}
-          {onEdit === undefined || record.kind === 'delete' ? null : <ReviewTooltipButton
+          ><ReaderIcon name={sourceNavigation?.pending ? 'loading' : 'locate'} size={16} /></ReaderTooltipButton> : null}
+          {onEdit === undefined || record.kind === 'delete' ? null : <ReaderTooltipButton
             type="button"
             className="full-annotation-reader__edit"
             data-full-annotation-action="edit"
             label="Edit"
             tooltip="Edit annotation"
             onClick={(event) => onEdit(event.currentTarget)}
-          ><ReviewIcon name="edit" size={16} /></ReviewTooltipButton>}
-          {onDelete === undefined ? null : <ReviewTooltipButton
+          ><ReaderIcon name="edit" size={16} /></ReaderTooltipButton>}
+          {onDelete === undefined ? null : <ReaderTooltipButton
             type="button"
             className="full-annotation-reader__delete"
             data-full-annotation-action="delete"
             label="Delete"
             tooltip="Delete annotation"
             onClick={(event) => { void onDelete(event.currentTarget); }}
-          ><ReviewIcon name="remove" size={16} /></ReviewTooltipButton>}
+          ><ReaderIcon name="remove" size={16} /></ReaderTooltipButton>}
         </div>
       </header>
 

@@ -11,8 +11,8 @@ import {
 import { CopyLinkControl } from './CopyLinkControl.js';
 import type { CopyLinkActionData } from './copy-link-model.js';
 import { compositeFocusIndex, enabledMenuItems } from './menu-focus.js';
-import { ReviewIcon, type ReviewIconName } from './ReviewIcon.js';
-import { ReviewTooltipButton } from './ReviewTooltipButton.js';
+import { ReaderIcon, type ReaderIconName } from './ReviewIcon.js';
+import { ReaderTooltipButton } from './ReviewTooltipButton.js';
 
 export const ROW_ACTION_CONTAINER_NAME = 'row-actions';
 
@@ -25,7 +25,7 @@ interface RowActionBase {
 
 export interface RowCommandAction extends RowActionBase {
   readonly kind: 'command';
-  readonly icon: ReviewIconName;
+  readonly icon: ReaderIconName;
   readonly disabled?: boolean;
   readonly onInvoke: (trigger: HTMLButtonElement) => void;
 }
@@ -63,7 +63,7 @@ function DirectAction({ action }: { readonly action: RowAction }) {
     );
   }
   return (
-    <ReviewTooltipButton
+    <ReaderTooltipButton
       type="button"
       className="row-action-group__action"
       data-row-action={action.id}
@@ -73,8 +73,8 @@ function DirectAction({ action }: { readonly action: RowAction }) {
       disabled={action.disabled}
       onClick={(event) => action.onInvoke(event.currentTarget)}
     >
-      <ReviewIcon name={action.icon} size={16} />
-    </ReviewTooltipButton>
+      <ReaderIcon name={action.icon} size={16} />
+    </ReaderTooltipButton>
   );
 }
 
@@ -137,7 +137,7 @@ export function RowActionGroup({ actions, rowLabel }: RowActionGroupProps) {
         {actions.map((action) => <DirectAction key={action.id} action={action} />)}
       </div>
       <div className="row-action-group__secondary">
-        <ReviewTooltipButton
+        <ReaderTooltipButton
           ref={triggerRef}
           type="button"
           className="row-action-group__trigger"
@@ -149,8 +149,8 @@ export function RowActionGroup({ actions, rowLabel }: RowActionGroupProps) {
           aria-controls={menuId}
           onClick={() => setOpen((current) => !current)}
         >
-          <ReviewIcon name="more-horizontal" />
-        </ReviewTooltipButton>
+          <ReaderIcon name="more-horizontal" />
+        </ReaderTooltipButton>
         {open ? (
           <div
             id={menuId}
@@ -185,7 +185,7 @@ export function RowActionGroup({ actions, rowLabel }: RowActionGroupProps) {
                   closeAndRestore();
                 }}
               >
-                <ReviewIcon name={action.icon} size={16} />
+                <ReaderIcon name={action.icon} size={16} />
                 <span>{action.label}</span>
               </button>
             ))}

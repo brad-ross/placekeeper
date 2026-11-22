@@ -1,23 +1,23 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactElement, type ReactNode } from "react";
 
 import {
-  anchorEvidenceFromReviewItem,
-  synchronizeReviewItemAnchor,
+  anchorEvidenceFromAnnotation,
+  synchronizeAnnotationAnchor,
 } from "../../../../packages/core/src/review-model.js";
 import type {
-  PendingReviewDraftV1,
-  ReviewAnchorEvidenceV1,
-  ReviewCommand,
-  ReviewItem,
-  ReviewItemKind,
-  ReviewStateView,
+  PendingDocumentDraftV1,
+  DocumentAnchorEvidenceV1,
+  DocumentCommand,
+  Annotation,
+  AnnotationKind,
+  DocumentStateView,
 } from "../../../../packages/core/src/review-model.js";
 import type { GenerationRefreshStatus } from "../generation-status.js";
 import {
-  beginReviewInteraction,
-  type ReviewInteractionHandle,
-  type ReviewInteractionReceipt,
-  type ReviewInteractionTransport,
+  beginDocumentInteraction,
+  type DocumentInteractionHandle,
+  type DocumentInteractionReceipt,
+  type DocumentInteractionTransport,
 } from "./authoring-session.js";
 import type { CaretAnchor } from "../pdf/selection-anchor.js";
 import { reliableSelection, type SelectionUpdate } from "../pdf/selection-state.js";
@@ -26,8 +26,8 @@ import {
   AnnotationRowContent,
   type AnnotationAttentionPresentation,
 } from "./AnnotationList.js";
-import { ReviewIcon } from "./ReviewIcon.js";
-import { ReviewTooltipButton } from "./ReviewTooltipButton.js";
+import { ReaderIcon } from "./ReviewIcon.js";
+import { ReaderTooltipButton } from "./ReviewTooltipButton.js";
 import { existingAnnotationKey } from "../pdf/existing-annotations.js";
 import {
   FullAnnotationReaderBody,
@@ -48,7 +48,7 @@ export type ReattachmentTarget =
     }
   | {
       readonly kind: "draft";
-      readonly draft: PendingReviewDraftV1;
+      readonly draft: PendingDocumentDraftV1;
     };
 
 const DEFAULT_SELECTION_REATTACHMENT_MESSAGE = "Select the text to reattach to in the PDF.";
@@ -57,9 +57,9 @@ export function buildReattachmentCommand(input: {
   readonly target: ReattachmentTarget;
   readonly stateRevision: number;
   readonly documentGeneration: number;
-  readonly anchor: ReviewAnchorEvidenceV1;
+  readonly anchor: DocumentAnchorEvidenceV1;
   readonly updatedAt: string;
-}): ReviewCommand {
+}): DocumentCommand {
   if (input.target.kind === "item") {
     return {
       type: "reattach",
@@ -87,14 +87,14 @@ export function buildReattachmentCommand(input: {
   };
 }
 
-function targetAnchor(target: ReviewItem | PendingReviewDraftV1): ReviewAnchorEvidenceV1 {
-  return "payload" in target ? anchorEvidenceFromReviewItem(target) : target.anchor;
+function targetAnchor(target: Annotation | PendingDocumentDraftV1): DocumentAnchorEvidenceV1 {
+  return "payload" in target ? anchorEvidenceFromAnnotation(target) : target.anchor;
 }
 
 /** Text that shows where an insertion or page note used to sit, so its new
  * place can be found. Selection anchors already show their own quoted text. */
 function priorLocationContext(
-  target: ReviewItem | PendingReviewDraftV1,
+  target: Annotation | PendingDocumentDraftV1,
 ): { readonly label: string; readonly text: string } | null {
   const anchor = targetAnchor(target);
   if (anchor.kind === "caret") {
@@ -113,7 +113,7 @@ function priorLocationContext(
 
 function selectionEvidence(
   update: SelectionUpdate,
-): Extract<ReviewAnchorEvidenceV1, { readonly kind: "selection" }> | null {
+): Extract<DocumentAnchorEvidenceV1, { readonly kind: "selection" }> | null {
   const selection = reliableSelection(update);
   if (selection === null) return null;
   const { reliable: _reliable, ...anchor } = selection;
@@ -122,7 +122,7 @@ function selectionEvidence(
 
 function caretEvidence(
   caret: CaretAnchor | null | undefined,
-): Extract<ReviewAnchorEvidenceV1, { readonly kind: "caret" }> | null {
+): Extract<DocumentAnchorEvidenceV1, { readonly kind: "caret" }> | null {
   if (caret === null || caret === undefined) return null;
   return {
     kind: "caret",
@@ -134,10 +134,10 @@ function caretEvidence(
 }
 
 export function reattachmentCandidateFor(
-  expected: ReviewAnchorEvidenceV1["kind"],
+  expected: DocumentAnchorEvidenceV1["kind"],
   selectionUpdate: SelectionUpdate,
   caret: CaretAnchor | null | undefined,
-): { readonly anchor: ReviewAnchorEvidenceV1 | null; readonly message: string } {
+): { readonly anchor: DocumentAnchorEvidenceV1 | null; readonly message: string } {
   const selection = selectionEvidence(selectionUpdate);
   const caretAnchor = caretEvidence(caret);
   if (expected === "selection") {
@@ -186,14 +186,14 @@ export function reconciliationCommandRejectionMessage(result: unknown): string |
   return null;
 }
 
-function quote(target: ReviewItem | PendingReviewDraftV1): string {
+function quote(target: Annotation | PendingDocumentDraftV1): string {
   const anchor = targetAnchor(target);
   if (anchor.kind === "selection") return anchor.quote;
   if (anchor.kind === "caret") return `${anchor.leftContext}▏${anchor.rightContext}`;
   return anchor.nearbyText ?? `Page ${anchor.pageIndex + 1}`;
 }
 
-const REATTACHMENT_TITLES: Readonly<Record<ReviewItemKind, string>> = {
+const REATTACHMENT_TITLES: Readonly<Record<AnnotationKind, string>> = {
   delete: "Reattach deletion",
   highlight: "Reattach highlight",
   insert: "Reattach insertion",
@@ -202,13 +202,13 @@ const REATTACHMENT_TITLES: Readonly<Record<ReviewItemKind, string>> = {
   replace: "Reattach replacement",
 };
 
-export function reattachmentTitle(kind: ReviewItemKind): string {
+export function reattachmentTitle(kind: AnnotationKind): string {
   return REATTACHMENT_TITLES[kind];
 }
 
 export function reattachmentInstruction(
-  expected: ReviewAnchorEvidenceV1["kind"],
-  candidate: { readonly anchor: ReviewAnchorEvidenceV1 | null; readonly message: string },
+  expected: DocumentAnchorEvidenceV1["kind"],
+  candidate: { readonly anchor: DocumentAnchorEvidenceV1 | null; readonly message: string },
 ): string {
   if (candidate.anchor === null && candidate.message !== DEFAULT_SELECTION_REATTACHMENT_MESSAGE) {
     return candidate.message;
@@ -219,16 +219,16 @@ export function reattachmentInstruction(
 }
 
 export interface ReconciliationWorkspaceProps {
-  readonly state: ReviewStateView;
+  readonly state: DocumentStateView;
   readonly activeAuthoringDraftId?: string;
   readonly activeAuthoringDraftIds?: readonly string[];
   readonly selectionUpdate: SelectionUpdate;
   readonly caretAnchor?: CaretAnchor | null;
   readonly refreshStatus: GenerationRefreshStatus;
-  readonly onCommand: (command: ReviewCommand) => Promise<unknown>;
+  readonly onCommand: (command: DocumentCommand) => Promise<unknown>;
   readonly focusRequestToken?: number;
   readonly onFocusFallback?: () => void;
-  readonly interactionLifecycle?: ReviewInteractionTransport;
+  readonly interactionLifecycle?: DocumentInteractionTransport;
   readonly interactionLifecycleRequired?: boolean;
   readonly subscribeInteractionReconnect?: (
     listener: (identity: { readonly generation: number; readonly revision: number }) => Promise<void>,
@@ -253,7 +253,7 @@ interface ResolutionDetail {
 }
 
 export interface TerminalReattachmentAttempt {
-  readonly interaction: ReviewInteractionHandle;
+  readonly interaction: DocumentInteractionHandle;
   readonly draftId: string;
   readonly expectedDraftRevision: number;
 }
@@ -275,8 +275,8 @@ export async function resolveReattachmentDiscardIntent(
 interface ResolutionRecord {
   readonly key: string;
   readonly target: ReattachmentTarget;
-  readonly value: ReviewItem | PendingReviewDraftV1;
-  readonly kind: ReviewItem["kind"] | PendingReviewDraftV1["kind"];
+  readonly value: Annotation | PendingDocumentDraftV1;
+  readonly kind: Annotation["kind"] | PendingDocumentDraftV1["kind"];
   readonly pageNumber: number;
   readonly authoredText: string;
   readonly stateLabel: string;
@@ -291,7 +291,7 @@ export function reconciliationFocusKeyAfterRemoval(
   return keys[index + 1] ?? keys[index - 1] ?? null;
 }
 
-function authoredText(target: ReviewItem | PendingReviewDraftV1): string {
+function authoredText(target: Annotation | PendingDocumentDraftV1): string {
   if (!("payload" in target)) return target.text;
   const fields = ["proposedText", "comment", "quote"] as const;
   return fields
@@ -299,7 +299,7 @@ function authoredText(target: ReviewItem | PendingReviewDraftV1): string {
     .find((value): value is string => typeof value === "string" && value.length > 0) ?? quote(target);
 }
 
-function resolutionStateLabel(target: ReviewItem | PendingReviewDraftV1): string {
+function resolutionStateLabel(target: Annotation | PendingDocumentDraftV1): string {
   if (!("payload" in target)) {
     if (target.status === "protected" && target.disposition.kind === "resolved") return "Ready to apply";
     return target.status === "frozen" ? "Needs new location" : "Needs review";
@@ -311,9 +311,9 @@ function resolutionStateLabel(target: ReviewItem | PendingReviewDraftV1): string
 }
 
 export function projectReconciliationDraftReader(
-  draft: PendingReviewDraftV1,
+  draft: PendingDocumentDraftV1,
 ): OwnedAnnotationReaderRecord | null {
-  const payload: ReviewItem["payload"] = (() => {
+  const payload: Annotation["payload"] = (() => {
     switch (draft.kind) {
       case "replace": return { proposedText: draft.text };
       case "highlight": return draft.text.trim().length === 0 ? {} : { comment: draft.text };
@@ -323,7 +323,7 @@ export function projectReconciliationDraftReader(
       case "pdfAnnotation": return { comment: draft.text };
     }
   })();
-  const item = synchronizeReviewItemAnchor({
+  const item = synchronizeAnnotationAnchor({
     id: draft.id,
     kind: draft.kind,
     pageIndex: draft.pageIndex,
@@ -410,7 +410,7 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
   const returnFocusKeyRef = useRef<string | null>(null);
   const acceptedFocusKeyRef = useRef<string | null>(null);
   const acceptedFocusPendingRef = useRef(false);
-  const interactionRef = useRef<ReviewInteractionHandle | null>(null);
+  const interactionRef = useRef<DocumentInteractionHandle | null>(null);
   const interactionAdmissionPendingRef = useRef(false);
   const terminalAttemptRef = useRef<TerminalReattachmentAttempt | null>(null);
   const mountedRef = useRef(true);
@@ -419,8 +419,8 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
   const onFocusFallbackRef = useRef(props.onFocusFallback);
   onFocusFallbackRef.current = props.onFocusFallback;
   const pendingReceiptRef = useRef<{
-    readonly interaction: ReviewInteractionHandle;
-    readonly receipt: ReviewInteractionReceipt;
+    readonly interaction: DocumentInteractionHandle;
+    readonly receipt: DocumentInteractionReceipt;
   } | null>(null);
   const closeDetailRef = useRef<() => Promise<void>>(async () => undefined);
   const activeRecord = detail === null
@@ -548,7 +548,7 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
       interactionAdmissionPendingRef.current = true;
       setPending(true);
       try {
-        const interaction = await beginReviewInteraction(
+        const interaction = await beginDocumentInteraction(
           props.interactionLifecycle,
           props.state.workflow.documentGeneration,
           `reattach_${crypto.randomUUID()}`,
@@ -673,7 +673,7 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
     props.state.workflow.documentGeneration,
   ]);
 
-  const submitReattachment = async (record: ResolutionRecord, anchor: ReviewAnchorEvidenceV1) => {
+  const submitReattachment = async (record: ResolutionRecord, anchor: DocumentAnchorEvidenceV1) => {
     const interaction = interactionRef.current;
     if (interaction === null) {
       await submit(buildReattachmentCommand({
@@ -722,7 +722,7 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
       });
       const rejection = reconciliationCommandRejectionMessage(result);
       if (rejection !== null) throw new Error(rejection);
-      const next = result as ReviewStateView;
+      const next = result as DocumentStateView;
       const protectedDraft = next.pendingDrafts.find(({ id }) => id === draftId);
       if (protectedDraft === undefined) throw new Error('The reattachment draft was not acknowledged.');
       acceptedFocusKeyRef.current = reconciliationFocusKeyAfterRemoval(
@@ -743,7 +743,7 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
       setPending(false);
     }
   };
-  const submit = async (command: ReviewCommand) => {
+  const submit = async (command: DocumentCommand) => {
     acceptedFocusKeyRef.current = detail === null
       ? null
       : reconciliationFocusKeyAfterRemoval(records.map(({ key }) => key), detail.key);
@@ -769,7 +769,7 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
       setPending(false);
     }
   };
-  const discardCommand = (target: ReattachmentTarget): ReviewCommand => ({
+  const discardCommand = (target: ReattachmentTarget): DocumentCommand => ({
     type: "discard-reconciliation",
     expectedRevision: props.state.revision,
     target: target.kind,
@@ -908,7 +908,7 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
     >
       <header className="full-annotation-reader__metadata-bar">
         <div className="full-annotation-reader__actions" aria-label="Full annotation actions">
-          <ReviewTooltipButton
+          <ReaderTooltipButton
             type="button"
             className="full-annotation-reader__back"
             data-full-annotation-action="back"
@@ -916,11 +916,11 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
             tooltip="Back to annotations"
             disabled={pending}
             onClick={() => { void closeDetail(); }}
-          ><ReviewIcon name="arrow-left" size={16} /></ReviewTooltipButton>
+          ><ReaderIcon name="arrow-left" size={16} /></ReaderTooltipButton>
         </div>
         <FullAnnotationReaderMetadata record={projectedRecord} prior />
         <div className="full-annotation-reader__header-actions">
-          {detail.mode === "reattach" ? <ReviewTooltipButton
+          {detail.mode === "reattach" ? <ReaderTooltipButton
             type="button"
             className="full-annotation-reader__delete"
             data-full-annotation-action="delete"
@@ -928,7 +928,7 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
             tooltip="Delete annotation"
             disabled={pending}
             onClick={() => { void openDiscardConfirmation(); }}
-          ><ReviewIcon name="remove" size={16} /></ReviewTooltipButton> : null}
+          ><ReaderIcon name="remove" size={16} /></ReaderTooltipButton> : null}
         </div>
       </header>
       <FullAnnotationReaderBody
@@ -959,7 +959,7 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
               }
               void submitReattachment(activeRecord, candidate.anchor);
             }}
-          >{pending ? <ReviewIcon name="loading" /> : null}<span>Attach</span></button>
+          >{pending ? <ReaderIcon name="loading" /> : null}<span>Attach</span></button>
         </div>
       </section> : null}
       {detail.mode === "apply" && canApplyDraft ? <section className="reconciliation-workspace__resolution" data-apply-confirmation>
@@ -972,7 +972,7 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
             expectedDraftRevision: draft.revision,
             ownerViewId: draft.ownerViewId,
             updatedAt: new Date().toISOString(),
-          })}>{pending ? <ReviewIcon name="loading" /> : null}<span>Apply</span></button>
+          })}>{pending ? <ReaderIcon name="loading" /> : null}<span>Apply</span></button>
         </div>
       </section> : null}
       {detail.mode === "discard" ? <section className="reconciliation-workspace__resolution" data-discard-confirmation>

@@ -69,8 +69,8 @@ describe('VS Code presentation restoration', () => {
 });
 
 it('renders the runtime review through a layout-neutral inert boundary without an empty upgrade announcement', async () => {
-  const { RuntimeProductionReviewApp } = await import('../src/production-entry.js');
-  const html = renderToStaticMarkup(createElement(RuntimeProductionReviewApp));
+  const { RuntimeProductionReaderApp } = await import('../src/production-entry.js');
+  const html = renderToStaticMarkup(createElement(RuntimeProductionReaderApp));
   expect(html).toContain('class="review-upgrade-content"');
   expect(html).not.toContain('class="review-upgrade-status"');
   expect(html).not.toContain('role="status"></div>');

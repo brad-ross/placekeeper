@@ -1,4 +1,4 @@
-import { reviewEdgeGeometry } from '../../scripts/testing/review-edge-geometry.js';
+import { documentEdgeGeometry } from '../../scripts/testing/review-edge-geometry.js';
 import { createHash, randomUUID } from "node:crypto";
 import { access, copyFile, mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -8,9 +8,9 @@ import { PDFDocument, StandardFonts } from "pdf-lib";
 
 import { PlacekeeperHost } from "../../apps/service/src/host/placekeeper-host.js";
 import { TaskBindingRegistry } from "../../apps/service/src/context/task-binding-registry.js";
-import { readEditableReviewItems } from "../../packages/pdf-backends/src/embedpdf-adapter.js";
+import { readEditableAnnotations } from "../../packages/pdf-backends/src/embedpdf-adapter.js";
 import { addPageNote, setAnnotationName } from "../../packages/core/src/review-commands.js";
-import { ReviewConflictError } from '../../packages/core/src/review-reducer.js';
+import { DocumentConflictError } from '../../packages/core/src/review-reducer.js';
 
 let root = "";
 let host: PlacekeeperHost;
@@ -609,7 +609,7 @@ test('imports standard annotations into the editable tray and saves comment edit
   await expect.poll(() => host.broker.saveStatus(sessionId)?.sync.phase).toBe('clean');
   const destination = host.broker.saveStatus(sessionId)?.destination;
   if (destination?.phase !== 'active') throw new Error('Imported annotations have no save destination.');
-  expect((await readEditableReviewItems(new Uint8Array(await readFile(destination.targetPath)))).map(({ id }) => id))
+  expect((await readEditableAnnotations(new Uint8Array(await readFile(destination.targetPath)))).map(({ id }) => id))
     .toEqual([imported.find(({ id }) => id !== item.id)!.id]);
 });
 
@@ -1031,7 +1031,7 @@ for (const viewportWidth of [1280, 760]) {
       await expect.poll(async () => {
         const viewport = await main.locator('[data-viewer-framing-viewport]').boundingBox();
         const bounds = await pdfPage.boundingBox();
-        const { clearRight } = await page.locator('[data-review-stage]').evaluate(reviewEdgeGeometry);
+        const { clearRight } = await page.locator('[data-review-stage]').evaluate(documentEdgeGeometry);
         if (!viewport || !bounds) return Number.POSITIVE_INFINITY;
         const right = clearRight;
         return Math.max(viewport.x - bounds.x, bounds.x + bounds.width - right);
@@ -1039,7 +1039,7 @@ for (const viewportWidth of [1280, 760]) {
     };
     await results.first().click();
     await expectFittedPage(0);
-    const { clearRight } = await page.locator('[data-review-stage]').evaluate(reviewEdgeGeometry);
+    const { clearRight } = await page.locator('[data-review-stage]').evaluate(documentEdgeGeometry);
     await page.evaluate((clearRight) => {
       const state = { running: true, overflow: [] as number[] };
       (window as unknown as { jumpFrames: typeof state }).jumpFrames = state;
@@ -2107,7 +2107,7 @@ test("keeps a real reference chain beside the anchored main PDF through reflow a
   await expect.poll(async () => {
     const viewport = await mainViewport.boundingBox();
     const paper = await mainPageOne.boundingBox();
-    const { clearRight } = await page.locator('[data-review-stage]').evaluate(reviewEdgeGeometry);
+    const { clearRight } = await page.locator('[data-review-stage]').evaluate(documentEdgeGeometry);
     if (!viewport || !paper) return Number.POSITIVE_INFINITY;
     return Math.max(viewport.x - paper.x, paper.x + paper.width - clearRight);
   }).toBeLessThan(2);
@@ -4968,8 +4968,8 @@ test('keeps VS Code composer controls aligned with the web desktop control size'
   await page.setViewportSize({ width: 760, height: 900 });
   await page.goto(launched.url);
 
-  const review = page.locator('[data-production-review]');
-  await expect(review).toHaveAttribute('data-launch-surface', 'vscode');
+  const documentSession = page.locator('[data-production-review]');
+  await expect(documentSession).toHaveAttribute('data-launch-surface', 'vscode');
   const firstPage = page.locator(".pdf-workspace__page[data-page-index='0']").first();
   await waitForRenderedPageImage(firstPage);
   const firstPageBox = await firstPage.boundingBox();
@@ -5693,9 +5693,9 @@ test('refits opening workspaces only from fit width and preserves manual reading
   await expect(drawer).toHaveAttribute('data-workspace-presentation', 'bottom');
   await expect(notePeek).toHaveCount(0);
   expect(await currentZoomText(page)).toBe(zoomAfterManualAdjustment);
-  const activeReviewId = await noteMark.getAttribute('data-review-id');
-  if (!activeReviewId) throw new Error('Page Note mark has no canonical review id.');
-  await expect(page.locator(`[data-review-item="${activeReviewId}"]`)).toHaveAttribute('data-active', 'true');
+  const activeDocumentId = await noteMark.getAttribute('data-review-id');
+  if (!activeDocumentId) throw new Error('Page Note mark has no canonical review id.');
+  await expect(page.locator(`[data-review-item="${activeDocumentId}"]`)).toHaveAttribute('data-active', 'true');
   await expect.poll(async () => {
     const mark = await noteMark.boundingBox();
     const sheet = await drawer.boundingBox();
@@ -5720,13 +5720,13 @@ test('refits opening workspaces only from fit width and preserves manual reading
   await page.setViewportSize({ width: 1280, height: 900 });
   await expect(stage).toHaveAttribute('data-annotation-presentation', 'right');
   await expect(drawer).toBeVisible();
-  await expect(page.locator(`[data-review-item="${activeReviewId}"]`)).toHaveAttribute('data-active', 'true');
+  await expect(page.locator(`[data-review-item="${activeDocumentId}"]`)).toHaveAttribute('data-active', 'true');
   await expect(workspace).toHaveAttribute('data-adaptive-mount-probe', 'stable');
   expect(await currentZoomText(page)).toBe(responsiveZoom);
   await page.setViewportSize({ width: 760, height: 900 });
   await expect(stage).toHaveAttribute('data-annotation-presentation', 'bottom');
   await expect(drawer).toBeVisible();
-  await expect(page.locator(`[data-review-item="${activeReviewId}"]`)).toHaveAttribute('data-active', 'true');
+  await expect(page.locator(`[data-review-item="${activeDocumentId}"]`)).toHaveAttribute('data-active', 'true');
   await expect(workspace).toHaveAttribute('data-adaptive-mount-probe', 'stable');
 
   const pageBeforeFinalClose = await pdfPage.boundingBox();
@@ -5954,8 +5954,8 @@ for (const surface of ['browser', 'vscode'] as const) {
 
     await page.setViewportSize({ width: 760, height: 900 });
     await page.goto(launched.url);
-    const review = page.locator('[data-production-review]');
-    await expect(review).toHaveAttribute('data-launch-surface', surface);
+    const documentSession = page.locator('[data-production-review]');
+    await expect(documentSession).toHaveAttribute('data-launch-surface', surface);
     const firstPage = page.locator(".pdf-workspace__page[data-page-index='0']").first();
     await waitForRenderedPageImage(firstPage);
     const viewer = page.locator('.pdf-workspace:not(.pdf-workspace--reference)');
@@ -6638,7 +6638,7 @@ test("cancels the pending first annotation without modifying the PDF or creating
   await copyFile(pdf, cancelPdf);
   const launched = await host.open({ pdfPath: cancelPdf, sourceRootPath: sourceRoot, fork: true });
   if (!launched.ok || launched.kind === "recovery-offered") throw new Error("Cancel launch failed");
-  const initialReview = host.broker.state(launched.sessionId)!;
+  const initialDocument = host.broker.state(launched.sessionId)!;
   const originalBytes = await readFile(cancelPdf);
   await page.goto(launched.url);
   const pageCanvas = page.locator(".pdf-workspace__page[data-page-index='0']").first();
@@ -6650,7 +6650,7 @@ test("cancels the pending first annotation without modifying the PDF or creating
   await expect(page.getByRole("region", { name: "Page Note" })).toBeVisible();
   const comment = composer.locator('textarea');
   await comment.fill("Do not keep this note.");
-  expect(host.broker.state(launched.sessionId)?.items).toEqual(initialReview.items);
+  expect(host.broker.state(launched.sessionId)?.items).toEqual(initialDocument.items);
   await expect.poll(() => host.broker.state(launched.sessionId)?.pendingDrafts[0]?.text)
     .toBe('Do not keep this note.');
   await expect(access(cancelPdf.replace(/\.pdf$/u, "-annotated.pdf"))).rejects.toMatchObject({ code: "ENOENT" });
@@ -6661,7 +6661,7 @@ test("cancels the pending first annotation without modifying the PDF or creating
   await composer.getByRole("button", { name: "Cancel" }).click();
   await expect(composer).toHaveCount(0);
   await expect(page.locator('[data-authoring-preview="true"]')).toHaveCount(0);
-  expect(host.broker.state(launched.sessionId)?.items).toEqual(initialReview.items);
+  expect(host.broker.state(launched.sessionId)?.items).toEqual(initialDocument.items);
   expect(host.broker.state(launched.sessionId)?.pendingDrafts).toEqual([]);
   expect(await readFile(cancelPdf)).toEqual(originalBytes);
 });
@@ -6678,7 +6678,7 @@ test("selects Page Notes only until the next click outside annotations", async (
   const browserErrors = collectBrowserErrors(page);
   await page.goto(launched.url);
   await chooseFreshCopyDestination(page);
-  const initialReview = host.broker.state(launched.sessionId)!;
+  const initialDocument = host.broker.state(launched.sessionId)!;
 
   const pageCanvas = page.locator(".pdf-workspace__page[data-page-index='0']").first();
   await expect(pageCanvas).toBeVisible();
@@ -6703,13 +6703,13 @@ test("selects Page Notes only until the next click outside annotations", async (
   await composer.getByRole("button", { name: "Save", exact: true }).click();
 
   await expect.poll(() => host.broker.state(launched.sessionId)?.items.length)
-    .toBe(initialReview.items.length + 1);
+    .toBe(initialDocument.items.length + 1);
   await expect.poll(() => host.broker.saveStatus(launched.sessionId)?.sync.phase).toBe("clean");
   await expect(composer).toHaveCount(0);
   const state = host.broker.state(launched.sessionId);
-  expect(state?.revision).toBeGreaterThan(initialReview.revision);
-  expect(state?.items).toHaveLength(initialReview.items.length + 1);
-  const note = state?.items.find((item) => !initialReview.items.some((old) => old.id === item.id));
+  expect(state?.revision).toBeGreaterThan(initialDocument.revision);
+  expect(state?.items).toHaveLength(initialDocument.items.length + 1);
+  const note = state?.items.find((item) => !initialDocument.items.some((old) => old.id === item.id));
   expect(note).toMatchObject({
     kind: "pageNote",
     pageIndex: 0,
@@ -6903,7 +6903,7 @@ test("selects Page Notes only until the next click outside annotations", async (
   await expect(row).toHaveAttribute("data-active", "false");
   await expect(workspace).toHaveAttribute("aria-expanded", "false");
 
-  expect(host.broker.state(launched.sessionId)?.revision).toBeGreaterThan(initialReview.revision);
+  expect(host.broker.state(launched.sessionId)?.revision).toBeGreaterThan(initialDocument.revision);
   expect(browserErrors).toEqual([]);
 });
 
@@ -6919,7 +6919,7 @@ test("places a crop-relative Page Note through the real PDF keyboard cursor", as
   const browserErrors = collectBrowserErrors(page);
   await page.goto(launched.url);
   await chooseFreshCopyDestination(page);
-  const initialReview = host.broker.state(launched.sessionId)!;
+  const initialDocument = host.broker.state(launched.sessionId)!;
 
   const pageCanvas = page.locator(".pdf-workspace__page[data-page-index='0']").first();
   await expect(pageCanvas).toBeVisible();
@@ -6940,12 +6940,12 @@ test("places a crop-relative Page Note through the real PDF keyboard cursor", as
   await composer.getByRole("button", { name: "Save", exact: true }).click();
 
   await expect.poll(() => host.broker.state(launched.sessionId)?.items.length)
-    .toBe(initialReview.items.length + 1);
+    .toBe(initialDocument.items.length + 1);
   await expect.poll(() => host.broker.saveStatus(launched.sessionId)?.sync.phase).toBe("clean");
   const state = host.broker.state(launched.sessionId);
-  expect(state?.revision).toBeGreaterThan(initialReview.revision);
-  expect(state?.items).toHaveLength(initialReview.items.length + 1);
-  const note = state?.items.find((item) => !initialReview.items.some((old) => old.id === item.id));
+  expect(state?.revision).toBeGreaterThan(initialDocument.revision);
+  expect(state?.items).toHaveLength(initialDocument.items.length + 1);
+  const note = state?.items.find((item) => !initialDocument.items.some((old) => old.id === item.id));
   expect(note).toMatchObject({
     kind: "pageNote",
     pageIndex: 0,
@@ -6973,7 +6973,7 @@ test("normalizes a real context gesture on a rotated cropped PDF into crop-relat
   const browserErrors = collectBrowserErrors(page);
   await page.goto(launched.url);
   await chooseFreshCopyDestination(page);
-  const initialReview = host.broker.state(launched.sessionId)!;
+  const initialDocument = host.broker.state(launched.sessionId)!;
 
   const pageCanvas = page.locator(".pdf-workspace__page[data-page-index='0']").first();
   await expect(pageCanvas).toBeVisible();
@@ -6993,11 +6993,11 @@ test("normalizes a real context gesture on a rotated cropped PDF into crop-relat
   await composer.getByRole("button", { name: "Save", exact: true }).click();
 
   await expect.poll(() => host.broker.state(launched.sessionId)?.items.length)
-    .toBe(initialReview.items.length + 1);
+    .toBe(initialDocument.items.length + 1);
   await expect.poll(() => host.broker.saveStatus(launched.sessionId)?.sync.phase).toBe("clean");
   const state = host.broker.state(launched.sessionId);
-  expect(state?.items).toHaveLength(initialReview.items.length + 1);
-  const note = state?.items.find((item) => !initialReview.items.some((old) => old.id === item.id));
+  expect(state?.items).toHaveLength(initialDocument.items.length + 1);
+  const note = state?.items.find((item) => !initialDocument.items.some((old) => old.id === item.id));
   expect(note).toMatchObject({
     kind: "pageNote",
     pageIndex: 0,
@@ -7102,7 +7102,7 @@ for (const key of ["Delete", "Backspace"] as const) {
     await installSelectionCaptureGate(page);
     await page.goto(launched.url);
     await chooseFreshCopyDestination(page);
-    const initialReview = host.broker.state(launched.sessionId)!;
+    const initialDocument = host.broker.state(launched.sessionId)!;
 
     const pageCanvas = page.locator(".pdf-workspace__page[data-page-index='0']").first();
     await expect(pageCanvas).toBeVisible();
@@ -7122,13 +7122,13 @@ for (const key of ["Delete", "Backspace"] as const) {
     await page.keyboard.press(key);
     await releaseSelectionCapture(page);
 
-    await expect(page.locator("[data-review-item]")).toHaveCount(initialReview.items.length + 1);
+    await expect(page.locator("[data-review-item]")).toHaveCount(initialDocument.items.length + 1);
     await expect(page.locator("[data-owned-mark='delete']")).toHaveCount(1);
     expect(page.url()).toBe(urlBeforeKey);
     const state = host.broker.state(launched.sessionId);
-    expect(state?.revision).toBe(initialReview.revision + 1);
+    expect(state?.revision).toBe(initialDocument.revision + 1);
     await expect.poll(() => host.broker.saveStatus(launched.sessionId)?.sync.phase).toBe("clean");
-    expect(state?.items).toHaveLength(initialReview.items.length + 1);
+    expect(state?.items).toHaveLength(initialDocument.items.length + 1);
     const deletion = state?.items.find((item) => item.kind === "delete");
     expect(deletion).toMatchObject({
       kind: "delete",
@@ -7165,7 +7165,7 @@ test("shows command conflicts until a retry succeeds", async ({ page }) => {
     "Fresh command-conflict production launch failed",
   );
   await chooseFreshCopyDestination(page);
-  const initialReview = host.broker.state(launched.sessionId)!;
+  const initialDocument = host.broker.state(launched.sessionId)!;
 
   const pageCanvas = page.locator(".pdf-workspace__page[data-page-index='0']").first();
   await expect(pageCanvas).toBeVisible();
@@ -7188,14 +7188,14 @@ test("shows command conflicts until a retry succeeds", async ({ page }) => {
 
   await selectionActions.getByRole("button", { name: "Delete", exact: true }).click();
   await expect(page.locator("[data-viewer-status]")).toContainText(
-    "Another review window changed this draft",
+    "Another window changed this draft",
   );
   await expect(selectionActions).toBeVisible();
 
   await selectionActions.getByRole("button", { name: "Delete", exact: true }).click();
   await expect(page.locator("[data-viewer-status]")).toHaveCount(0);
-  await expect(page.locator("[data-review-item]")).toHaveCount(initialReview.items.length + 2);
-  expect(host.broker.state(launched.sessionId)?.revision).toBe(initialReview.revision + 2);
+  await expect(page.locator("[data-review-item]")).toHaveCount(initialDocument.items.length + 2);
+  expect(host.broker.state(launched.sessionId)?.revision).toBe(initialDocument.revision + 2);
 });
 
 test('returns a concurrent draft revision conflict to the preserved composer for retry', async ({ page }) => {
@@ -7205,7 +7205,7 @@ test('returns a concurrent draft revision conflict to the preserved composer for
     'Fresh pending-destination conflict launch failed',
   );
   await chooseFreshCopyDestination(page);
-  const initialReview = host.broker.state(launched.sessionId)!;
+  const initialDocument = host.broker.state(launched.sessionId)!;
   const pageCanvas = page.locator(".pdf-workspace__page[data-page-index='0']").first();
   await waitForRenderedPageImage(pageCanvas);
   await dragPdfPointer(page, pageCanvas, { x: 253, y: 98 }, { x: 405, y: 98 });
@@ -7263,7 +7263,7 @@ test('returns a concurrent draft revision conflict to the preserved composer for
   expect((await rejectedUpdate).status()).toBe(409);
 
   await expect(page.locator('[data-viewer-status]'))
-    .toContainText('Another review window changed this draft');
+    .toContainText('Another window changed this draft');
   await expect(composer).toBeVisible();
   await expect(editor).toHaveValue('retry from authoritative state');
   expect(host.broker.state(launched.sessionId)?.pendingDrafts
@@ -7272,7 +7272,7 @@ test('returns a concurrent draft revision conflict to the preserved composer for
   await composer.getByRole('button', { name: 'Apply' }).click();
   await expect(composer).toHaveCount(0);
   await expect.poll(() => host.broker.state(launched.sessionId)?.items.length)
-    .toBe(initialReview.items.length + 1);
+    .toBe(initialDocument.items.length + 1);
   expect(host.broker.state(launched.sessionId)?.items.some((item) => (
     item.kind === 'replace' && item.payload.proposedText === 'retry from authoritative state'
   ))).toBe(true);
@@ -7286,7 +7286,7 @@ test('merges a first-annotation conflict through its protected draft', async ({ 
     'Fresh pending-destination conflict launch failed',
   );
   await chooseFreshCopyDestination(page);
-  const initialReview = host.broker.state(launched.sessionId)!;
+  const initialDocument = host.broker.state(launched.sessionId)!;
   const pageCanvas = page.locator(".pdf-workspace__page[data-page-index='0']").first();
   await waitForRenderedPageImage(pageCanvas);
   await dragPdfPointer(page, pageCanvas, { x: 253, y: 98 }, { x: 405, y: 98 });
@@ -7311,13 +7311,13 @@ test('merges a first-annotation conflict through its protected draft', async ({ 
       );
       break;
     } catch (error) {
-      if (!(error instanceof ReviewConflictError) || attempt >= 4) throw error;
+      if (!(error instanceof DocumentConflictError) || attempt >= 4) throw error;
     }
   }
   await composer.getByRole('button', { name: 'Apply' }).click();
   await expect(composer).toHaveCount(0);
   await expect.poll(() => host.broker.state(launched.sessionId)?.items.length)
-    .toBe(initialReview.items.length + 2);
+    .toBe(initialDocument.items.length + 2);
   expect(host.broker.state(launched.sessionId)?.items.some((item) =>
     item.kind === 'pageNote' && item.payload.comment === 'External conflict note.')).toBe(true);
   expect(host.broker.state(launched.sessionId)?.items.some((item) =>
@@ -7337,7 +7337,7 @@ test("discards queued typing when a pending selection is cleared", async ({ page
   await installSelectionCaptureGate(page);
   await page.goto(launched.url);
   await chooseFreshCopyDestination(page);
-  const initialReview = host.broker.state(launched.sessionId)!;
+  const initialDocument = host.broker.state(launched.sessionId)!;
 
   const pageCanvas = page.locator(".pdf-workspace__page[data-page-index='0']").first();
   await expect(pageCanvas).toBeVisible();
@@ -7351,8 +7351,8 @@ test("discards queued typing when a pending selection is cleared", async ({ page
   await releaseSelectionCapture(page);
 
   await expect(page.getByRole("region", { name: "Replacement" })).toHaveCount(0);
-  await expect(page.locator("[data-review-item]")).toHaveCount(initialReview.items.length);
-  expect(host.broker.state(launched.sessionId)?.revision).toBe(initialReview.revision);
+  await expect(page.locator("[data-review-item]")).toHaveCount(initialDocument.items.length);
+  expect(host.broker.state(launched.sessionId)?.revision).toBe(initialDocument.revision);
 });
 
 test("keeps only typing for the newest pending selection", async ({ page }) => {
@@ -7367,7 +7367,7 @@ test("keeps only typing for the newest pending selection", async ({ page }) => {
   await installSelectionCaptureGate(page);
   await page.goto(launched.url);
   await chooseFreshCopyDestination(page);
-  const initialReview = host.broker.state(launched.sessionId)!;
+  const initialDocument = host.broker.state(launched.sessionId)!;
 
   const pageCanvas = page.locator(".pdf-workspace__page[data-page-index='0']").first();
   await expect(pageCanvas).toBeVisible();
@@ -7386,11 +7386,11 @@ test("keeps only typing for the newest pending selection", async ({ page }) => {
   await expect(replacementComposer.getByRole("textbox", { name: "Replacement" })).toHaveValue("current");
   await replacementComposer.getByRole("button", { name: "Apply" }).click();
   await expect(replacementComposer).toHaveCount(0);
-  await expect(page.locator("[data-review-item]")).toHaveCount(initialReview.items.length + 1);
+  await expect(page.locator("[data-review-item]")).toHaveCount(initialDocument.items.length + 1);
   const state = host.broker.state(launched.sessionId);
-  expect(state?.revision).toBeGreaterThan(initialReview.revision);
+  expect(state?.revision).toBeGreaterThan(initialDocument.revision);
   await expect.poll(() => host.broker.saveStatus(launched.sessionId)?.sync.phase).toBe("clean");
-  expect(state?.items).toHaveLength(initialReview.items.length + 1);
+  expect(state?.items).toHaveLength(initialDocument.items.length + 1);
   const replacement = state?.items.find((item) => item.kind === "replace");
   expect(replacement).toMatchObject({
     kind: "replace",
@@ -7888,7 +7888,7 @@ test('document annotation name export rejects a concurrent rename and retries th
   await dialog.getByRole('button', { name: 'Export', exact: true }).click();
   const result = await (await exported).json();
   await expect(dialog).toHaveCount(0);
-  const items = await readEditableReviewItems(new Uint8Array(await readFile(result.path)));
+  const items = await readEditableAnnotations(new Uint8Array(await readFile(result.path)));
   expect(items).toHaveLength(1);
   expect(items[0]?.importedAnnotationAuthor).toBe('Alice');
 });

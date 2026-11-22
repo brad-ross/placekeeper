@@ -2,7 +2,7 @@ import { pdfAnnotationIdentity } from './embedpdf-annotation.js';
 import type { PdfDocumentObject, PdfEngine } from '@embedpdf/models';
 import { PDFArray, PDFDict, PDFDocument, PDFHexString, PDFName, PDFNumber, PDFString } from 'pdf-lib';
 import { ANNOTATION_PALETTE as palette, annotationAppearance, READER_APPEARANCE_KEY } from '../../core/src/annotation-appearance.js';
-import { PdfWriterError, type ReviewAnnotation } from '../../core/src/pdf-writer.js';
+import { PdfWriterError, type PdfWriterAnnotation } from '../../core/src/pdf-writer.js';
 import { textCenterFraction, textMarkGeometry, type MarkGlyph } from '../../core/src/text-mark-geometry.js';
 
 const number = (value: number) => Number(value.toFixed(5)).toString();
@@ -19,7 +19,7 @@ function roundedRect(x: number, y: number, w: number, h: number): string {
   ].join('\n');
 }
 
-function appearanceContent(annotation: ReviewAnnotation, glyphs: readonly MarkGlyph[]): string {
+function appearanceContent(annotation: PdfWriterAnnotation, glyphs: readonly MarkGlyph[]): string {
   const style = annotationAppearance(annotation);
   const { width, height } = annotation.rect;
   const commands = ['q', '/PKInk gs', `${color(style.ink)} rg`, `${color(style.ink)} RG`, `${palette.lineWidth} w`, '1 J', '1 j'];
@@ -61,7 +61,7 @@ function appearanceContent(annotation: ReviewAnnotation, glyphs: readonly MarkGl
 export async function saveWithReaderAppearances(
   engine: Pick<PdfEngine, 'getPageGlyphs' | 'saveAsCopy'>,
   document: PdfDocumentObject,
-  created: readonly ReviewAnnotation[],
+  created: readonly PdfWriterAnnotation[],
 ): Promise<Uint8Array> {
   const glyphsByPage = new Map<number, readonly MarkGlyph[]>();
   const textPages = [...new Set(created.filter(({ kind }) => ['highlight', 'delete', 'replace'].includes(kind)).map(({ pageIndex }) => pageIndex))];

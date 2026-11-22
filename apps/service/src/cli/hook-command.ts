@@ -23,7 +23,7 @@ const MAX_HOOK_INPUT_BYTES = 128 * 1024;
 const MAX_PROMPT_CONTEXT_BYTES = 128 * 1024;
 const MAX_INLINE_DELTA_BYTES = 48 * 1024;
 const IDENTIFIER = /^[A-Za-z0-9._:-]{1,256}$/u;
-const REVIEW_IDENTIFIER = /^[A-Za-z0-9_-]{1,256}$/u;
+const DOCUMENT_IDENTIFIER = /^[A-Za-z0-9_-]{1,256}$/u;
 const SECRET = /^[A-Za-z0-9_-]{43}$/u;
 const INSTALLED_LAUNCHER_RELATIVE_PATH = "Applications/Placekeeper.app/Contents/MacOS/placekeeper";
 
@@ -177,7 +177,7 @@ function launchResponse(value: unknown, surface: "codex" | "codex-native" | "ele
   try { parsed = JSON.parse(serialized) as unknown; } catch { return undefined; }
   if (surface === "electron") {
     if (!isObject(parsed) || parsed.ok !== true || parsed.surface !== "electron" || parsed.native !== true ||
-        !["opened", "focused"].includes(String(parsed.kind)) || typeof parsed.sessionId !== "string" || !REVIEW_IDENTIFIER.test(parsed.sessionId) ||
+        !["opened", "focused"].includes(String(parsed.kind)) || typeof parsed.sessionId !== "string" || !DOCUMENT_IDENTIFIER.test(parsed.sessionId) ||
         !Number.isSafeInteger(parsed.documentGeneration) || (parsed.documentGeneration as number) < 1 || typeof parsed.bindProof !== "string" || !SECRET.test(parsed.bindProof) ||
         typeof parsed.launchId !== "string" || !SECRET.test(parsed.launchId) || typeof parsed.expiresAt !== "string" || !Number.isFinite(Date.parse(parsed.expiresAt))) return undefined;
     return { reviewSessionId: parsed.sessionId, documentGeneration: parsed.documentGeneration as number, bindProof: parsed.bindProof, native: true, desktop: true };
@@ -189,7 +189,7 @@ function launchResponse(value: unknown, surface: "codex" | "codex-native" | "ele
   if (
     !isObject(parsed) || parsed.ok !== true ||
     (parsed.kind !== "opened" && parsed.kind !== "focused") ||
-    typeof parsed.sessionId !== "string" || !REVIEW_IDENTIFIER.test(parsed.sessionId) ||
+    typeof parsed.sessionId !== "string" || !DOCUMENT_IDENTIFIER.test(parsed.sessionId) ||
     typeof parsed.documentGeneration !== "number" ||
     !Number.isSafeInteger(parsed.documentGeneration) || parsed.documentGeneration < 0 ||
     typeof parsed.bindProof !== "string" || !SECRET.test(parsed.bindProof) ||
@@ -234,7 +234,7 @@ export function inspectHookEvent(value: unknown): HookLifecycleEvent {
   return { kind: "ignored" };
 }
 
-function compactReviewChanges(result: Extract<LiveContextRefreshResult, { status: "current" }>): JsonObject {
+function compactDocumentChanges(result: Extract<LiveContextRefreshResult, { status: "current" }>): JsonObject {
   const changes = result.reviewItems;
   if (changes.mode === "full") {
     const intentCounts: Record<string, number> = {};
@@ -361,7 +361,7 @@ export function formatPromptContext(
     },
     saveSync: result.saveStatus,
     ...(result.reviewState === undefined ? {} : { reviewState: result.reviewState }),
-    reviewItems: compactReviewChanges(result),
+    reviewItems: compactDocumentChanges(result),
     existingPdfAnnotations: {
       dataClassification: "untrusted-data",
       count: result.existingPdfAnnotations.count,

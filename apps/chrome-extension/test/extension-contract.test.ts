@@ -82,7 +82,7 @@ describe("Chrome extension static contract", () => {
     ]);
     expect(handlerEntry).toContain('chrome.runtime.getURL("shared/app.js")');
     expect(handlerEntry).toContain('chrome.runtime.getURL("shared/app.css")');
-    expect(handlerEntry).toContain("createNativeEmbeddedReview");
+    expect(handlerEntry).toContain("createNativeEmbeddedDocument");
     expect(handler).toContain('<div id="root"');
   });
 

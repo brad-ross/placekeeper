@@ -1,19 +1,19 @@
-export const REVIEW_CHROME_PRESENTATIONS = [
+export const READER_CHROME_PRESENTATIONS = [
   'expanded',
   'historyCompact',
   'zoomCompact',
   'navigationCompact',
 ] as const;
 
-export type ReviewChromePresentation = typeof REVIEW_CHROME_PRESENTATIONS[number];
+export type ReaderChromePresentation = typeof READER_CHROME_PRESENTATIONS[number];
 
-export type ReviewChromePresentationWidths = Readonly<
-  Record<ReviewChromePresentation, number>
+export type ReaderChromePresentationWidths = Readonly<
+  Record<ReaderChromePresentation, number>
 >;
 
-export const REVIEW_CHROME_EXPANSION_HYSTERESIS = 24;
+export const READER_CHROME_EXPANSION_HYSTERESIS = 24;
 
-const MOST_COMPACT_PRESENTATION: ReviewChromePresentation = 'navigationCompact';
+const MOST_COMPACT_PRESENTATION: ReaderChromePresentation = 'navigationCompact';
 
 function validMeasurement(value: number): boolean {
   return Number.isFinite(value) && value > 0;
@@ -25,10 +25,10 @@ function validExpansionHysteresis(value: number): boolean {
 
 function hasCompleteMeasurements(input: {
   readonly availableWidth: number;
-  readonly widths: ReviewChromePresentationWidths;
+  readonly widths: ReaderChromePresentationWidths;
 }): boolean {
   return validMeasurement(input.availableWidth)
-    && REVIEW_CHROME_PRESENTATIONS.every((presentation) => (
+    && READER_CHROME_PRESENTATIONS.every((presentation) => (
       validMeasurement(input.widths[presentation])
     ));
 }
@@ -41,24 +41,24 @@ function hasCompleteMeasurements(input: {
  * not oscillate the controls. A missing previous presentation represents the
  * first complete measurement and therefore does not apply restore hysteresis.
  */
-export function chooseReviewChromePresentation(input: {
+export function chooseReaderChromePresentation(input: {
   readonly availableWidth: number;
-  readonly widths: ReviewChromePresentationWidths;
-  readonly previous: ReviewChromePresentation | null;
+  readonly widths: ReaderChromePresentationWidths;
+  readonly previous: ReaderChromePresentation | null;
   readonly expansionHysteresis?: number;
-}): ReviewChromePresentation {
+}): ReaderChromePresentation {
   if (!hasCompleteMeasurements(input)) return MOST_COMPACT_PRESENTATION;
 
   const previousIndex = input.previous === null
     ? -1
-    : REVIEW_CHROME_PRESENTATIONS.indexOf(input.previous);
+    : READER_CHROME_PRESENTATIONS.indexOf(input.previous);
   const expansionHysteresis = input.expansionHysteresis === undefined
     || !validExpansionHysteresis(input.expansionHysteresis)
-    ? REVIEW_CHROME_EXPANSION_HYSTERESIS
+    ? READER_CHROME_EXPANSION_HYSTERESIS
     : input.expansionHysteresis;
 
-  for (let index = 0; index < REVIEW_CHROME_PRESENTATIONS.length; index += 1) {
-    const presentation = REVIEW_CHROME_PRESENTATIONS[index]!;
+  for (let index = 0; index < READER_CHROME_PRESENTATIONS.length; index += 1) {
+    const presentation = READER_CHROME_PRESENTATIONS[index]!;
     const isExpansion = previousIndex >= 0 && index < previousIndex;
     const requiredWidth = input.widths[presentation]
       + (isExpansion ? expansionHysteresis : 0);
@@ -75,10 +75,10 @@ export function chooseReviewChromePresentation(input: {
  * many pixels of room it shows only the file icon, since a few letters and an
  * ellipsis no longer identify the document.
  */
-export const REVIEW_CHROME_TITLE_MIN_WIDTH = 56;
-export const REVIEW_CHROME_TITLE_HYSTERESIS = 16;
+export const READER_CHROME_TITLE_MIN_WIDTH = 56;
+export const READER_CHROME_TITLE_HYSTERESIS = 16;
 
-export type ReviewChromeTitlePresentation = 'title' | 'icon';
+export type ReaderChromeTitlePresentation = 'title' | 'icon';
 
 /**
  * Chooses whether the top bar shows the document title or only its icon.
@@ -86,15 +86,15 @@ export type ReviewChromeTitlePresentation = 'title' | 'icon';
  * has its natural width. Restoring the title needs extra runway so a bar
  * resting near the threshold does not flicker.
  */
-export function chooseReviewChromeTitlePresentation(input: {
+export function chooseReaderChromeTitlePresentation(input: {
   readonly titleRoom: number;
-  readonly previous: ReviewChromeTitlePresentation;
+  readonly previous: ReaderChromeTitlePresentation;
   readonly minWidth?: number;
   readonly hysteresis?: number;
-}): ReviewChromeTitlePresentation {
+}): ReaderChromeTitlePresentation {
   if (!Number.isFinite(input.titleRoom)) return input.previous;
-  const minWidth = input.minWidth ?? REVIEW_CHROME_TITLE_MIN_WIDTH;
-  const hysteresis = input.hysteresis ?? REVIEW_CHROME_TITLE_HYSTERESIS;
+  const minWidth = input.minWidth ?? READER_CHROME_TITLE_MIN_WIDTH;
+  const hysteresis = input.hysteresis ?? READER_CHROME_TITLE_HYSTERESIS;
   const required = input.previous === 'icon' ? minWidth + hysteresis : minWidth;
   return input.titleRoom >= required ? 'title' : 'icon';
 }
@@ -109,7 +109,7 @@ export function chooseReviewChromeTitlePresentation(input: {
  * the live bar. The separate controls return only once that room, plus some
  * runway, is available again.
  */
-export function chooseReviewChromeHistoryCompact(input: {
+export function chooseReaderChromeHistoryCompact(input: {
   readonly titleRoom: number;
   readonly compact: boolean;
   readonly savings: number | null;
@@ -118,6 +118,6 @@ export function chooseReviewChromeHistoryCompact(input: {
   if (!Number.isFinite(input.titleRoom)) return input.compact;
   if (!input.compact) return input.titleRoom < 0;
   if (input.savings === null || !Number.isFinite(input.savings)) return true;
-  const hysteresis = input.hysteresis ?? REVIEW_CHROME_TITLE_HYSTERESIS;
+  const hysteresis = input.hysteresis ?? READER_CHROME_TITLE_HYSTERESIS;
   return input.titleRoom - input.savings < hysteresis;
 }

@@ -9,12 +9,12 @@ import {
   ChromeRuntimeConnection,
   ChromeRuntimeOperationJournal,
   ChromeRuntimeServiceAuthority,
-  ChromeCanonicalReviewIndex,
+  ChromeCanonicalDocumentIndex,
   ChromeRuntimeManager,
   type ChromeRuntimeBackend,
   type ChromeRuntimeProjection,
 } from "../src/browser/chrome-runtime.js";
-import { ReviewInteractions } from "../src/sessions/review-interactions.js";
+import { DocumentInteractions } from "../src/sessions/review-interactions.js";
 
 const origin = "chrome-extension://cgegjjjhbhnfgcoipeffhogoojfoekgg/";
 const connectionId = "connection-runtime-1";
@@ -117,7 +117,7 @@ describe("Chrome least-authority native runtime", () => {
   it("derives stable session-scoped owner authority without retaining the recovery secret", async () => {
     const ownerKeys: string[] = [];
     const commits = vi.fn(async () => 2);
-    const interactions = new ReviewInteractions({ currentGeneration: () => 1 });
+    const interactions = new DocumentInteractions({ currentGeneration: () => 1 });
     let draftOwnerViewId: string | undefined;
     const service = backend({
       registerInteraction: vi.fn((_canonicalKey, ownerKey) => {
@@ -397,10 +397,10 @@ describe("Chrome least-authority native runtime", () => {
     await expect(preflight.handle({ type: "hello", reviewRuntimeVersion: 4, protocol: "placekeeper.chrome-runtime", protocolVersion: 1, connectionId }))
       .resolves.toMatchObject({ type: "failure", reason: "protocol-mismatch" });
 
-    for (const reviewRuntimeVersion of [undefined, 1, 2, 3]) {
+    for (const documentRuntimeVersion of [undefined, 1, 2, 3]) {
       const mixed = new ChromeRuntimeConnection({ callerOrigin: origin, backend: backend() });
       await expect(mixed.handle({ type: "hello", protocol: "placekeeper.chrome-runtime", protocolVersion: 2,
-        connectionId, ...(reviewRuntimeVersion === undefined ? {} : { reviewRuntimeVersion }) }))
+        connectionId, ...(documentRuntimeVersion === undefined ? {} : { reviewRuntimeVersion: documentRuntimeVersion }) }))
         .resolves.toMatchObject({ type: "failure", reason: "protocol-mismatch" });
       expect(mixed.diagnostics().negotiated).toBe(false);
       await mixed.disconnect();
@@ -480,7 +480,7 @@ describe("Chrome least-authority native runtime", () => {
   });
 
   it("keeps canonical source identity conjunctive with verified digest and generation", async () => {
-    const index = new ChromeCanonicalReviewIndex<{ readonly id: string }>();
+    const index = new ChromeCanonicalDocumentIndex<{ readonly id: string }>();
     const sourceIdentity = createHash("sha256").update("https://papers.example.test/paper.pdf").digest("hex");
     const same = vi.fn(async () => ({ id: "canonical-1" }));
     const first = await index.resolve({ sourceIdentity, sha256: sourceDigest, generation: 1 }, same);

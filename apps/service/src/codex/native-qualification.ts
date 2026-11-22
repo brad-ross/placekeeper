@@ -1,12 +1,12 @@
 import { qualificationDirectory, readQualificationDescriptor } from "./native-qualification-files.js";
-import { REVIEW_RUNTIME_METHODS } from "../../../../packages/core/src/review-runtime-protocol.js";
+import { DOCUMENT_RUNTIME_METHODS } from "../../../../packages/core/src/review-runtime-protocol.js";
 import { createHmac, randomBytes } from "node:crypto";
 import { closeSync, constants, fstatSync, openSync, writeSync } from "node:fs";
 import { join } from "node:path";
 
 const EVENTS = Object.freeze(["claim-arrived", "claim-accepted", "claim-denied", "claim-conflict", "display-issued", "attestation-arrived", "attestation-accepted", "attestation-denied", "ready-accepted", "pending-denied", "promotion-accepted", "panel-expired", "panel-ended", "app-result", "invocation-issued", "hook-parsed", "hook-result", "experiment-selected", "experiment-delivery", "experiment-incomplete", "hook-delay-start", "hook-delay-end"] as const);
 const DENIALS = Object.freeze(["proof-missing-or-expired", "task-associated-other-review", "review-owned-other-task", "generation-mismatch", "launch-not-current", "invalid", "expired", "replayed", "owner-mismatch", "stale-generation", "revoked", "unavailable"] as const);
-const METHODS = Object.freeze(["ready", "status", "reconnect", "renew", "detach", "watermark", "bootstrap", "resource", ...REVIEW_RUNTIME_METHODS]);
+const METHODS = Object.freeze(["ready", "status", "reconnect", "renew", "detach", "watermark", "bootstrap", "resource", ...DOCUMENT_RUNTIME_METHODS]);
 const STATUSES = Object.freeze(["accepted", "denied", "pending", "active", "ok", "operation-error", "ignored", "claim", "attest", "refresh", "revoke"]);
 const FIELDS = Object.freeze(["session_id", "hook_event_name", "tool_name", "tool_input", "tool_response", "prompt"]);
 const nonce = () => randomBytes(16).toString("hex");

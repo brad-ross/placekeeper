@@ -1,5 +1,5 @@
 import { PDFDocument } from 'pdf-lib';
-import { createEmbedPdfWriter, readEditableReviewItems } from '../../../packages/pdf-backends/src/embedpdf-adapter.js';
+import { createEmbedPdfWriter, readEditableAnnotations } from '../../../packages/pdf-backends/src/embedpdf-adapter.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdtemp, rm, readFile, readdir, writeFile, realpath, mkdir, rename, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
 import { SessionBroker } from '../src/sessions/session-broker.js';
 import { ExtensionRuntimeManager } from '../src/codex/extension-runtime.js';
-import { ExtensionRecentReviews } from '../src/codex/extension-recent-reviews.js';
+import { ExtensionRecentDocuments } from '../src/codex/extension-recent-reviews.js';
 import { CodexServiceRuntimeBackend } from '../src/codex/codex-runtime-backend.js';
 import { PdfSaveCoordinator } from '../src/saving/pdf-save-coordinator.js';
 import { ExportCoordinator } from '../src/export/export-coordinator.js';
@@ -212,7 +212,7 @@ it('serializes and verifies a real reviewed PDF before issuing a conditional hos
  const saved:any=await f.manager.dispatch({action:'host-resource',operation:'save',grant:active.grant});expect(saved.status).toBe('host-save');
  const pdf=await readFile(join(f.root,'recovery',id,`host-save-${saved.intent.id}.pdf`));
  expect(createHash('sha256').update(pdf).digest('hex')).toBe(saved.intent.sha256);
- const annotations=await readEditableReviewItems(pdf);expect(annotations).toHaveLength(1);expect(JSON.stringify(annotations)).toContain('actual PDF annotation');
+ const annotations=await readEditableAnnotations(pdf);expect(annotations).toHaveLength(1);expect(JSON.stringify(annotations)).toContain('actual PDF annotation');
 });
 it.each([
  { copy: false, changedUri: false, changedCopy: false },
@@ -325,7 +325,7 @@ it('keeps admitted host identity when a stale recent entry is opened after an in
  const offered: any = await upload(f.manager, { ticket: descriptor.ticket }, bytes, true);
  const chosen: any = await f.manager.choose({ action: 'choose', recoveryToken: offered.recoveryToken, choice: 'resume', operationId: randomUUID() });
  expect(await upload(f.manager, { grant: chosen.grant }, bytes, true)).toMatchObject({ status: 'host-ready' });
- const remember = vi.spyOn(ExtensionRecentReviews.prototype, 'remember').mockRejectedValueOnce(Error('Index write unavailable'));
+ const remember = vi.spyOn(ExtensionRecentDocuments.prototype, 'remember').mockRejectedValueOnce(Error('Index write unavailable'));
  let admitted: any;
  try { admitted = await f.manager.resume(chosen.grant, randomUUID(), 'activate'); }
  finally { remember.mockRestore(); }
@@ -544,7 +544,7 @@ it.each([false, true])('autosaves opaque PDFs to a chosen local copy and preserv
  for(const comment of ['first copy note','second copy note']) {
   expect(await h.call('command',addPageNote(f.broker.state(h.sessionId)!,0,{x:20,y:20,width:20,height:20},comment))).toMatchObject({status:'ok'});
   await f.saving.drain();
-  expect(JSON.stringify(await readEditableReviewItems(await readFile(join(f.root,'copy.pdf'))))).toContain(comment);
+  expect(JSON.stringify(await readEditableAnnotations(await readFile(join(f.root,'copy.pdf'))))).toContain(comment);
   expect(f.broker.saveStatus(h.sessionId)?.sync.phase).toBe('clean');
   expect(await f.manager.dispatch({action:'host-resource',operation:'save',grant:h.active.grant})).not.toHaveProperty('intent');
  }
@@ -558,7 +558,7 @@ it.each([false, true])('autosaves opaque PDFs to a chosen local copy and preserv
  expect(await upload(f.manager,{grant:h.active.grant},successor,writable)).toMatchObject({status:'host-ready',generation:2});
  expect(f.broker.saveStatus(h.sessionId)?.destination).toMatchObject({phase:'active',targetPath:await realpath(join(f.root,'copy.pdf'))});
  await f.saving.drain();
- expect(JSON.stringify(await readEditableReviewItems(await readFile(join(f.root,'copy.pdf'))))).toContain('second copy note');
+ expect(JSON.stringify(await readEditableAnnotations(await readFile(join(f.root,'copy.pdf'))))).toContain('second copy note');
 });
 
 it('a retired host write cannot mark a local copy saved or restore its host destination',async()=>{

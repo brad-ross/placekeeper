@@ -9,12 +9,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { setAnnotationName } from "../../../packages/core/src/review-commands.js";
 import { PdfWriterError, type PdfWriter } from "../../../packages/core/src/pdf-writer.js";
 import { inspectProjectedPortableAnnotations } from "../../../packages/core/src/portable-annotation.js";
-import type { ReviewCommand, ReviewItem, ReviewState } from "../../../packages/core/src/review-model.js";
+import type { DocumentCommand, Annotation, DocumentState } from "../../../packages/core/src/review-model.js";
 import { NativeRuntimeManager } from "../src/desktop/native-runtime.js";
 import { ChromeServiceRuntimeBackend } from "../src/browser/chrome-runtime-backend.js";
 import { ChromeTransferStore } from "../src/browser/chrome-handoff.js";
 import { ExportCoordinator } from "../src/export/export-coordinator.js";
-import { parseNativeReviewHelperMessage } from "../../../packages/core/src/native-helper-protocol.js";
+import { parseNativeDocumentHelperMessage } from "../../../packages/core/src/native-helper-protocol.js";
 import { PdfSaveCoordinator } from "../src/saving/pdf-save-coordinator.js";
 import { SessionBroker } from "../src/sessions/session-broker.js";
 import { BrowserSourceStore } from "../src/browser/browser-source-store.js";
@@ -22,7 +22,7 @@ import type { DestinationPicker } from "../src/host/destination-picker.js";
 import { PdfVerificationError, type PdfExportVerifier } from "../src/export/pdf-verifier.js";
 import {
   DraftSnapshotStore,
-  reviewStateDigest,
+  documentStateDigest,
   type SnapshotHooks,
 } from "../src/recovery/draft-snapshot.js";
 
@@ -199,7 +199,7 @@ async function setupRemote(picker?: DestinationPicker) {
   };
 }
 
-function add(expectedRevision: number): ReviewCommand {
+function add(expectedRevision: number): DocumentCommand {
   const now = "2026-08-11T12:00:00.000Z";
   return {
     type: "add",
@@ -223,7 +223,7 @@ function add(expectedRevision: number): ReviewCommand {
   };
 }
 
-function addLongHighlight(expectedRevision: number): ReviewCommand {
+function addLongHighlight(expectedRevision: number): DocumentCommand {
   const command = add(expectedRevision);
   if (command.type !== "add") throw new Error("Expected an add command");
   return {
@@ -244,7 +244,7 @@ function addLongHighlight(expectedRevision: number): ReviewCommand {
   };
 }
 
-function addCrossPage(expectedRevision: number): ReviewCommand {
+function addCrossPage(expectedRevision: number): DocumentCommand {
   const command = add(expectedRevision);
   if (command.type !== "add") throw new Error("Expected an add command");
   const pages = [0, 1, 2].map((pageIndex) => ({
@@ -276,7 +276,7 @@ function addCrossPage(expectedRevision: number): ReviewCommand {
   };
 }
 
-function withSegmentCount(item: ReviewItem, count: number): ReviewItem {
+function withSegmentCount(item: Annotation, count: number): Annotation {
   const { reconciliation: _runtimeReconciliation, ...legacyItem } = item;
   const { pages: _runtimePages, ...legacyPayload } = item.payload;
   return {
@@ -294,7 +294,7 @@ function withSegmentCount(item: ReviewItem, count: number): ReviewItem {
   };
 }
 
-async function persistRecoveredState(root: string, sessionId: string, state: ReviewState): Promise<void> {
+async function persistRecoveredState(root: string, sessionId: string, state: DocumentState): Promise<void> {
   const store = new DraftSnapshotStore(join(root, "recovery", sessionId));
   const recovered = await store.recover();
   if (recovered === undefined) throw new Error("Expected persisted recovery draft");
@@ -304,7 +304,7 @@ async function persistRecoveredState(root: string, sessionId: string, state: Rev
     sync: {
       ...recovered.sync,
       desiredRevision: state.revision,
-      desiredDigest: reviewStateDigest(state),
+      desiredDigest: documentStateDigest(state),
     },
   });
 }
@@ -687,7 +687,7 @@ describe("coalescing PDF autosave", () => {
     await broker.acceptMutation(sessionId, addLongHighlight(0));
     const current = broker.state(sessionId)!;
     const legacyItem = withSegmentCount(current.items[0]!, 256);
-    const legacyState: ReviewState = {
+    const legacyState: DocumentState = {
       ...current,
       revision: 7,
       items: [legacyItem],
@@ -732,7 +732,7 @@ describe("coalescing PDF autosave", () => {
     await broker.acceptMutation(sessionId, addLongHighlight(0));
     const current = broker.state(sessionId)!;
     const unsupportedItem = withSegmentCount(current.items[0]!, 257);
-    const recoveredState: ReviewState = {
+    const recoveredState: DocumentState = {
       ...current,
       revision: 7,
       items: [],
@@ -805,8 +805,8 @@ describe("coalescing PDF autosave", () => {
     try {
       const selection = { ...envelope, ...fence, type: "destination-selection", method: "chooseFolder",
         selectedPath: root, requestId: "request_folder_native", idempotencyKey: "operation_folder_native" };
-      expect(parseNativeReviewHelperMessage("macos", selection)).toBeUndefined();
-      expect(parseNativeReviewHelperMessage("electron", { ...selection, selectedPath: "relative" })).toBeUndefined();
+      expect(parseNativeDocumentHelperMessage("macos", selection)).toBeUndefined();
+      expect(parseNativeDocumentHelperMessage("electron", { ...selection, selectedPath: "relative" })).toBeUndefined();
       const selected = await manager.handle(helper, selection);
       expect(selected).toMatchObject({ type: "result", method: "chooseFolder", payload: { cancelled: false, folder: "Local folder" } });
       expect(JSON.stringify(selected)).not.toContain(root);
@@ -1051,7 +1051,7 @@ describe("coalescing PDF autosave", () => {
     expect(broker.saveStatus(sessionId)?.sync).toMatchObject({
       phase: "clean", desiredRevision: 1, savedRevision: 1,
     });
-    const receipt = await broker.finalizeReviewInteraction({
+    const receipt = await broker.finalizeDocumentInteraction({
       sessionId, attachment, interactionToken, order: 2,
       outcome: "discarded", draftId, expectedDraftRevision: 0,
     });
@@ -1060,7 +1060,7 @@ describe("coalescing PDF autosave", () => {
     expect(broker.saveStatus(sessionId)?.sync).toMatchObject({
       phase: "clean", desiredRevision: 3, savedRevision: 3,
     });
-    await expect(broker.acknowledgeReviewInteraction({
+    await expect(broker.acknowledgeDocumentInteraction({
       sessionId, attachment, interactionToken, order: 3,
     })).resolves.toMatchObject({ status: "released" });
 
@@ -1495,7 +1495,7 @@ describe("coalescing PDF autosave", () => {
       documentGeneration: state.workflow.documentGeneration,
       sourceDigest: state.source.digest,
       revision: state.revision,
-      stateDigest: reviewStateDigest(state),
+      stateDigest: documentStateDigest(state),
       targetDigest: sha(prepared),
       commit: async () => {
         await writeFile(source, prepared);
@@ -1545,7 +1545,7 @@ describe("coalescing PDF autosave", () => {
       documentGeneration: state.workflow.documentGeneration,
       sourceDigest: state.source.digest,
       revision: state.revision,
-      stateDigest: reviewStateDigest(state),
+      stateDigest: documentStateDigest(state),
       targetDigest: sha(prepared),
       commit: async () => { throw new Error("simulated publication failure"); },
     })).rejects.toThrow(/simulated publication failure/u);
@@ -1583,7 +1583,7 @@ describe("coalescing PDF autosave", () => {
       documentGeneration: state.workflow.documentGeneration,
       sourceDigest: state.source.digest,
       revision: state.revision,
-      stateDigest: reviewStateDigest(state),
+      stateDigest: documentStateDigest(state),
       targetDigest: sha(prepared),
       commit: async () => {
         await writeFile(source, prepared);

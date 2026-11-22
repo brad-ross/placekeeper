@@ -19,13 +19,13 @@ import type {
   PdfWriteResult,
   PdfWriter,
   PdfRewriteEligibility,
-  ReviewAnnotation,
+  PdfWriterAnnotation,
 } from '../../core/src/pdf-writer.js';
 import {
   inspectPortableAnnotation,
   inspectProjectedPortableAnnotations,
 } from '../../core/src/portable-annotation.js';
-import type { JsonValue, ReviewItem, ReviewState } from '../../core/src/review-model.js';
+import type { JsonValue, Annotation, DocumentState } from '../../core/src/review-model.js';
 import {
   PdfWriterError,
   SEMANTIC_MARKUP_KINDS,
@@ -34,7 +34,7 @@ import {
   annotationPreservationSignature,
   canonicalEmbedPdfValue as canonical,
   embedPdfSubtypeName,
-  mapReviewAnnotationToEmbedPdf,
+  mapPdfWriterAnnotationToEmbedPdf,
   pdfAnnotationIdentity,
   pdfRewriteMarkers,
   portableItemsFromAnnotationPages,
@@ -62,14 +62,14 @@ export interface InspectedPdf {
   pageFingerprints: readonly string[];
   annotationSubtypes: string[];
   annotations: InspectedPdfAnnotation[];
-  portableItems: ReviewItem[];
+  portableItems: Annotation[];
   nativeAnnotations?: NativePdfAnnotation[];
 }
 
 export interface InspectedPdfAnnotationCatalog {
   pageCount: number;
   annotations: InspectedPdfAnnotation[];
-  portableItems: ReviewItem[];
+  portableItems: Annotation[];
   nativeAnnotations?: NativePdfAnnotation[];
 }
 
@@ -192,9 +192,9 @@ function translateLegacyRect(value: JsonValue | undefined, left: number, top: nu
 }
 
 function migrateLegacyItemGeometry(
-  item: ReviewItem,
+  item: Annotation,
   page: PdfDocumentObject['pages'][number] | undefined,
-): ReviewItem {
+): Annotation {
   if (!page) {
     throw new PdfWriterError(
       'invalid-annotation-geometry',
@@ -220,11 +220,11 @@ function migrateLegacyItemGeometry(
 }
 
 function migrateLegacyStateWithPages(
-  state: ReviewState,
+  state: DocumentState,
   pages: PdfDocumentObject['pages'],
-): ReviewState {
+): DocumentState {
   if (state.schemaVersion === 2) return state;
-  const migrate = (item: ReviewItem) => migrateLegacyItemGeometry(item, pages[item.pageIndex]);
+  const migrate = (item: Annotation) => migrateLegacyItemGeometry(item, pages[item.pageIndex]);
   return {
     ...state,
     schemaVersion: 2,
@@ -243,7 +243,7 @@ function migrateLegacyStateWithPages(
   };
 }
 
-export async function readPortableReviewItems(bytes: Uint8Array, options: { readonly includeNative?: boolean } = {}): Promise<ReviewItem[]> {
+export async function readPortableAnnotations(bytes: Uint8Array, options: { readonly includeNative?: boolean } = {}): Promise<Annotation[]> {
   const engine = await newEngine();
   try {
     const document = await engine
@@ -268,15 +268,15 @@ export async function readPortableReviewItems(bytes: Uint8Array, options: { read
   }
 }
 
-export function readEditableReviewItems(bytes: Uint8Array): Promise<ReviewItem[]> {
-  return readPortableReviewItems(bytes, { includeNative: true });
+export function readEditableAnnotations(bytes: Uint8Array): Promise<Annotation[]> {
+  return readPortableAnnotations(bytes, { includeNative: true });
 }
 
 /** Upgrades recovery state written by the pre-v2 coordinate contract. */
-export async function migrateLegacyReviewStateGeometry(
+export async function migrateLegacyDocumentStateGeometry(
   bytes: Uint8Array,
-  state: ReviewState,
-): Promise<ReviewState> {
+  state: DocumentState,
+): Promise<DocumentState> {
   if (state.schemaVersion === 2) return state;
   const engine = await newEngine();
   try {
@@ -401,7 +401,7 @@ export async function inspectPdfAnnotationCatalogWithEmbedPdf(
   }
 }
 
-function assertSemanticGeometry(annotations: readonly ReviewAnnotation[]): void {
+function assertSemanticGeometry(annotations: readonly PdfWriterAnnotation[]): void {
   const invalid = annotations.find(
     (annotation) =>
       SEMANTIC_MARKUP_KINDS.has(annotation.kind) && annotation.textAnchorReliable !== true,
@@ -415,7 +415,7 @@ function assertSemanticGeometry(annotations: readonly ReviewAnnotation[]): void 
 }
 
 function assertAnnotationWithinPage(
-  annotation: ReviewAnnotation,
+  annotation: PdfWriterAnnotation,
   page: PdfDocumentObject['pages'][number],
 ): void {
   const epsilon = 0.001;
@@ -585,7 +585,7 @@ async function writeOwnedWithEmbedPdf(request: PdfWriteRequest): Promise<PdfWrit
       await engine.createPageAnnotation(
         document,
         page,
-        mapReviewAnnotationToEmbedPdf(annotation),
+        mapPdfWriterAnnotationToEmbedPdf(annotation),
       ).toPromise();
     }
 

@@ -1,17 +1,17 @@
 import { readFile } from "node:fs/promises";
-import type { ReviewItem, ReviewState } from "../../../../packages/core/src/review-model.js";
-import { migrateLegacyReviewStateGeometry } from "../../../../packages/pdf-backends/src/embedpdf-adapter.js";
+import type { Annotation, DocumentState } from "../../../../packages/core/src/review-model.js";
+import { migrateLegacyDocumentStateGeometry } from "../../../../packages/pdf-backends/src/embedpdf-adapter.js";
 import { hashFile } from "../files/file-capabilities.js";
 import type { RecoverableDraftV3 } from "../recovery/draft-snapshot.js";
-import type { OpenReviewRequest } from "./session-contracts.js";
+import type { OpenDocumentRequest } from "./session-contracts.js";
 
-export async function prepareRecoveredReview(input: {
+export async function prepareRecoveredDocument(input: {
   readonly matchingDraft: RecoverableDraftV3;
   readonly recoveredSnapshotPath: string;
   readonly approvedFile: { readonly id: string };
   readonly approvedRoot: { readonly id: string } | undefined;
-  readonly request: OpenReviewRequest;
-  readonly portableReader: (bytes: Uint8Array) => Promise<readonly ReviewItem[]>;
+  readonly request: OpenDocumentRequest;
+  readonly portableReader: (bytes: Uint8Array) => Promise<readonly Annotation[]>;
 }) {
   const { matchingDraft, recoveredSnapshotPath, approvedFile, approvedRoot, request, portableReader } = input;
   const sourceSnapshotBytes = new Uint8Array(await readFile(recoveredSnapshotPath));
@@ -23,13 +23,13 @@ export async function prepareRecoveredReview(input: {
     throw new Error("Recovery source snapshot failed integrity validation");
   }
   const geometryMigrated = matchingDraft.state.schemaVersion === 1;
-  const migratedState = await migrateLegacyReviewStateGeometry(
+  const migratedState = await migrateLegacyDocumentStateGeometry(
     sourceSnapshotBytes,
     matchingDraft.state,
   );
   // Older recovery records never imported standard marks. Add them once to
   // the current state and every undo snapshot, so undo cannot delete them.
-  let nativeMigration: readonly ReviewItem[] = [];
+  let nativeMigration: readonly Annotation[] = [];
   let nativeImportSucceeded = migratedState.nativeAnnotationImportDigest === migratedState.source.digest;
   if (!nativeImportSucceeded) {
     try {
@@ -38,9 +38,9 @@ export async function prepareRecoveredReview(input: {
       nativeImportSucceeded = true;
     } catch { /* Preserve all source annotations until an import can succeed. */ }
   }
-  const mergeNative = (items: readonly ReviewItem[]) => [...items,
+  const mergeNative = (items: readonly Annotation[]) => [...items,
     ...nativeMigration.filter((item) => !items.some(({ id }) => id === item.id))];
-  const resumedState: ReviewState = {
+  const resumedState: DocumentState = {
     ...migratedState,
     ...(nativeImportSucceeded ? { nativeAnnotationImportDigest: migratedState.source.digest } : {}),
     items: mergeNative(migratedState.items),

@@ -2,12 +2,12 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { PlacekeeperLinkLocation } from '../../../packages/core/src/placekeeper-link.js';
 import {
-  BrowserReviewLocationHistory,
-  MemoryReviewLocationHistory,
-  type ReviewLocationHistoryEnvironment,
+  BrowserDocumentLocationHistory,
+  MemoryDocumentLocationHistory,
+  type DocumentLocationHistoryEnvironment,
 } from '../src/review/review-location-history.js';
 
-class FakeEnvironment implements ReviewLocationHistoryEnvironment {
+class FakeEnvironment implements DocumentLocationHistoryEnvironment {
   readonly location = { hash: '#v=1&page=3' };
   readonly listeners = new Set<() => void>();
   readonly entries: Array<{ state: unknown; fragment: string }> = [
@@ -72,7 +72,7 @@ describe('browser review location history', () => {
   it('replaces settled reading, pushes explicit jumps once, and restores through popstate', () => {
     const environment = new FakeEnvironment();
     const restore = vi.fn();
-    const history = new BrowserReviewLocationHistory(environment);
+    const history = new BrowserDocumentLocationHistory(environment);
     history.start(restore);
 
     expect(history.read()).toEqual(page(3));
@@ -101,14 +101,14 @@ describe('browser review location history', () => {
 
   it('recovers forward availability when a middle entry is reloaded', () => {
     const environment = new FakeEnvironment();
-    const first = new BrowserReviewLocationHistory(environment);
+    const first = new BrowserDocumentLocationHistory(environment);
     first.start(() => undefined);
     first.push(page(4));
     first.push(page(8));
     first.back();
     first.dispose();
 
-    const reloaded = new BrowserReviewLocationHistory(environment);
+    const reloaded = new BrowserDocumentLocationHistory(environment);
     reloaded.start(() => undefined);
     expect(reloaded.snapshot()).toEqual({ canBack: true, canForward: true });
     expect(reloaded.read()).toEqual(page(4));
@@ -117,7 +117,7 @@ describe('browser review location history', () => {
   it('round-trips durable destinations through replace, push, Back, and Forward', () => {
     const environment = new FakeEnvironment();
     const restore = vi.fn();
-    const history = new BrowserReviewLocationHistory(environment);
+    const history = new BrowserDocumentLocationHistory(environment);
     history.start(restore);
 
     history.replace(destination(3));
@@ -136,7 +136,7 @@ describe('browser review location history', () => {
   it('starts popstate restoration before publishing the new traversal controls', () => {
     const environment = new FakeEnvironment();
     const order: string[] = [];
-    const history = new BrowserReviewLocationHistory(environment);
+    const history = new BrowserDocumentLocationHistory(environment);
     history.start(() => { order.push('restore'); });
     history.push(page(4));
     order.length = 0;
@@ -152,7 +152,7 @@ describe('browser review location history', () => {
     const environment = new FakeEnvironment();
     const order: string[] = [];
     let finishRestore: () => void = () => {};
-    const history = new BrowserReviewLocationHistory(environment);
+    const history = new BrowserDocumentLocationHistory(environment);
     history.start(() => new Promise<void>((resolve) => {
       order.push('restore');
       finishRestore = resolve;
@@ -173,7 +173,7 @@ describe('browser review location history', () => {
     const environment = new FakeEnvironment();
     environment.location.hash = '#unsafe';
     environment.entries[0] = { state: null, fragment: 'unsafe' };
-    const history = new BrowserReviewLocationHistory(environment);
+    const history = new BrowserDocumentLocationHistory(environment);
     history.start(() => undefined);
 
     expect(() => history.read()).toThrow();
@@ -185,7 +185,7 @@ describe('browser review location history', () => {
 
 describe('memory review location history', () => {
   it('traverses semantic locations without touching browser location or history', () => {
-    const history = new MemoryReviewLocationHistory(page(3));
+    const history = new MemoryDocumentLocationHistory(page(3));
     const restored: string[] = [];
     history.start((direction) => { restored.push(direction); });
 
@@ -201,7 +201,7 @@ describe('memory review location history', () => {
   });
 
   it('does not republish unchanged traversal availability', () => {
-    const history = new MemoryReviewLocationHistory(page(1));
+    const history = new MemoryDocumentLocationHistory(page(1));
     const listener = vi.fn();
     history.subscribe(listener);
 

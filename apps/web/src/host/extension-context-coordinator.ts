@@ -1,6 +1,6 @@
 import type { OpenAIModelContext, OpenAIModelContextHostState } from '@openai/mcp-extensions/app';
 import type { DocumentContextMember, DocumentContextPublicationStatus } from './document-in-context.js';
-import type { ReviewContextSnapshot } from './review-context-snapshot.js';
+import type { DocumentContextSnapshot } from './review-context-snapshot.js';
 
 type Block = NonNullable<NonNullable<OpenAIModelContextHostState>['content']>[number];
 export const backgroundContextUri = 'placekeeper-context:///background';
@@ -35,7 +35,7 @@ function resource(id: string, title: string, text: string): Block {
 }
 /** One serialized publisher per app invocation. The host can pause automatic publication by removing the background group. */
 export class ExtensionContextCoordinator {
-  #snapshot: ReviewContextSnapshot | undefined;
+  #snapshot: DocumentContextSnapshot | undefined;
   #paused = false;
   #attachments = new Map<string, Block>();
   #confirmedAttachments = new Map<string, Block>();
@@ -97,7 +97,7 @@ export class ExtensionContextCoordinator {
   get status(): ExtensionContextStatus { return this.#status; }
   get attachments(): readonly string[] { return [...this.#attachments.keys()].map(id => decodeURIComponent(id.slice(attachmentPrefix.length))); }
   #notify(status: ExtensionContextStatus) { this.#status = status; this.onStatus(status); }
-  publish(snapshot: ReviewContextSnapshot) { this.#retainedBackground = undefined; this.#snapshot = snapshot; this.#change(); }
+  publish(snapshot: DocumentContextSnapshot) { this.#retainedBackground = undefined; this.#snapshot = snapshot; this.#change(); }
   retry() { if (this.#status === 'unavailable') this.#change(true); }
   setDocument(member: DocumentContextMember) {
     if (this.#document?.member === member) return;

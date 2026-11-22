@@ -5,7 +5,7 @@ import { DEFAULT_ANNOTATION_NAME } from "../../../../packages/core/src/review-mo
 
 import { trapDialogFocus } from "../app/dialog-focus.js";
 import type { SaveCopyProposal } from "../host/session-contracts.js";
-import { ReviewIcon } from "../review/ReviewIcon.js";
+import { ReaderIcon } from "../review/ReviewIcon.js";
 import type { PdfRewriteEligibility } from "../../../../packages/core/src/pdf-writer.js";
 import type { SaveFailureReason } from "../../../../packages/core/src/save-status.js";
 
@@ -107,7 +107,7 @@ export function SaveDestinationDialog(props: SaveDestinationDialogProps) {
                   title="Return to annotations"
                   onClick={props.onCancel}
                 >
-                  <ReviewIcon name="arrow-left" />
+                  <ReaderIcon name="arrow-left" />
                   <span>Return to annotations</span>
                 </button>
               </div>
@@ -126,7 +126,7 @@ export function SaveDestinationDialog(props: SaveDestinationDialogProps) {
                   disabled={props.establishing}
                   onClick={() => void props.onRetry?.()}
                 >
-                  <ReviewIcon name="redo" />
+                  <ReaderIcon name="redo" />
                   <span>Retry</span>
                 </button>
                 <button
@@ -136,7 +136,7 @@ export function SaveDestinationDialog(props: SaveDestinationDialogProps) {
                   disabled={props.establishing}
                   onClick={() => void props.onLocate?.()}
                 >
-                  <ReviewIcon name="locate" />
+                  <ReaderIcon name="locate" />
                   <span>Locate PDF…</span>
                 </button>
               </div>
@@ -237,7 +237,7 @@ export function SaveDestinationDialog(props: SaveDestinationDialogProps) {
             }
             onClick={() => void props.onConfirm(choice, filename, annotationName)}
           >
-            {props.establishing ? <ReviewIcon name="loading" /> : null}
+            {props.establishing ? <ReaderIcon name="loading" /> : null}
             <span>Save</span>
           </button>
         </footer>

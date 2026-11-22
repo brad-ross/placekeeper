@@ -8,7 +8,7 @@ import {
   readStaticPdfUrl,
 } from "./host/static-runtime.js";
 import { startRuntime } from "./production-entry.js";
-import { ReviewIcon } from "./review/ReviewIcon.js";
+import { ReaderIcon } from "./review/ReviewIcon.js";
 import { browserDownloadTarget, loadDownloads, type Downloads } from "./landing/downloads.js";
 import { DownloadButton } from "./landing/DownloadButton.js";
 import { ProductShowcase } from "./landing/ProductShowcase.js";
@@ -158,7 +158,7 @@ export function StaticLauncher(props: {
     if (event.key === "Escape" && pending) operationRef.current?.abort();
   }}>
     {error === undefined ? null : <div className="review-toast-stack static-launcher__toasts">
-      <aside className="review-toast review-toast--error" role="alert"><ReviewIcon name="alert" /><span>{error}</span></aside>
+      <aside className="review-toast review-toast--error" role="alert"><ReaderIcon name="alert" /><span>{error}</span></aside>
     </div>}
     <div className="landing-hero" id="top">
       <section className="landing-hero__copy" aria-labelledby="landing-title">
@@ -198,7 +198,7 @@ export function StaticLauncher(props: {
           disabled={pending && openingSource !== "file"}
           onClick={() => pending ? operationRef.current?.abort() : inputRef.current?.click()}
         >
-          <ReviewIcon name={pending && openingSource === "file" ? "loading" : "upload"} size={14} className={pending && openingSource === "file" ? "review-icon static-launcher__spinner" : "review-icon"} />
+          <ReaderIcon name={pending && openingSource === "file" ? "loading" : "upload"} size={14} className={pending && openingSource === "file" ? "review-icon static-launcher__spinner" : "review-icon"} />
           Upload PDF
         </button>
         <p className="landing-drop-hint">or drop a PDF here</p>
@@ -223,7 +223,7 @@ export function StaticLauncher(props: {
               onChange={(event) => setRemoteUrl(event.currentTarget.value)}
             />
             <button type="submit" title={pending && openingSource === "url" ? "Cancel opening" : "Open document URL"} disabled={pending ? openingSource !== "url" : remoteUrl.trim() === ""}>
-              <ReviewIcon name={pending && openingSource === "url" ? "loading" : "link"} size={14} className={pending && openingSource === "url" ? "review-icon static-launcher__spinner" : "review-icon"} />
+              <ReaderIcon name={pending && openingSource === "url" ? "loading" : "link"} size={14} className={pending && openingSource === "url" ? "review-icon static-launcher__spinner" : "review-icon"} />
               Open
             </button>
           </div>
@@ -236,7 +236,7 @@ export function StaticLauncher(props: {
     <section className="landing-extras" aria-labelledby="more-features-title">
       <h2 id="more-features-title">More useful features</h2>
       <article><span className="landing-symbol" aria-hidden="true">∑</span><div><h3>Symbol search</h3><p>Find mathematical symbols by name or LaTeX command.</p></div></article>
-      <article><ReviewIcon name="refresh" size={20} /><div><h3>Keep up with changes</h3><p>Keep reading as other apps or agents update your document. Reattach annotations when passages change.</p></div></article>
+      <article><ReaderIcon name="refresh" size={20} /><div><h3>Keep up with changes</h3><p>Keep reading as other apps or agents update your document. Reattach annotations when passages change.</p></div></article>
     </section>
     <SurfaceShowcase />
     <section id="install" className="landing-invitations" aria-label="Get started with Placekeeper">
@@ -248,7 +248,7 @@ export function StaticLauncher(props: {
       <div>
         <h2>Or try your own document.</h2>
         <p>Open a file or document link here.</p>
-        <a href="#try">Try it <ReviewIcon name="arrow-right" size={16} /></a>
+        <a href="#try">Try it <ReaderIcon name="arrow-right" size={16} /></a>
       </div>
     </section>
   </main>;
@@ -323,9 +323,9 @@ export async function mountStaticBrowserApp(): Promise<void> {
     });
     operation.onPhase("activating");
 
-    const reviewRoot = document.createElement("div");
-    reviewRoot.className = "static-review-root static-review-root--activating";
-    document.body.append(reviewRoot);
+    const readerRoot = document.createElement("div");
+    readerRoot.className = "static-review-root static-review-root--activating";
+    document.body.append(readerRoot);
     const ready = Promise.withResolvers<void>();
     let unmount: (() => void) | undefined;
     let disposed = false;
@@ -334,11 +334,11 @@ export async function mountStaticBrowserApp(): Promise<void> {
       disposed = true;
       unmount?.();
       runtime.dispose();
-      reviewRoot.remove();
+      readerRoot.remove();
     };
     try {
       unmount = await startRuntime(runtime, {
-        rootElement: reviewRoot,
+        rootElement: readerRoot,
         onDocumentReady: () => ready.resolve(),
         onRuntimeError: (error) => ready.reject(error),
       });
@@ -351,8 +351,8 @@ export async function mountStaticBrowserApp(): Promise<void> {
 
     launcher.unmount();
     rootElement.remove();
-    reviewRoot.id = "root";
-    reviewRoot.classList.remove("static-review-root--activating");
+    readerRoot.id = "root";
+    readerRoot.classList.remove("static-review-root--activating");
     const onPageHide = (event: PageTransitionEvent) => {
       if (event.persisted) return;
       globalThis.removeEventListener("pagehide", onPageHide);

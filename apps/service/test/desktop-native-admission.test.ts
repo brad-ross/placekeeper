@@ -5,12 +5,12 @@ import { join, resolve } from 'node:path';
 import { createDesktopIsolatedRoot } from '../../../test/support/desktop-isolated-root.js';
 import { startServiceDaemon } from '../src/host/service-daemon.js';
 import { requestControl } from '../src/host/launch-control.js';
-import { validElectronReviewHelperResponse } from '../../../packages/core/src/electron-helper-protocol.js';
+import { validElectronDocumentHelperResponse } from '../../../packages/core/src/electron-helper-protocol.js';
 import { ChromeTransferStore } from '../src/browser/chrome-handoff.js';
 import { lifecycleDiagnostic } from '../src/desktop/lifecycle-control-command.js';
 import { decodePlacekeeperLink } from '../../../packages/core/src/placekeeper-link.js';
 import { ChromeRuntimeOperationJournal } from '../src/browser/runtime-operation-journal.js';
-import type { ReviewCommand } from '../../../packages/core/src/review-model.js';
+import type { DocumentCommand } from '../../../packages/core/src/review-model.js';
 import { DraftSnapshotStore } from '../src/recovery/draft-snapshot.js';
 
 it('admits, activates, and durably protects native authoring through the private daemon without disclosing paths', async () => {
@@ -33,10 +33,10 @@ it('admits, activates, and durably protects native authoring through the private
             try { const result = await canonicalize.call(this, url); stages.push('canonicalize-local-complete'); return result; }
             catch (error) { stages.push(lifecycleDiagnostic('canonicalize-local', error)); throw error; }
         });
-        const openReview = daemon.host.broker.openReview.bind(daemon.host.broker);
+        const openDocument = daemon.host.broker.openReview.bind(daemon.host.broker);
         vi.spyOn(daemon.host.broker, 'openReview').mockImplementation(async request => {
             stages.push('open-review');
-            try { const result = await openReview(request); stages.push('open-review-complete'); return result; }
+            try { const result = await openDocument(request); stages.push('open-review-complete'); return result; }
             catch (error) { stages.push(lifecycleDiagnostic('open-review', error)); throw error; }
         });
         const canonicalLink = daemon.host.broker.canonicalLinkBase.bind(daemon.host.broker);
@@ -66,7 +66,7 @@ it('admits, activates, and durably protects native authoring through the private
         const admitted = await requestControl(socket, { kind: 'electron-runtime', appInstanceId, helperId,
             message: { ...envelope, requestId: randomUUID(), type: 'admit', sourcePath: source } });
         if (admitted.kind !== 'electron-runtime' || admitted.response.type !== 'admitted') throw new Error(`Native admission failed: ${JSON.stringify({ response: admitted, stages })}`);
-        expect(validElectronReviewHelperResponse(admitted.response)).toBe(true);
+        expect(validElectronDocumentHelperResponse(admitted.response)).toBe(true);
         expect(JSON.stringify(admitted.response.projection)).not.toContain(root);
         expect(JSON.stringify(admitted.response.projection)).not.toContain(await realpath(root));
         const { resourceId, generation } = admitted.response;
@@ -89,7 +89,7 @@ it('admits, activates, and durably protects native authoring through the private
             anchor: { kind: 'page' as const, pageIndex: 0, nearbyText: 'source', rect: { x: 1, y: 1, width: 2, height: 2 } },
             disposition: { kind: 'resolved' as const, generation }, status: 'protected' as const,
             createdAt: '2026-11-02T12:00:00Z', updatedAt: '2026-11-02T12:00:00Z' };
-        const payload: ReviewCommand = { type: 'put-draft', expectedRevision: 0, expectedDraftRevision: -1, draft };
+        const payload: DocumentCommand = { type: 'put-draft', expectedRevision: 0, expectedDraftRevision: -1, draft };
         const idempotencyKey = randomUUID();
         const command = (revision: number) => requestControl(socket, { kind: 'electron-runtime', appInstanceId, helperId,
             message: { ...envelope, requestId: randomUUID(), type: 'invoke', generation, revision,

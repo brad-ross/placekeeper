@@ -1,11 +1,11 @@
 import { decodePlacekeeperLinkFragment, encodePlacekeeperLinkFragment, type PlacekeeperLinkLocation } from './placekeeper-link.js';
-import type { ReviewCommandSurfaceSnapshot, ReviewSemanticCommand } from '../../../apps/web/src/review/review-command-surface.js';
+import type { DocumentCommandSurfaceSnapshot, DocumentSemanticCommand } from '../../../apps/web/src/review/review-command-surface.js';
 /** Renderer-safe capability surface. Native paths and recovery authority stay in main. */
 export interface ElectronShellIdentity { readonly windowId: string; readonly attemptId: string }
 export type ElectronShellEvent =
     | { readonly type: 'source-endpoint'; readonly token: string }
     | { readonly type: 'toolbar-hover'; readonly hovered: boolean }
-    | { readonly type: 'command'; readonly id: ReviewSemanticCommand; readonly token: number; readonly revision: number }
+    | { readonly type: 'command'; readonly id: DocumentSemanticCommand; readonly token: number; readonly revision: number }
     | { readonly type: 'confirm-visible'; readonly generation: number; readonly token: string; readonly location?: PlacekeeperLinkLocation }
     | { readonly type: 'settle-close'; readonly token: string };
 export interface ElectronShellBridge {
@@ -20,7 +20,7 @@ export interface ElectronShellBridge {
     readyToSettle(identity: ElectronShellIdentity): Promise<void>;
     documentReady(identity: ElectronShellIdentity, generation: number): Promise<void>;
     visible(identity: ElectronShellIdentity, generation: number, token?: string): Promise<void>;
-    commandSurface(identity: ElectronShellIdentity, revision: number, snapshot: ReviewCommandSurfaceSnapshot): Promise<void>;
+    commandSurface(identity: ElectronShellIdentity, revision: number, snapshot: DocumentCommandSurfaceSnapshot): Promise<void>;
     presentation(identity: ElectronShellIdentity, state: { readonly pageIndex: number; readonly zoom: number }): Promise<void>;
     toolbarHeight(identity: ElectronShellIdentity, height: number): Promise<void>;
     closeSettled(identity: ElectronShellIdentity, token: string, error?: string): Promise<void>;

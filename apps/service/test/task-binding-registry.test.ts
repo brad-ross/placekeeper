@@ -115,9 +115,9 @@ describe("task-scoped PDF binding registry", () => {
 
   it("fails closed for wrong review and generation and for browser-first launch", () => {
     const { registry } = registryFixture();
-    const wrongReview = issue(registry);
+    const wrongDocument = issue(registry);
     expect(registry.claim({
-      bindProof: wrongReview,
+      bindProof: wrongDocument,
       taskSessionId: "task-a",
       reviewSessionId: "review-b",
       documentGeneration: 1,
@@ -184,12 +184,12 @@ describe("task-scoped PDF binding registry", () => {
       documentGeneration: 1,
     }))).not.toContain("task-a");
 
-    const otherReviewProof = issue(registry, {
+    const otherDocumentProof = issue(registry, {
       reviewSessionId: "review-b",
       browserCapability: `${BROWSER_CAPABILITY}-other-review`,
     });
     expect(registry.claim({
-      bindProof: otherReviewProof,
+      bindProof: otherDocumentProof,
       taskSessionId: "task-a",
       reviewSessionId: "review-b",
       documentGeneration: 1,
@@ -549,8 +549,8 @@ describe("in-flight native authority checks", () => {
 });
 
 describe("advisory native reconnect hints", () => {
-  function activateHint(registry: TaskBindingRegistry, task = "task-a", review = "review-a", pdfPath = "/private/tmp/paper.pdf") {
-    const input = { taskSessionId: task, reviewSessionId: review, documentGeneration: 1, browserCapabilityHash: digestSecretHex(`native-${task}`) };
+  function activateHint(registry: TaskBindingRegistry, task = "task-a", documentSession = "review-a", pdfPath = "/private/tmp/paper.pdf") {
+    const input = { taskSessionId: task, reviewSessionId: documentSession, documentGeneration: 1, browserCapabilityHash: digestSecretHex(`native-${task}`) };
     const bindProof = registry.issueBindProof({ ...input, browserCapability: `native-${task}`, native: true });
     expect(registry.claimNative({ ...input, bindProof }).status).toBe("pending");
     expect(registry.rememberNativeReconnect({ ...input, pdfPath })).toBe(false);

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import type { ReviewItem, ReviewItemKind } from '../../../packages/core/src/review-model.js';
+import type { Annotation, AnnotationKind } from '../../../packages/core/src/review-model.js';
 import type { ExistingAnnotation } from '../src/pdf/existing-annotations.js';
 import {
   projectExistingAnnotationReader,
@@ -10,10 +10,10 @@ import {
 } from '../src/review/annotation-reader.js';
 
 function owned(
-  kind: ReviewItemKind,
-  payload: ReviewItem['payload'],
+  kind: AnnotationKind,
+  payload: Annotation['payload'],
   id = `owned-${kind}`,
-): ReviewItem {
+): Annotation {
   return {
     id,
     kind,
@@ -42,7 +42,7 @@ describe('annotation reader complete-content projection', () => {
     ['insert', { proposedText: 'Add this sentence.', quote: 'Source anchor.' }, 'Insertion text'],
     ['highlight', { comment: 'Explain this inference.', quote: 'Highlighted source.' }, 'Comment'],
     ['pageNote', { comment: 'Revisit the structure of this page.', quote: 'Nearby source.' }, 'Page note'],
-  ] satisfies readonly [ReviewItemKind, ReviewItem['payload'], string][]) (
+  ] satisfies readonly [AnnotationKind, Annotation['payload'], string][]) (
     'projects authored %s content without source-text fallback',
     (kind, payload, contentLabel) => {
       const record = projectOwnedAnnotationReader(owned(kind, payload), 'Identification');

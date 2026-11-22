@@ -1,5 +1,5 @@
 import { parseElectronAppControlResponse, type ElectronAppControlMessage, type ElectronAppControlResponse } from "../../../../packages/core/src/electron-app-control-protocol.js";
-import { validElectronReviewHelperResponse, type ElectronReviewHelperMessage, type ElectronReviewHelperResponse } from "../../../../packages/core/src/electron-helper-protocol.js";
+import { validElectronDocumentHelperResponse, type ElectronDocumentHelperMessage, type ElectronDocumentHelperResponse } from "../../../../packages/core/src/electron-helper-protocol.js";
 import { observeIsolatedDaemonStartup } from './daemon-startup-diagnostic.js';
 import { closeWindowsNativeWorker } from "../platform/windows-native-worker.js";
 import { readControlDiscovery } from "../platform/control-transport.js";
@@ -334,11 +334,11 @@ export async function detachChromeRuntimeThroughDaemon(
 export async function electronRuntimeThroughDaemon(
   appInstanceId: string,
   helperId: string,
-  message: ElectronReviewHelperMessage,
+  message: ElectronDocumentHelperMessage,
   signal?: AbortSignal,
   paths = defaultDaemonPaths(),
   inheritedLifecycleToken?: string,
-): Promise<ElectronReviewHelperResponse> {
+): Promise<ElectronDocumentHelperResponse> {
   const request = { kind: "electron-runtime" as const, appInstanceId, helperId, message };
   const response = message.type === "admit" || message.type === "admit-link"
     ? await demandStartedControl(request, paths, signal, inheritedLifecycleToken)
@@ -346,7 +346,7 @@ export async function electronRuntimeThroughDaemon(
         timeoutMs: 10 * 60_000,
         ...(signal === undefined ? {} : { signal }),
       });
-  if (response.kind !== "electron-runtime" || !validElectronReviewHelperResponse(response.response)) {
+  if (response.kind !== "electron-runtime" || !validElectronDocumentHelperResponse(response.response)) {
     throw new DaemonUpgradeRequiredError("malformed");
   }
   return response.response;

@@ -11,8 +11,8 @@ import {
   stat,
 } from "node:fs/promises";
 import { basename, join } from "node:path";
-import { normalizeReviewState, type ReviewState } from "../../../../packages/core/src/review-model.js";
-import { normalizeReviewHistory } from "../../../../packages/core/src/review-history.js";
+import { normalizeDocumentState, type DocumentState } from "../../../../packages/core/src/review-model.js";
+import { normalizeDocumentHistory } from "../../../../packages/core/src/review-history.js";
 import { canonicalSha256 } from "../../../../packages/core/src/live-context.js";
 import type { NativePdfAnnotationIdentityProvenance } from "../../../../packages/core/src/native-pdf-annotation.js";
 import type {
@@ -36,7 +36,7 @@ export interface LegacyRecoverableDraft {
   readonly schemaVersion: 1;
   readonly canonicalSourcePath: string;
   readonly sourceSnapshotPath: string;
-  readonly state: ReviewState;
+  readonly state: DocumentState;
   readonly acknowledgedAt: string;
   readonly lastExportAt?: string;
   readonly acceptedOriginalDigests?: readonly string[];
@@ -91,7 +91,7 @@ export interface RecoverableDraftV2 {
   readonly schemaVersion: 2;
   readonly canonicalSourcePath: string;
   readonly sourceSnapshotPath: string;
-  readonly state: ReviewState;
+  readonly state: DocumentState;
   readonly acknowledgedAt: string;
   readonly lastExportAt?: string;
   readonly acceptedOriginalDigests?: readonly string[];
@@ -131,7 +131,7 @@ export type RecoverableSourceOwnership =
 export interface RecoverableDraftV3 {
   readonly schemaVersion: 3;
   readonly source: RecoverableSourceOwnership;
-  readonly state: ReviewState;
+  readonly state: DocumentState;
   readonly acknowledgedAt: string;
   readonly lastExportAt?: string;
   readonly acceptedOriginalDigests?: readonly string[];
@@ -181,8 +181,8 @@ function serialize(draft: RecoverableDraft): string {
   return JSON.stringify(envelope);
 }
 
-export function reviewStateDigest(
-  state: Pick<ReviewState, "items"> & Partial<Pick<ReviewState, "workflow" | "pendingDrafts" | "discardAudit" | "annotationName">>,
+export function documentStateDigest(
+  state: Pick<DocumentState, "items"> & Partial<Pick<DocumentState, "workflow" | "pendingDrafts" | "discardAudit" | "annotationName">>,
 ): string {
   const ordered = [...state.items].sort((left, right) => left.id.localeCompare(right.id));
   return canonicalSha256({
@@ -195,14 +195,14 @@ export function reviewStateDigest(
 }
 
 export function migrateRecoverableDraft(draft: RecoverableDraft): RecoverableDraftV3 {
-  const previousDigest = reviewStateDigest(draft.state);
-  const normalized = normalizeReviewState(draft.state);
-  const { history, historyCursor, historyBoundary } = normalizeReviewHistory(
+  const previousDigest = documentStateDigest(draft.state);
+  const normalized = normalizeDocumentState(draft.state);
+  const { history, historyCursor, historyBoundary } = normalizeDocumentHistory(
     normalized.history, normalized.historyCursor, normalized.workflow.historyBoundary,
   );
-  const state: ReviewState = { ...normalized, history, historyCursor,
+  const state: DocumentState = { ...normalized, history, historyCursor,
     workflow: { ...normalized.workflow, historyBoundary } };
-  const desiredDigest = reviewStateDigest(state);
+  const desiredDigest = documentStateDigest(state);
   const sync = draft.schemaVersion === 1 ? undefined : {
     ...draft.sync,
     ...(draft.sync.desiredDigest === previousDigest ? { desiredDigest } : {}),

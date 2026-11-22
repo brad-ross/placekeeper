@@ -2,8 +2,8 @@ import { PdfZoomMode } from '@embedpdf/models';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 
-import { createReviewState, type ReviewItem, type ReviewState } from '../../../packages/core/src/review-model.js';
-import { ReviewShell } from '../src/app/ReviewShell.js';
+import { createDocumentState, type Annotation, type DocumentState } from '../../../packages/core/src/review-model.js';
+import { ReaderShell } from '../src/app/ReviewShell.js';
 import { acceptedAuthoringCommandRequiresPersistence } from '../src/app/ProductionReviewApp.js';
 import {
   activeAnnotationShouldDismissForClick,
@@ -33,7 +33,7 @@ import {
   reduceReferenceNavigation,
 } from '../src/review/reference-navigation-state.js';
 
-const item: ReviewItem = {
+const item: Annotation = {
   id: 'note-1',
   kind: 'pageNote',
   pageIndex: 4,
@@ -41,8 +41,8 @@ const item: ReviewItem = {
   updatedAt: '2026-09-17T00:00:00.000Z',
   payload: { comment: 'Frozen draft text' },
 };
-const reviewState: ReviewState = {
-  ...createReviewState({
+const documentState: DocumentState = {
+  ...createDocumentState({
     sessionId: 'reference-authoring',
     source: { fileId: 'paper', digest: 'a'.repeat(64), byteLength: 10 },
   }),
@@ -51,7 +51,7 @@ const reviewState: ReviewState = {
 
 const session = createAuthoringSession({
   token: 1,
-  authority: { sessionId: reviewState.sessionId, sourceIdentity: JSON.stringify(['reference-authoring', 'paper', 'a'.repeat(64)]), documentGeneration: 8 },
+  authority: { sessionId: documentState.sessionId, sourceIdentity: JSON.stringify(['reference-authoring', 'paper', 'a'.repeat(64)]), documentGeneration: 8 },
   source: { kind: 'edit', item },
   origin: {
     kind: 'reader-edit',
@@ -160,7 +160,7 @@ describe('Reference authoring continuity', () => {
   });
 
   it('retains one accepted authoring mutation until its PDF revision is persisted', () => {
-    const next = { ...reviewState, revision: 1 };
+    const next = { ...documentState, revision: 1 };
     const unsettled = {
       destination: { phase: 'active' as const, generation: 1, kind: 'copy' as const, targetPath: '/tmp/review.pdf' },
       sync: { phase: 'not-saved' as const, desiredRevision: 1, savedRevision: 0 },
@@ -184,7 +184,7 @@ describe('Reference authoring continuity', () => {
       session,
       pending,
       currentAuthority: session.authority,
-      items: reviewState.items,
+      items: documentState.items,
       forcedInvalidToken: null,
       persistedRevision: 1,
     })).toBe(true);
@@ -192,7 +192,7 @@ describe('Reference authoring continuity', () => {
       session,
       pending,
       currentAuthority: { ...session.authority, documentGeneration: 9 },
-      items: reviewState.items,
+      items: documentState.items,
       forcedInvalidToken: null,
       persistedRevision: 9,
     })).toBe(false);
@@ -200,14 +200,14 @@ describe('Reference authoring continuity', () => {
       session,
       pending,
       currentAuthority: session.authority,
-      items: reviewState.items,
+      items: documentState.items,
       forcedInvalidToken: session.token,
       persistedRevision: 1,
     })).toBe(false);
   });
 
   it('accepts a protected draft while an unrelated annotation is still saving to the PDF', () => {
-    const next = { ...reviewState, revision: 5 };
+    const next = { ...documentState, revision: 5 };
     const saving = {
       destination: { phase: 'active' as const, generation: 1, kind: 'copy' as const, targetPath: '/tmp/review.pdf' },
       sync: { phase: 'saving' as const, desiredRevision: 4, savedRevision: 3 },
@@ -294,11 +294,11 @@ describe('Reference authoring continuity', () => {
         pageContext: 'Page 5',
       },
     );
-    const html = renderToStaticMarkup(<ReviewShell
-      state={reviewState}
+    const html = renderToStaticMarkup(<ReaderShell
+      state={documentState}
       save={{}}
       selection={{ selectionUpdate: { kind: 'cleared', generation: 0 } }}
-      authoring={{ onCommand: async () => reviewState }}
+      authoring={{ onCommand: async () => documentState }}
       viewer={{}}
       workspace={{ workspaceOpen: true, navigationState }}
       referenceInspection={{
@@ -308,7 +308,7 @@ describe('Reference authoring continuity', () => {
         pageIndex: 4,
         placement: { left: 120, top: 160 },
       }}
-    ><div data-annotation-surface="main">Main document</div></ReviewShell>);
+    ><div data-annotation-surface="main">Main document</div></ReaderShell>);
 
     expect(html).toContain('data-reference-annotation-inspection="7"');
     expect(html).toMatch(
@@ -365,8 +365,8 @@ describe('Reference authoring continuity', () => {
     );
     const renderPageMenu = (surface: { kind: 'main'; documentGeneration: number } | {
       kind: 'reference'; documentGeneration: number; tabIdentity: string;
-    }) => renderToStaticMarkup(<ReviewShell
-      state={reviewState}
+    }) => renderToStaticMarkup(<ReaderShell
+      state={documentState}
       save={{}}
       selection={{ selectionUpdate: { kind: 'cleared', generation: 0 } }}
       authoring={{
@@ -377,11 +377,11 @@ describe('Reference authoring continuity', () => {
           position: { x: 10, y: 20, width: 4, height: 4 },
           surface,
         },
-        onCommand: async () => reviewState,
+        onCommand: async () => documentState,
       }}
       viewer={{}}
       workspace={{ workspaceOpen: true, navigationState }}
-    ><div data-annotation-surface="main">Main document</div></ReviewShell>);
+    ><div data-annotation-surface="main">Main document</div></ReaderShell>);
 
     expect(renderPageMenu({
       kind: 'reference', documentGeneration: 8, tabIdentity: 'tab-1',

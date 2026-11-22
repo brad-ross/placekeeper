@@ -1,14 +1,14 @@
 import {
-  normalizeReviewSelectionAnchor,
-  synchronizeReviewItemAnchor,
-  type ReviewSelectionPageEvidenceV1,
-  type PendingReviewDraftV1,
-  type ReviewAnchorDisposition,
-  type ReviewAnchorEvidenceV1,
-  type ReviewItem,
-  type ReviewState,
+  normalizeDocumentSelectionAnchor,
+  synchronizeAnnotationAnchor,
+  type DocumentSelectionPageEvidenceV1,
+  type PendingDocumentDraftV1,
+  type DocumentAnchorDisposition,
+  type DocumentAnchorEvidenceV1,
+  type Annotation,
+  type DocumentState,
 } from "../../../../packages/core/src/review-model.js";
-import { assertReviewAnchorEvidence } from "../../../../packages/core/src/review-reducer.js";
+import { assertDocumentAnchorEvidence } from "../../../../packages/core/src/review-reducer.js";
 
 export interface PdfAnchorPage {
   readonly pageIndex: number;
@@ -25,8 +25,8 @@ export interface PdfAnchorPage {
 }
 
 interface AnchorResolution {
-  readonly anchor: ReviewAnchorEvidenceV1;
-  readonly disposition: ReviewAnchorDisposition;
+  readonly anchor: DocumentAnchorEvidenceV1;
+  readonly disposition: DocumentAnchorDisposition;
 }
 
 interface SemanticMatch {
@@ -51,7 +51,7 @@ interface DocumentPassageIndex {
   readonly pages: readonly DocumentPageSpan[];
 }
 
-function candidateMatches(anchor: ReviewAnchorEvidenceV1, pages: readonly PdfAnchorPage[]) {
+function candidateMatches(anchor: DocumentAnchorEvidenceV1, pages: readonly PdfAnchorPage[]) {
   const candidates: SemanticMatch[] = [];
   if (anchor.kind === "page" && anchor.nearbyText === undefined) return candidates;
   for (const page of pages) {
@@ -80,7 +80,7 @@ function candidateMatches(anchor: ReviewAnchorEvidenceV1, pages: readonly PdfAnc
   return candidates;
 }
 
-type Rect = ReviewAnchorEvidenceV1["rect"];
+type Rect = DocumentAnchorEvidenceV1["rect"];
 
 function unionRects(rects: readonly Rect[]): Rect | undefined {
   if (rects.length === 0) return undefined;
@@ -138,9 +138,9 @@ function caretGeometry(page: PdfAnchorPage, offset: number): Rect | undefined {
 }
 
 function anchorForMatch(
-  anchor: ReviewAnchorEvidenceV1,
+  anchor: DocumentAnchorEvidenceV1,
   match: SemanticMatch,
-): ReviewAnchorEvidenceV1 | undefined {
+): DocumentAnchorEvidenceV1 | undefined {
   if (anchor.kind === "caret") {
     const rect = caretGeometry(match.page, match.offset + anchor.leftContext.length);
     return rect === undefined ? undefined : { ...anchor, pageIndex: match.page.pageIndex, rect };
@@ -167,10 +167,10 @@ function documentPageSpans(pages: readonly PdfAnchorPage[]): DocumentPassageInde
 }
 
 function crossPagePassageMatches(
-  anchor: Extract<ReviewAnchorEvidenceV1, { readonly kind: "selection" }>,
+  anchor: Extract<DocumentAnchorEvidenceV1, { readonly kind: "selection" }>,
   document: DocumentPassageIndex,
 ): readonly PassageMatch[] {
-  const canonical = normalizeReviewSelectionAnchor(anchor);
+  const canonical = normalizeDocumentSelectionAnchor(anchor);
   const needle = canonical.pages.map(({ quote }) => quote).join("");
   if (needle.length === 0) return [];
   const matches: PassageMatch[] = [];
@@ -191,11 +191,11 @@ function crossPagePassageMatches(
 }
 
 function crossPageAnchorForMatch(
-  anchor: Extract<ReviewAnchorEvidenceV1, { readonly kind: "selection" }>,
+  anchor: Extract<DocumentAnchorEvidenceV1, { readonly kind: "selection" }>,
   match: PassageMatch,
-): Extract<ReviewAnchorEvidenceV1, { readonly kind: "selection" }> | undefined {
-  const canonical = normalizeReviewSelectionAnchor(anchor);
-  const pages: ReviewSelectionPageEvidenceV1[] = [];
+): Extract<DocumentAnchorEvidenceV1, { readonly kind: "selection" }> | undefined {
+  const canonical = normalizeDocumentSelectionAnchor(anchor);
+  const pages: DocumentSelectionPageEvidenceV1[] = [];
   for (const span of match.pages) {
     const overlapStart = Math.max(match.start, span.start);
     const overlapEnd = Math.min(match.end, span.end);
@@ -239,7 +239,7 @@ function crossPageAnchorForMatch(
 }
 
 function reconcilePdfAnchorWithPassageIndex(
-  anchor: ReviewAnchorEvidenceV1,
+  anchor: DocumentAnchorEvidenceV1,
   pages: readonly PdfAnchorPage[],
   generation: number,
   passageIndex?: DocumentPassageIndex,
@@ -253,7 +253,7 @@ function reconcilePdfAnchorWithPassageIndex(
       },
     };
   }
-  if (anchor.kind === "selection" && normalizeReviewSelectionAnchor(anchor).pages.length > 1) {
+  if (anchor.kind === "selection" && normalizeDocumentSelectionAnchor(anchor).pages.length > 1) {
     const matches = crossPagePassageMatches(anchor, passageIndex ?? documentPageSpans(pages));
     if (matches.length === 1) {
       const resolvedAnchor = crossPageAnchorForMatch(anchor, matches[0]!);
@@ -267,7 +267,7 @@ function reconcilePdfAnchorWithPassageIndex(
         };
       }
       try {
-        assertReviewAnchorEvidence(resolvedAnchor);
+        assertDocumentAnchorEvidence(resolvedAnchor);
       } catch {
         return {
           anchor,
@@ -323,7 +323,7 @@ function reconcilePdfAnchorWithPassageIndex(
 }
 
 export function reconcilePdfAnchor(
-  anchor: ReviewAnchorEvidenceV1,
+  anchor: DocumentAnchorEvidenceV1,
   pages: readonly PdfAnchorPage[],
   generation: number,
 ): AnchorResolution {
@@ -331,11 +331,11 @@ export function reconcilePdfAnchor(
 }
 
 function reconcileItem(
-  item: ReviewItem,
+  item: Annotation,
   pages: readonly PdfAnchorPage[],
   generation: number,
   passageIndex?: DocumentPassageIndex,
-): ReviewItem {
+): Annotation {
   if (item.reconciliation === undefined) {
     throw new Error(`Generated-output Review Item ${item.id} lacks canonical anchor state`);
   }
@@ -345,7 +345,7 @@ function reconcileItem(
     generation,
     passageIndex,
   );
-  const synchronized = synchronizeReviewItemAnchor(item, resolved.anchor);
+  const synchronized = synchronizeAnnotationAnchor(item, resolved.anchor);
   return {
     ...synchronized,
     reconciliation: {
@@ -357,11 +357,11 @@ function reconcileItem(
 }
 
 function reconcileDraft(
-  draft: PendingReviewDraftV1,
+  draft: PendingDocumentDraftV1,
   pages: readonly PdfAnchorPage[],
   generation: number,
   passageIndex?: DocumentPassageIndex,
-): PendingReviewDraftV1 {
+): PendingDocumentDraftV1 {
   const resolved = reconcilePdfAnchorWithPassageIndex(
     draft.anchor,
     pages,
@@ -382,15 +382,15 @@ function reconcileDraft(
  * ambiguous anchors preserve predecessor evidence and never inherit geometry
  * from an unrelated match. */
 export function reconcilePdfAnchorState(
-  state: ReviewState,
+  state: DocumentState,
   input: { readonly pages: readonly PdfAnchorPage[]; readonly generation: number },
-): ReviewState {
+): DocumentState {
   const anchors = [
     ...state.items.map((item) => item.reconciliation?.anchor),
     ...state.pendingDrafts.map((draft) => draft.anchor),
   ];
   const needsPassageIndex = anchors.some((anchor) =>
-    anchor?.kind === "selection" && normalizeReviewSelectionAnchor(anchor).pages.length > 1
+    anchor?.kind === "selection" && normalizeDocumentSelectionAnchor(anchor).pages.length > 1
   );
   const passageIndex = needsPassageIndex ? documentPageSpans(input.pages) : undefined;
   const items = state.items.map((item) =>

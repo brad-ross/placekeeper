@@ -1,39 +1,39 @@
-import { isReviewPanelKey } from "../../../packages/core/src/review-runtime-protocol.js";
+import { isDocumentPanelKey } from "../../../packages/core/src/review-runtime-protocol.js";
 
-export interface ReviewBinding {
+export interface DocumentBinding {
   readonly outputPath: string;
   readonly sourceRoot?: string;
 }
 
-export interface ReviewPanelLike {
+export interface DocumentPanelLike {
   viewColumn?: number;
   reveal(viewColumn?: number, preserveFocus?: boolean): void;
   onDidDispose(listener: () => void): { dispose(): unknown };
 }
 
-export interface SerializedReviewPanelState {
+export interface SerializedDocumentPanelState {
   readonly panelKey: string;
 }
 
-export interface ReviewPanelControllerOptions<Panel extends ReviewPanelLike> {
+export interface DocumentPanelControllerOptions<Panel extends DocumentPanelLike> {
   readonly canonicalize: (path: string) => Promise<string>;
-  readonly create: (binding: ReviewBinding, column: "beside") => Promise<Panel>;
+  readonly create: (binding: DocumentBinding, column: "beside") => Promise<Panel>;
   readonly detach?: (canonicalOutputPath: string) => void | Promise<void>;
-  readonly resolvePanelKey?: (panelKey: string) => Promise<ReviewBinding | undefined>;
-  readonly attachRestored?: (panel: Panel, binding: ReviewBinding) => Promise<void>;
+  readonly resolvePanelKey?: (panelKey: string) => Promise<DocumentBinding | undefined>;
+  readonly attachRestored?: (panel: Panel, binding: DocumentBinding) => Promise<void>;
 }
 
 /** Owns the one-panel-per-canonical-output invariant without owning review state. */
-export class ReviewPanelController<Panel extends ReviewPanelLike> {
-  readonly #options: ReviewPanelControllerOptions<Panel>;
+export class DocumentPanelController<Panel extends DocumentPanelLike> {
+  readonly #options: DocumentPanelControllerOptions<Panel>;
   readonly #panels = new Map<string, Panel>();
   readonly #opening = new Map<string, Promise<Panel>>();
 
-  constructor(options: ReviewPanelControllerOptions<Panel>) {
+  constructor(options: DocumentPanelControllerOptions<Panel>) {
     this.#options = options;
   }
 
-  async open(binding: ReviewBinding, options: { readonly preserveFocus?: boolean } = {}): Promise<Panel> {
+  async open(binding: DocumentBinding, options: { readonly preserveFocus?: boolean } = {}): Promise<Panel> {
     const canonicalOutputPath = await this.#options.canonicalize(binding.outputPath);
     const existing = this.#panels.get(canonicalOutputPath);
     if (existing !== undefined) {
@@ -91,8 +91,8 @@ export class ReviewPanelController<Panel extends ReviewPanelLike> {
   }
 }
 
-function parseSerializedPanelState(value: unknown): SerializedReviewPanelState | undefined {
+function parseSerializedPanelState(value: unknown): SerializedDocumentPanelState | undefined {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
   const input = value as Record<string, unknown>;
-  return isReviewPanelKey(input.panelKey) ? { panelKey: input.panelKey } : undefined;
+  return isDocumentPanelKey(input.panelKey) ? { panelKey: input.panelKey } : undefined;
 }

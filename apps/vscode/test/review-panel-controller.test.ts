@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { ReviewPanelController } from "../src/review-panel-controller.js";
+import { DocumentPanelController } from "../src/review-panel-controller.js";
 
 function fakePanel(column = 2) {
   let dispose: (() => void) | undefined;
@@ -17,7 +17,7 @@ function fakePanel(column = 2) {
 describe("review panel controller", () => {
   it("opens beside source once and then reveals the same panel in its current group", async () => {
     const created: ReturnType<typeof fakePanel>[] = [];
-    const controller = new ReviewPanelController({
+    const controller = new DocumentPanelController({
       canonicalize: async (path) => path.toLowerCase(),
       create: vi.fn(async (_binding, column) => {
         expect(column).toBe("beside");
@@ -39,7 +39,7 @@ describe("review panel controller", () => {
   it("keeps different canonical outputs independent and detaches on close", async () => {
     const detach = vi.fn();
     const create = vi.fn(async () => fakePanel());
-    const controller = new ReviewPanelController({ canonicalize: async (path) => path, create, detach });
+    const controller = new DocumentPanelController({ canonicalize: async (path) => path, create, detach });
     const left = await controller.open({ outputPath: "/a/paper.pdf" });
     await controller.open({ outputPath: "/b/paper.pdf" });
     left.close();
@@ -51,7 +51,7 @@ describe("review panel controller", () => {
   it("shares one in-flight panel creation across concurrent opens", async () => {
     const pending = Promise.withResolvers<ReturnType<typeof fakePanel>>();
     const create = vi.fn(() => pending.promise);
-    const controller = new ReviewPanelController({
+    const controller = new DocumentPanelController({
       canonicalize: async (path) => path.toLowerCase(),
       create,
     });
@@ -68,7 +68,7 @@ describe("review panel controller", () => {
 
   it("restores from an opaque panel key through a fresh attachment", async () => {
     const attachRestored = vi.fn(async () => undefined);
-    const controller = new ReviewPanelController({
+    const controller = new DocumentPanelController({
       canonicalize: async (path) => path,
       create: async () => fakePanel(),
       resolvePanelKey: async (key) => key === "opaque-panel-key" ? { outputPath: "/work/paper.pdf" } : undefined,
@@ -82,7 +82,7 @@ describe("review panel controller", () => {
 
   it("fails closed for malformed, unavailable, and rejected restoration state", async () => {
     const attachRestored = vi.fn(async () => { throw new Error("attachment failed"); });
-    const controller = new ReviewPanelController({
+    const controller = new DocumentPanelController({
       canonicalize: async (path) => path,
       create: async () => fakePanel(),
       resolvePanelKey: async (key) => key === "available-panel-key"

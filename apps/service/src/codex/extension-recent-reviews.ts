@@ -5,29 +5,29 @@ import { parseHostResourceRequest, type HostResourceFile } from '../../../../pac
 import { ensurePrivateDirectory, readPrivateFile } from '../platform/private-storage.js';
 import { publishFile, stagePublication, syncPublishedFile } from '../platform/file-publication.js';
 
-export type RecentReviewSource = { kind: 'local'; path: string } | { kind: 'host'; file: HostResourceFile };
-export interface RecentReviewEntry {
+export type RecentDocumentSource = { kind: 'local'; path: string } | { kind: 'host'; file: HostResourceFile };
+export interface RecentDocumentEntry {
   id: string;
   sessionId: string;
   title: string;
-  source: RecentReviewSource;
+  source: RecentDocumentSource;
   page?: number;
   updatedAt: string;
 }
-export type RecentReviewInput = Pick<RecentReviewEntry, 'sessionId' | 'title' | 'source'>;
-type State = { schemaVersion: 1; entries: RecentReviewEntry[] };
+export type RecentDocumentInput = Pick<RecentDocumentEntry, 'sessionId' | 'title' | 'source'>;
+type State = { schemaVersion: 1; entries: RecentDocumentEntry[] };
 const maxEntries = 50;
 const maxBytes = 8 * 1024 * 1024;
 const object = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 const keys = (v: Record<string, unknown>, allowed: string[]) => Object.keys(v).every(key => allowed.includes(key));
 const session = (v: unknown): v is string => typeof v === 'string' && /^[A-Za-z0-9_-]{8,128}$/.test(v);
 const page = (v: unknown): v is number => Number.isSafeInteger(v) && (v as number) > 0 && (v as number) <= 1_000_000;
-function source(v: unknown): v is RecentReviewSource {
+function source(v: unknown): v is RecentDocumentSource {
   if (!object(v)) return false;
   if (v.kind === 'local') return keys(v, ['kind', 'path']) && typeof v.path === 'string' && v.path.length < 32768 && isAbsolute(v.path) && !v.path.includes('\0');
   return v.kind === 'host' && keys(v, ['kind', 'file']) && parseHostResourceRequest({ action: 'host-open', file: v.file }) !== undefined;
 }
-function entry(v: unknown): v is RecentReviewEntry {
+function entry(v: unknown): v is RecentDocumentEntry {
   return object(v) && keys(v, ['id', 'sessionId', 'title', 'source', 'page', 'updatedAt']) &&
     typeof v.id === 'string' && /^[A-Za-z0-9_-]{32}$/.test(v.id) && session(v.sessionId) &&
     typeof v.title === 'string' && v.title.length <= 180 && source(v.source) &&
@@ -36,7 +36,7 @@ function entry(v: unknown): v is RecentReviewEntry {
 }
 
 /** Private reopen hints, not authority: callers must re-admit every selected review. */
-export class ExtensionRecentReviews {
+export class ExtensionRecentDocuments {
   #state: State | undefined;
   #tail: Promise<unknown> = Promise.resolve();
   constructor(readonly root: string, readonly now: () => number = Date.now) { }
@@ -60,7 +60,7 @@ export class ExtensionRecentReviews {
       return this.#state = { schemaVersion: 1, entries: [] };
     }
   }
-  async #save(entries: RecentReviewEntry[]): Promise<void> {
+  async #save(entries: RecentDocumentEntry[]): Promise<void> {
     const next: State = { schemaVersion: 1, entries };
     const bytes = Buffer.from(JSON.stringify(next));
     if (bytes.byteLength > maxBytes) throw Error('Recent review storage is full');
@@ -71,13 +71,13 @@ export class ExtensionRecentReviews {
       this.#state = next;
     } finally { await rm(temporary, { force: true }); }
   }
-  remember(input: RecentReviewInput): Promise<RecentReviewEntry> {
+  remember(input: RecentDocumentInput): Promise<RecentDocumentEntry> {
     // Snapshot inputs before queuing so a caller cannot change a pending write.
     const value = structuredClone(input);
     return this.#serial(async () => {
       if (!object(value) || !keys(value, ['sessionId', 'title', 'source']) || !session(value.sessionId) || typeof value.title !== 'string' || !source(value.source)) throw Error('Invalid recent review');
       const state = await this.#load(), previous = state.entries.find(item => item.sessionId === value.sessionId);
-      const next: RecentReviewEntry = {
+      const next: RecentDocumentEntry = {
         id: previous?.id ?? randomBytes(24).toString('base64url'), sessionId: value.sessionId,
         title: value.title.replace(/[\u0000-\u001f]/g, ' ').slice(0, 180), source: value.source,
         ...(previous?.page === undefined ? {} : { page: previous.page }), updatedAt: new Date(this.now()).toISOString(),
@@ -95,8 +95,8 @@ export class ExtensionRecentReviews {
       await this.#save([next, ...state.entries.filter(item => item.sessionId !== sessionId)]);
     });
   }
-  list(): Promise<RecentReviewEntry[]> { return this.#serial(async () => structuredClone((await this.#load()).entries)); }
-  get(id: string): Promise<RecentReviewEntry | undefined> {
+  list(): Promise<RecentDocumentEntry[]> { return this.#serial(async () => structuredClone((await this.#load()).entries)); }
+  get(id: string): Promise<RecentDocumentEntry | undefined> {
     return this.#serial(async () => structuredClone((await this.#load()).entries.find(item => item.id === id)));
   }
 }

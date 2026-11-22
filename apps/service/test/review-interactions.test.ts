@@ -1,10 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { ReviewInteractions } from "../src/sessions/review-interactions.js";
+import { DocumentInteractions } from "../src/sessions/review-interactions.js";
 
 describe("broker-owned review interactions", () => {
   it("retires disconnected owner indexes without losing reconnect receipts or newer incarnations", async () => {
-    const interactions = new ReviewInteractions({ currentGeneration: () => 1 });
+    const interactions = new DocumentInteractions({ currentGeneration: () => 1 });
     for (let index = 0; index < 20; index++) {
       const attachment = interactions.register("review-a", `native-panel-${index}`);
       interactions.disconnect(attachment.attachmentId, attachment.incarnationId);
@@ -26,7 +26,7 @@ describe("broker-owned review interactions", () => {
 
   it("projects exact authoring draft presence and rejects an active token rebind", async () => {
     const presenceChanged = vi.fn();
-    const interactions = new ReviewInteractions({
+    const interactions = new DocumentInteractions({
       currentGeneration: () => 1,
       onPresenceChange: presenceChanged,
     });
@@ -60,7 +60,7 @@ describe("broker-owned review interactions", () => {
     vi.useFakeTimers();
     try {
       const presenceChanged = vi.fn();
-      const interactions = new ReviewInteractions({
+      const interactions = new DocumentInteractions({
         currentGeneration: () => 1,
         onPresenceChange: presenceChanged,
         reconnectPresenceMs: 2_000,
@@ -90,7 +90,7 @@ describe("broker-owned review interactions", () => {
   it("removes authoring presence only after a finalize commit removes the canonical draft", async () => {
     let canonicalDraftPresent = true;
     const presenceObservations: boolean[] = [];
-    const interactions = new ReviewInteractions({
+    const interactions = new DocumentInteractions({
       currentGeneration: () => 1,
       onPresenceChange: () => presenceObservations.push(canonicalDraftPresent),
     });
@@ -116,7 +116,7 @@ describe("broker-owned review interactions", () => {
   });
 
   it("finalizes a legacy generic hold while keeping exact authoring holds non-rebindable", async () => {
-    const interactions = new ReviewInteractions({ currentGeneration: () => 1 });
+    const interactions = new DocumentInteractions({ currentGeneration: () => 1 });
     const attachment = interactions.register("review-a", "legacy-reconciliation-view");
     await interactions.begin({
       ...attachment,
@@ -150,7 +150,7 @@ describe("broker-owned review interactions", () => {
   it("defers for every attachment until the last explicit release without an inactivity timeout", async () => {
     let generation = 1;
     const wake = vi.fn();
-    const interactions = new ReviewInteractions({
+    const interactions = new DocumentInteractions({
       currentGeneration: () => generation,
       onLastRelease: wake,
     });
@@ -177,7 +177,7 @@ describe("broker-owned review interactions", () => {
   });
 
   it("rejects forged, cross-attachment, revoked, and delayed lifecycle operations", async () => {
-    const interactions = new ReviewInteractions({ currentGeneration: () => 1 });
+    const interactions = new DocumentInteractions({ currentGeneration: () => 1 });
     const current = interactions.register("review-a", "browser-view-a");
     const other = interactions.register("review-a", "browser-view-b");
     await interactions.begin({ ...current, generation: 1, interactionToken: "interaction_current_1", order: 1 });
@@ -196,7 +196,7 @@ describe("broker-owned review interactions", () => {
   });
 
   it("fences a delayed begin after authenticated cleanup reports the hold missing", async () => {
-    const interactions = new ReviewInteractions({
+    const interactions = new DocumentInteractions({
       currentGeneration: () => 1,
       maxTerminalFences: 1,
     });
@@ -230,7 +230,7 @@ describe("broker-owned review interactions", () => {
   });
 
   it("does not let an unauthenticated cleanup fence a live incarnation", async () => {
-    const interactions = new ReviewInteractions({ currentGeneration: () => 1 });
+    const interactions = new DocumentInteractions({ currentGeneration: () => 1 });
     const attachment = interactions.register("review-a", "browser-view-a");
 
     await expect(interactions.release({
@@ -249,7 +249,7 @@ describe("broker-owned review interactions", () => {
 
   it("persists a finalize receipt before releasing and replays it after reconnect", async () => {
     const persisted: unknown[] = [];
-    const interactions = new ReviewInteractions({
+    const interactions = new DocumentInteractions({
       currentGeneration: () => 1,
       persistReceipt: async (receipt) => { persisted.push(receipt); },
       maxPendingReceipts: 1,
@@ -287,7 +287,7 @@ describe("broker-owned review interactions", () => {
       reviewRevision: 999,
     })).resolves.toMatchObject({ status: "unauthorized" });
 
-    const restarted = new ReviewInteractions({ currentGeneration: () => 2 });
+    const restarted = new DocumentInteractions({ currentGeneration: () => 2 });
     restarted.hydrate(persisted as Parameters<typeof restarted.hydrate>[0]);
     const restoredAttachment = restarted.register("review-a", "browser-view-a");
     await expect(restarted.finalize({
@@ -326,7 +326,7 @@ describe("broker-owned review interactions", () => {
   });
 
   it("retains the hold when atomic state-and-receipt persistence fails", async () => {
-    const interactions = new ReviewInteractions({ currentGeneration: () => 1 });
+    const interactions = new DocumentInteractions({ currentGeneration: () => 1 });
     const attachment = interactions.register("review-a", "browser-view-a");
     await interactions.begin({ ...attachment, generation: 1, interactionToken: "interaction_failure_1", order: 1,
       draftId: "draft_failure_1234" });
@@ -347,7 +347,7 @@ describe("broker-owned review interactions", () => {
   });
 
   it("orders active-token terminals independently after attachment admission", async () => {
-    const interactions = new ReviewInteractions({ currentGeneration: () => 1 });
+    const interactions = new DocumentInteractions({ currentGeneration: () => 1 });
     const attachment = interactions.register("review-a", "browser-view-a");
     await expect(interactions.begin({
       ...attachment, generation: 1, interactionToken: "interaction_first_1", order: 1,

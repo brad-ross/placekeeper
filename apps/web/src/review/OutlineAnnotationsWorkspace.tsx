@@ -16,8 +16,8 @@ import { OutlineNavigator } from './OutlineNavigator.js';
 import type { WorkspaceMode } from './reference-navigation-state.js';
 import type { RightWorkspaceMode } from './reference-workspace-layout.js';
 import { WorkspaceModeStrip } from './WorkspaceModeStrip.js';
-import { ReviewIcon } from './ReviewIcon.js';
-import { ReviewTooltipButton } from './ReviewTooltipButton.js';
+import { ReaderIcon } from './ReviewIcon.js';
+import { ReaderTooltipButton } from './ReviewTooltipButton.js';
 
 export interface OutlineAnnotationsWorkspaceProps {
   readonly workspaceRef?: Ref<HTMLElement>;
@@ -199,14 +199,14 @@ export function OutlineAnnotationsWorkspace({
     >
       {headerVariant === 'tools' ? (
         <header className="review-workspace__header">
-          {onHide ? <ReviewTooltipButton
+          {onHide ? <ReaderTooltipButton
             label={hideLabel}
             type="button"
             className="review-workspace__close"
             aria-expanded="true"
             aria-controls="review-tools-workspace"
             onClick={onHide}
-          ><ReviewIcon name={presentation === 'bottom' ? 'chevron-down' : 'chevron-right'} /></ReviewTooltipButton> : null}
+          ><ReaderIcon name={presentation === 'bottom' ? 'chevron-down' : 'chevron-right'} /></ReaderTooltipButton> : null}
           <WorkspaceModeStrip
             modes={toolModes}
             selectedMode={effectiveToolMode}

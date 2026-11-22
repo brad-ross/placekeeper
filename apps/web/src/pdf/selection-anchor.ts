@@ -1,9 +1,9 @@
 import { Rotation, type Position, type Rect, type Size } from '@embedpdf/models';
 import type {
-  ReviewSelectionAnchorV1,
-  ReviewSelectionPageEvidenceV1,
+  DocumentSelectionAnchorV1,
+  DocumentSelectionPageEvidenceV1,
 } from '../../../../packages/core/src/review-model.js';
-import { normalizeReviewSelectionAnchor } from '../../../../packages/core/src/review-model.js';
+import { normalizeDocumentSelectionAnchor } from '../../../../packages/core/src/review-model.js';
 
 import {
   assessPageTextReliability,
@@ -44,7 +44,7 @@ export interface PdfSpaceRect {
   height: number;
 }
 
-export interface SelectionAnchor extends ReviewSelectionAnchorV1 {
+export interface SelectionAnchor extends DocumentSelectionAnchorV1 {
   reliable: true;
 }
 
@@ -191,7 +191,7 @@ export function createSelectionAnchor(input: CreateSelectionAnchorInput): Select
     quoteIndex + input.quote.length + contextCharacters,
   );
   const rect = union(segmentRects);
-  const pageEvidence: ReviewSelectionPageEvidenceV1 = {
+  const pageEvidence: DocumentSelectionPageEvidenceV1 = {
     pageIndex: input.page.pageIndex,
     quote: input.quote,
     prefix,
@@ -237,7 +237,7 @@ export function createSelectionAnchorSpan(
     anchors.push(result.anchor);
   }
   const separator = input.separator ?? '\n';
-  const pageEntries = anchors.map((anchor) => normalizeReviewSelectionAnchor(anchor).pages[0]!);
+  const pageEntries = anchors.map((anchor) => normalizeDocumentSelectionAnchor(anchor).pages[0]!);
   const first = pageEntries[0]!;
   const last = pageEntries.at(-1)!;
   return {

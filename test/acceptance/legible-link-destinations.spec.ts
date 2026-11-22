@@ -7,7 +7,7 @@ import { PDFArray, PDFDict, PDFDocument, PDFName } from "pdf-lib";
 
 import { PlacekeeperHost } from "../../apps/service/src/host/placekeeper-host.js";
 import { addPageNote } from "../../packages/core/src/review-commands.js";
-import { readEditableReviewItems } from "../../packages/pdf-backends/src/embedpdf-adapter.js";
+import { readEditableAnnotations } from "../../packages/pdf-backends/src/embedpdf-adapter.js";
 
 /*
  * Legible link destinations (AE1–AE6) against generated LaTeX-style links
@@ -520,7 +520,7 @@ test("Covers AE6. a banded destination is neither listed as an annotation nor ex
   await dialog.getByRole("button", { name: "Export", exact: true }).click();
   const result = await (await exported).json() as { path: string };
   const bytes = new Uint8Array(await readFile(result.path));
-  const items = await readEditableReviewItems(bytes);
+  const items = await readEditableAnnotations(bytes);
   expect(items).toHaveLength(1);
   expect(items[0]?.kind).toBe("pageNote");
 

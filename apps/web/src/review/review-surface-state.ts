@@ -6,30 +6,30 @@ import {
   type WorkspaceMode,
 } from './reference-navigation-state.js';
 
-export type ReviewBaseSurface = 'reading' | 'workspace';
-export type ReviewNestedLayer = 'none' | 'composer';
-export type ReviewTransientSurface = 'none' | 'selection-actions' | 'insert-action' | 'page-menu' | 'page-note-cursor';
+export type DocumentBaseSurface = 'reading' | 'workspace';
+export type DocumentNestedLayer = 'none' | 'composer';
+export type DocumentTransientSurface = 'none' | 'selection-actions' | 'insert-action' | 'page-menu' | 'page-note-cursor';
 
-export interface ReviewSurfaceState {
-  readonly baseSurface: ReviewBaseSurface;
-  readonly nestedLayer: ReviewNestedLayer;
-  readonly transientSurface: ReviewTransientSurface;
+export interface ReaderSurfaceState {
+  readonly baseSurface: DocumentBaseSurface;
+  readonly nestedLayer: DocumentNestedLayer;
+  readonly transientSurface: DocumentTransientSurface;
   readonly navigation: ReferenceNavigationState;
 }
 
-export type ReviewSurfaceAction =
-  | { readonly type: 'open-base'; readonly surface: ReviewBaseSurface }
+export type ReaderSurfaceAction =
+  | { readonly type: 'open-base'; readonly surface: DocumentBaseSurface }
   | { readonly type: 'open-workspace'; readonly mode?: WorkspaceMode }
   | { readonly type: 'hide-workspace'; readonly focusReturnToken: string }
   | { readonly type: 'reference-navigation'; readonly action: ReferenceNavigationAction }
   | { readonly type: 'replace-document'; readonly documentGeneration: number }
   | { readonly type: 'open-nested' }
   | { readonly type: 'close-nested' }
-  | { readonly type: 'open-transient'; readonly surface: Exclude<ReviewTransientSurface, 'none'> }
+  | { readonly type: 'open-transient'; readonly surface: Exclude<DocumentTransientSurface, 'none'> }
   | { readonly type: 'close-transient' }
   | { readonly type: 'escape' };
 
-export function createReviewSurfaceState(documentGeneration: number): ReviewSurfaceState {
+export function createReaderSurfaceState(documentGeneration: number): ReaderSurfaceState {
   return {
     baseSurface: 'reading',
     nestedLayer: 'none',
@@ -38,14 +38,14 @@ export function createReviewSurfaceState(documentGeneration: number): ReviewSurf
   };
 }
 
-export const INITIAL_REVIEW_SURFACE_STATE: ReviewSurfaceState = Object.freeze(
-  createReviewSurfaceState(0),
+export const INITIAL_READER_SURFACE_STATE: ReaderSurfaceState = Object.freeze(
+  createReaderSurfaceState(0),
 );
 
-export function reduceReviewSurface(
-  state: ReviewSurfaceState,
-  action: ReviewSurfaceAction,
-): ReviewSurfaceState {
+export function reduceReaderSurface(
+  state: ReaderSurfaceState,
+  action: ReaderSurfaceAction,
+): ReaderSurfaceState {
   switch (action.type) {
     case 'open-base':
       return state.baseSurface === action.surface

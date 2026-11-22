@@ -390,7 +390,7 @@ export class ChromeTransferQuota {
   }
 }
 
-export interface ChromeBrowserReviewOpener {
+export interface ChromeBrowserDocumentOpener {
   openLocal(canonicalPath: string, signal?: AbortSignal): Promise<string>;
   openSealed(handle: SealedBrowserSourceHandle, signal?: AbortSignal): Promise<string>;
 }
@@ -398,7 +398,7 @@ export interface ChromeBrowserReviewOpener {
 export interface ChromeHandoffSessionOptions {
   readonly callerOrigin: string;
   readonly store: ChromeTransferStore;
-  readonly opener: ChromeBrowserReviewOpener;
+  readonly opener: ChromeBrowserDocumentOpener;
   readonly quota?: ChromeTransferQuota;
   readonly maxTransferBytes?: number;
   readonly maxDurationMs?: number;
@@ -438,7 +438,7 @@ function validDestination(value: string): boolean {
 
 export class ChromeHandoffSession {
   readonly #store: ChromeTransferStore;
-  readonly #opener: ChromeBrowserReviewOpener;
+  readonly #opener: ChromeBrowserDocumentOpener;
   readonly #quota: ChromeTransferQuota;
   readonly #maxTransferBytes: number;
   readonly #maxDurationMs: number;

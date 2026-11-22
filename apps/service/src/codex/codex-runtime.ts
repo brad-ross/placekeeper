@@ -1,6 +1,6 @@
 import { reconcileNativeSource } from "./reconcile-native-source.js";
-import type { UpgradeReviewStatus } from "../../../../packages/core/src/upgrade-review-protocol.js";
-import { ReviewExportConflictError } from "../../../../packages/core/src/review-runtime-protocol.js";
+import type { UpgradeDocumentStatus } from "../../../../packages/core/src/upgrade-review-protocol.js";
+import { DocumentExportConflictError } from "../../../../packages/core/src/review-runtime-protocol.js";
 import type { NativeQualificationExperiments } from "./native-qualification-experiments.js";
 import type { NativeQualificationObserver } from "./native-qualification.js";
 import { randomBytes } from "node:crypto";
@@ -79,7 +79,7 @@ export class CodexRuntimeManager {
   readonly #panels = new Map<string, Panel>();
   readonly #continuations = new Map<string, Continuation>();
   readonly #resumeReceipts = new Map<string, { requestId: string; generation: number; continuation: Continuation; active: Extract<CodexAppResponse, { status: "active" }>; expiresAtMs: number }>();
-  readonly #upgradeClosures = new Map<string, { attemptId: string; generation: number; capabilityHash: string; taskHash: string; status: UpgradeReviewStatus }>();
+  readonly #upgradeClosures = new Map<string, { attemptId: string; generation: number; capabilityHash: string; taskHash: string; status: UpgradeDocumentStatus }>();
   // A restart ticket cannot revive a detached/expired panel in its issuing process.
   readonly #seenRuntimes = new Map<string, number>();
   readonly #prompts = new Map<string, {
@@ -497,7 +497,7 @@ export class CodexRuntimeManager {
       return Buffer.byteLength(JSON.stringify(response)) <= CODEX_MAX_ENCODED_RESPONSE_BYTES ? response : denied("unavailable");
     } catch (error) {
       if (this.resolveActive(request) === undefined) return denied("revoked");
-      if (request.method === "exportReviewedCopy" && error instanceof ReviewExportConflictError) return { status: "operation-error", reason: "export-conflict" };
+      if (request.method === "exportReviewedCopy" && error instanceof DocumentExportConflictError) return { status: "operation-error", reason: "export-conflict" };
       return denied(error instanceof Error && error.message === "invalid-resource" ? "invalid" : "unavailable");
     }
   }
@@ -858,7 +858,7 @@ export class CodexRuntimeManager {
     return this.#upgradeClosures.size === 0 && this.#launches.size === 0 && [...this.#panels.entries()].every(([id, panel]) => panel.attested && panel.ready && has(`codex:${id}`));
   }
 
-  async closeForUpgrade(status: UpgradeReviewStatus): Promise<void> {
+  async closeForUpgrade(status: UpgradeDocumentStatus): Promise<void> {
     if (status.phase !== 'committed') throw new Error('Global preparation must commit before retiring task authority');
     this.#continuations.clear();
     this.#resumeReceipts.clear();

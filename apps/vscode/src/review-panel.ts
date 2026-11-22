@@ -1,4 +1,4 @@
-import { isReviewPanelKey } from "../../../packages/core/src/review-runtime-protocol.js";
+import { isDocumentPanelKey } from "../../../packages/core/src/review-runtime-protocol.js";
 import type { LaunchErrorPresentation } from "./local-workspace.js";
 
 export interface SuccessfulLaunch {
@@ -33,7 +33,7 @@ export interface RecoveryLaunch {
 
 export interface FailedLaunch { readonly ok: false; readonly error: LaunchErrorPresentation }
 
-export function reviewPanelOptions(localResourceRoots: readonly unknown[]) {
+export function documentPanelOptions(localResourceRoots: readonly unknown[]) {
   return Object.freeze({ enableScripts: true, retainContextWhenHidden: false, localResourceRoots });
 }
 
@@ -83,7 +83,7 @@ function escapeHtml(value: string): string {
   return value.replaceAll("&", "&amp;").replaceAll('"', "&quot;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 }
 
-export interface ReviewWebviewHtmlOptions {
+export interface DocumentWebviewHtmlOptions {
   readonly nonce: string;
   readonly panelId: string;
   readonly panelKey?: string;
@@ -120,10 +120,10 @@ export function parseSharedAssetManifest(value: unknown): SharedAssetManifest {
   return candidate as SharedAssetManifest;
 }
 
-export function buildReviewWebviewHtml(options: ReviewWebviewHtmlOptions): string {
+export function buildDocumentWebviewHtml(options: DocumentWebviewHtmlOptions): string {
   if (!/^[A-Za-z0-9_-]{8,128}$/u.test(options.nonce)) throw new Error("A safe nonce is required");
   if (!/^[A-Za-z0-9_-]{16,128}$/u.test(options.panelId)) throw new Error("A safe panel identity is required");
-  if (options.panelKey !== undefined && !isReviewPanelKey(options.panelKey)) {
+  if (options.panelKey !== undefined && !isDocumentPanelKey(options.panelKey)) {
     throw new Error("A safe panel key is required");
   }
   const extensionResource = (uri: string) => uri.startsWith("vscode-webview://") ||
@@ -163,7 +163,7 @@ await app.startVscode({ panelId: ${panelId}, vscode${panelKey === undefined ? ""
 }
 
 /** A self-contained, inert fallback for a serialized panel that cannot reconnect. */
-export function buildReviewPanelReattachmentHtml(): string {
+export function buildDocumentPanelReattachmentHtml(): string {
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline';">

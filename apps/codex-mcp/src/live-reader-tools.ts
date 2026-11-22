@@ -1,4 +1,4 @@
-import type { ReviewAgentActions, ReviewAgentBridge, ReviewAgentTarget } from '../../web/src/host/review-agent-bridge.js';
+import type { DocumentAgentActions, DocumentAgentBridge, DocumentAgentTarget } from '../../web/src/host/review-agent-bridge.js';
 
 /** The document-scoped WebMCP surface exercised by the installed host probe. */
 export interface DocumentModelContext {
@@ -36,8 +36,8 @@ function registrationFailureName(error: unknown): NonNullable<RegistrationDiagno
   } catch { return 'Other'; }
 }
 
-export class LiveReaderTools implements ReviewAgentBridge {
-  #actions: ReviewAgentActions | undefined;
+export class LiveReaderTools implements DocumentAgentBridge {
+  #actions: DocumentAgentActions | undefined;
   #disposed = false;
   readonly #diagnostic: RegistrationDiagnostic;
   readonly #registry: ToolRegistry | undefined;
@@ -75,7 +75,7 @@ export class LiveReaderTools implements ReviewAgentBridge {
   }
   get diagnostic(): Readonly<RegistrationDiagnostic> { return { ...this.#diagnostic }; }
   get supported() { return this.#registered.length === 5 && !this.#disposed; }
-  attach(actions: ReviewAgentActions) { if (this.#disposed) return () => {}; this.#actions = actions; return () => { if (this.#actions === actions) this.#actions = undefined; }; }
+  attach(actions: DocumentAgentActions) { if (this.#disposed) return () => {}; this.#actions = actions; return () => { if (this.#actions === actions) this.#actions = undefined; }; }
   dispose() {
     this.#disposed = true;
     this.#actions = undefined;
@@ -113,7 +113,7 @@ export class LiveReaderTools implements ReviewAgentBridge {
         const result = await actions.search(args.query);
         return current() && result.documentGeneration === snapshot.documentGeneration ? JSON.stringify({ ...result, source: snapshot.source }) : fail();
       }
-      let target: ReviewAgentTarget;
+      let target: DocumentAgentTarget;
       if (name === 'navigate_page') {
         if (!integer(args.page) || args.page < 1 || args.page > snapshot.pageCount) return fail('out-of-range-page');
         target = { page: args.page, documentGeneration: args.documentGeneration };

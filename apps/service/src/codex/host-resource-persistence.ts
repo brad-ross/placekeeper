@@ -7,7 +7,7 @@ import { writePrivateFile, readPrivateFile, readPrivateFileRange } from '../plat
 import { publishFile, stagePublication, syncPublishedFile } from '../platform/file-publication.js';
 import type { SessionBroker } from '../sessions/session-broker.js';
 import type { PdfSaveCoordinator } from '../saving/pdf-save-coordinator.js';
-import type { OpenReviewResult } from '../sessions/session-contracts.js';
+import type { OpenDocumentResult } from '../sessions/session-contracts.js';
 const secret = () => randomBytes(32).toString('base64url');
 type Begin = Extract<HostResourceRequest, {
     operation: 'begin';
@@ -131,7 +131,7 @@ export class HostResourcePersistence {
         return await this.broker.findHostCopyRecovery(match, this.#isCopyRecoveryHost) === match.sessionId;
     }
     async finish(transfer: string): Promise<{
-        opened: OpenReviewResult;
+        opened: OpenDocumentResult;
         file?: HostResourceFile;
     } | { copyRecovery: HostCopyRecoveryMatch } | HostResourceResult> {
         const t = this.#transfers.get(transfer);
@@ -224,7 +224,7 @@ export class HostResourcePersistence {
             await rm(t.path, { force: true });
         }
     }
-    async fork(id: string, expectedDigest?: string): Promise<OpenReviewResult> {
+    async fork(id: string, expectedDigest?: string): Promise<OpenDocumentResult> {
         const state = await this.state(id), activeBytes = await this.broker.documentBytes(id), scope = await this.broker.sessionScope(id);
         const recoveryPath = activeBytes ? undefined : await this.broker.importedRecoveryPath(id);
         const bytes = activeBytes ?? (recoveryPath ? await readPrivateFile(recoveryPath, HOST_RESOURCE_MAX_BYTES) : undefined);

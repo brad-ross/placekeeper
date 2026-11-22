@@ -1,5 +1,5 @@
 import { nativePdfAnnotationSubtype, canEditPdfAnnotationComment } from '../../../../packages/core/src/native-pdf-annotation.js';
-import type { ReviewItem } from '../../../../packages/core/src/review-model.js';
+import type { Annotation } from '../../../../packages/core/src/review-model.js';
 import {
   existingAnnotationKey,
   type ExistingAnnotation,
@@ -7,7 +7,7 @@ import {
 } from '../pdf/existing-annotations.js';
 import { annotationKindLabel } from './AnnotationMetadata.js';
 import { annotationContent, existingAnnotationContent, type AnnotationContent } from './annotation-content.js';
-import { reviewItemPageRange } from './annotation-projection.js';
+import { annotationPageRange } from './annotation-projection.js';
 
 export type AnnotationReaderIdentity =
   | {
@@ -60,7 +60,7 @@ function nonBlankString(value: unknown): string | null {
   return typeof value === 'string' && value.trim().length > 0 ? value : null;
 }
 
-function ownedContentLabel(kind: ReviewItem['kind']): OwnedAnnotationReaderRecord['contentLabel'] {
+function ownedContentLabel(kind: Annotation['kind']): OwnedAnnotationReaderRecord['contentLabel'] {
   switch (kind) {
     case 'replace': return 'Replacement text';
     case 'insert': return 'Insertion text';
@@ -72,13 +72,13 @@ function ownedContentLabel(kind: ReviewItem['kind']): OwnedAnnotationReaderRecor
 }
 
 export function projectOwnedAnnotationReader(
-  item: ReviewItem,
+  item: Annotation,
   sectionLabel?: string,
 ): OwnedAnnotationReaderRecord | null {
   const presentation = annotationContent(item);
   if (![presentation.content, presentation.sourceText, presentation.quoteText].some(nonBlankString)) return null;
   const visibleSectionLabel = nonBlankString(sectionLabel);
-  const { firstPageIndex, lastPageIndex } = reviewItemPageRange(item);
+  const { firstPageIndex, lastPageIndex } = annotationPageRange(item);
 
   return {
     identity: { origin: 'owned', itemId: item.id },
@@ -133,7 +133,7 @@ export function projectExistingAnnotationReader(
 }
 
 export interface AnnotationReaderSources {
-  readonly ownedItems: readonly ReviewItem[];
+  readonly ownedItems: readonly Annotation[];
   readonly existingAnnotations: ExistingAnnotationsDiscovery;
   readonly documentGeneration: number;
   readonly ownedSectionLabels?: ReadonlyMap<string, string>;

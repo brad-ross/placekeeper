@@ -24,8 +24,8 @@ export function protectNativeScrollbarBacking(scrollport: HTMLElement): void {
   }
 }
 
-export const REVIEW_OVERLAY_INSET = 12;
-export const REVIEW_OVERLAY_FADE_SIZE = 12;
+export const READER_OVERLAY_INSET = 12;
+export const READER_OVERLAY_FADE_SIZE = 12;
 
 interface RectLike {
   readonly left: number;
@@ -47,7 +47,7 @@ interface ScrollportLike {
   readonly scrollTop: number;
 }
 
-export interface ReviewOverlayGeometry {
+export interface ReaderOverlayGeometry {
   readonly rightStart: number | null;
   readonly bottomStart: number | null;
   readonly outsideInset: number;
@@ -58,7 +58,7 @@ export interface ReviewOverlayGeometry {
   readonly fadeBottom: boolean;
 }
 
-export function measureReviewOverlayGeometry(input: {
+export function measureReaderOverlayGeometry(input: {
   readonly stage: RectLike;
   readonly surfaces: readonly {
     readonly open: boolean;
@@ -66,24 +66,24 @@ export function measureReviewOverlayGeometry(input: {
     readonly bounds: RectLike;
   }[];
   readonly scrollport?: ScrollportLike | null;
-}): ReviewOverlayGeometry {
+}): ReaderOverlayGeometry {
   const scrollbarWidth = input.scrollport === null || input.scrollport === undefined
     ? 0
     : Math.max(0, input.scrollport.offsetWidth - input.scrollport.clientWidth);
   const scrollbarHeight = input.scrollport === null || input.scrollport === undefined
     ? 0
     : Math.max(0, input.scrollport.offsetHeight - input.scrollport.clientHeight);
-  const outsideInset = Math.max(REVIEW_OVERLAY_INSET, scrollbarWidth, scrollbarHeight);
+  const outsideInset = Math.max(READER_OVERLAY_INSET, scrollbarWidth, scrollbarHeight);
   let rightStart: number | null = null;
   let bottomStart: number | null = null;
 
   for (const surface of input.surfaces) {
     if (!surface.open || surface.bounds.width <= 0 || surface.bounds.height <= 0) continue;
     if (surface.presentation === 'right') {
-      const start = Math.max(0, surface.bounds.left - input.stage.left - REVIEW_OVERLAY_INSET);
+      const start = Math.max(0, surface.bounds.left - input.stage.left - READER_OVERLAY_INSET);
       rightStart = rightStart === null ? start : Math.min(rightStart, start);
     } else {
-      const start = Math.max(0, surface.bounds.top - input.stage.top - REVIEW_OVERLAY_INSET);
+      const start = Math.max(0, surface.bounds.top - input.stage.top - READER_OVERLAY_INSET);
       bottomStart = bottomStart === null ? start : Math.min(bottomStart, start);
     }
   }
@@ -108,10 +108,10 @@ export function measureReviewOverlayGeometry(input: {
   };
 }
 
-const EMPTY_GEOMETRY: ReviewOverlayGeometry = {
+const EMPTY_GEOMETRY: ReaderOverlayGeometry = {
   rightStart: null,
   bottomStart: null,
-  outsideInset: REVIEW_OVERLAY_INSET,
+  outsideInset: READER_OVERLAY_INSET,
   scrollbarWidth: 0,
   scrollbarHeight: 0,
   fadeTop: false,
@@ -119,19 +119,19 @@ const EMPTY_GEOMETRY: ReviewOverlayGeometry = {
   fadeBottom: false,
 };
 
-function sameGeometry(left: ReviewOverlayGeometry, right: ReviewOverlayGeometry): boolean {
+function sameGeometry(left: ReaderOverlayGeometry, right: ReaderOverlayGeometry): boolean {
   return Object.keys(left).every((key) => (
-    left[key as keyof ReviewOverlayGeometry] === right[key as keyof ReviewOverlayGeometry]
+    left[key as keyof ReaderOverlayGeometry] === right[key as keyof ReaderOverlayGeometry]
   ));
 }
 
-export function useReviewOverlayGeometry(input: {
+export function useReaderOverlayGeometry(input: {
   readonly stageRef: RefObject<HTMLElement | null>;
   readonly surfaceRefs: readonly RefObject<HTMLElement | null>[];
   readonly layoutGeneration: string | number;
   readonly isFitToWidth?: () => boolean;
 }): {
-  readonly geometry: ReviewOverlayGeometry;
+  readonly geometry: ReaderOverlayGeometry;
   readonly fitWidthCurrent: boolean;
   readonly horizontalScrollAvailable: boolean;
   readonly style: CSSProperties;
@@ -139,7 +139,7 @@ export function useReviewOverlayGeometry(input: {
   const fitQuery = useRef(input.isFitToWidth);
   fitQuery.current = input.isFitToWidth;
   const [zoomActions, setZoomActions] = useState({ fitWidthCurrent: false, horizontalScrollAvailable: false });
-  const [geometry, setGeometry] = useState<ReviewOverlayGeometry>(EMPTY_GEOMETRY);
+  const [geometry, setGeometry] = useState<ReaderOverlayGeometry>(EMPTY_GEOMETRY);
 
   useLayoutEffect(() => {
     const stage = input.stageRef.current;
@@ -163,7 +163,7 @@ export function useReviewOverlayGeometry(input: {
         }
         if (scrollport !== null) protectNativeScrollbarBacking(scrollport);
         const stageBounds = stage.getBoundingClientRect();
-        const next = measureReviewOverlayGeometry({
+        const next = measureReaderOverlayGeometry({
           stage: stageBounds,
           surfaces: currentSurfaces().map((surface) => ({
             open: surface.dataset.workspaceOpen === 'true'
@@ -243,7 +243,7 @@ export function useReviewOverlayGeometry(input: {
       '--review-overlay-inset': `${geometry.outsideInset}px`,
       '--review-main-scrollbar-width': `${geometry.scrollbarWidth}px`,
       '--review-main-scrollbar-height': `${geometry.scrollbarHeight}px`,
-      '--review-overlay-fade-size': `${REVIEW_OVERLAY_FADE_SIZE}px`,
+      '--review-overlay-fade-size': `${READER_OVERLAY_FADE_SIZE}px`,
       ...(geometry.rightStart === null
         ? {}
         : { '--review-overlay-right-start': `${geometry.rightStart}px` }),

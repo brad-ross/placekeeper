@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import type { ReviewAnnotation } from '../../../packages/core/src/pdf-writer.js';
+import type { PdfWriterAnnotation } from '../../../packages/core/src/pdf-writer.js';
 import {
   OwnedMarkPointerGesture,
   ScopedOwnedMarkPointerGesture,
@@ -13,7 +13,7 @@ const timestamp = '2026-08-08T00:00:00.000Z';
 function annotation(
   id: string,
   rects: readonly { x: number; y: number; width: number; height: number }[],
-): ReviewAnnotation {
+): PdfWriterAnnotation {
   return {
     id,
     kind: 'highlight',
@@ -40,7 +40,7 @@ describe('owned mark page-space hit testing', () => {
         reviewItemId: 'logical-item',
         pageIndex: 2,
       },
-    ] as readonly ReviewAnnotation[];
+    ] as readonly PdfWriterAnnotation[];
 
     const firstPage = groupOwnedMarkGeometry([projections[0]!]);
     const secondPage = groupOwnedMarkGeometry([projections[1]!]);

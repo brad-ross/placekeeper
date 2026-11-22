@@ -6,7 +6,7 @@ import { HostResourceAdapter } from '../src/host-resource-adapter.js';
 import { EXTENSION_META_KEY } from '../../../packages/core/src/extension-protocol.js';
 const host = vi.hoisted(() => ({ options: [] as any[], mounts: [] as any[], unmount: vi.fn(), onMount: undefined as (() => void) | undefined }));
 vi.mock('../../web/src/host/codex-runtime.js', () => ({ createCodexHostRuntime: (options: any) => { host.options.push(options); return options; } }));
-vi.mock('../../web/src/codex-entry.js', () => ({ mountCodexProductionReview: (...args: any[]) => { host.mounts.push(args); host.onMount?.(); return host.unmount; } }));
+vi.mock('../../web/src/codex-entry.js', () => ({ mountCodexProductionDocument: (...args: any[]) => { host.mounts.push(args); host.onMount?.(); return host.unmount; } }));
 const grant = 'a'.repeat(43), nextGrant = 'b'.repeat(43);
 const active = (g = grant) => ({ status: 'active', grant: g, presentation: { status: 'active', runtimeId: 'runtime_123', attemptId: 'attempt_123', generation: 1, presentationCapability: 'c'.repeat(43), reconnectTicket: 'd'.repeat(43) } });
 const reply = (value: unknown) => ({ _meta: { [EXTENSION_META_KEY]: value } });

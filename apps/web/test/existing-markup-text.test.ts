@@ -9,7 +9,7 @@ import { inventoryDocumentAnnotations } from '../src/pdf/existing-annotations.js
 import { markedTextFromGlyphs } from '../src/pdf/markup-text.js';
 import { annotationContent, existingAnnotationContent, withImportedMarkedText } from '../src/review/annotation-content.js';
 import { importedMarkedTextBySourceObject } from '../src/pdf/existing-annotations.js';
-import type { ReviewItem } from '../../../packages/core/src/review-model.js';
+import type { Annotation } from '../../../packages/core/src/review-model.js';
 import { projectExistingAnnotationReader } from '../src/review/annotation-reader.js';
 
 const LINE_ONE = 'The design compares outcomes within narrowly defined markets.';
@@ -169,7 +169,7 @@ describe('markedTextFromGlyphs', () => {
 });
 
 describe('highlights imported as editable annotations', () => {
-  const imported: ReviewItem = {
+  const imported: Annotation = {
     id: 'native-1', kind: 'pdfAnnotation', pageIndex: 0, createdAt: '', updatedAt: '',
     payload: {
       position: { x: 0, y: 0, width: 10, height: 10 },

@@ -1,15 +1,15 @@
 import type { SaveStatus } from "../../../../packages/core/src/save-status.js";
-import type { ReviewCommand, ReviewStateView } from "../../../../packages/core/src/review-model.js";
+import type { DocumentCommand, DocumentStateView } from "../../../../packages/core/src/review-model.js";
 
 export type SaveGatedCommand =
-  | { readonly kind: "submit"; readonly command: ReviewCommand }
-  | { readonly kind: "submit-and-choose-destination"; readonly command: ReviewCommand }
-  | { readonly kind: "choose-destination"; readonly pending: ReviewCommand };
+  | { readonly kind: "submit"; readonly command: DocumentCommand }
+  | { readonly kind: "submit-and-choose-destination"; readonly command: DocumentCommand }
+  | { readonly kind: "choose-destination"; readonly pending: DocumentCommand };
 
-export function gateReviewCommand(
-  state: Pick<ReviewStateView, "workflow">,
+export function gateDocumentCommand(
+  state: Pick<DocumentStateView, "workflow">,
   status: SaveStatus,
-  command: ReviewCommand,
+  command: DocumentCommand,
   sourceDisposition: "local" | "remote-temporary" | "ephemeral" = "local",
 ): SaveGatedCommand {
   if (state.workflow.mode === "generated-output" || sourceDisposition === "ephemeral") {
@@ -24,8 +24,8 @@ export function gateReviewCommand(
 /** Save completion can advance without a review revision. Only adopt it for
  * the current document, and never replace newer locally observed progress. */
 export function canonicalSaveStatusCanApply(
-  currentState: ReviewStateView,
-  canonicalState: ReviewStateView,
+  currentState: DocumentStateView,
+  canonicalState: DocumentStateView,
   currentStatus: SaveStatus,
   canonicalStatus: SaveStatus,
 ): boolean {

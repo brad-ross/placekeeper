@@ -2,21 +2,21 @@ import { randomUUID } from "node:crypto";
 
 import {
   createAtomicLiveContextObservation,
-  createReviewSnapshot,
-  createReviewStateSummary,
+  createDocumentSnapshot,
+  createDocumentStateSummary,
   createUnavailableLiveContextObservation,
-  diffReviewSnapshots,
+  diffDocumentSnapshots,
   type ExistingPdfAnnotation,
   type LiveContextRefreshResult,
   type LiveSaveStatus,
-  type ReviewSnapshot,
+  type DocumentSnapshot,
 } from "../../../../packages/core/src/live-context.js";
 import type { SourceHint } from "../../../../packages/core/src/structured-review-item.js";
 import {
-  anchorEvidenceFromReviewItem,
-  normalizeReviewSelectionAnchor,
+  anchorEvidenceFromAnnotation,
+  normalizeDocumentSelectionAnchor,
   type JsonValue,
-  type ReviewItem,
+  type Annotation,
 } from "../../../../packages/core/src/review-model.js";
 import { portableAnnotationProjectionId } from "../../../../packages/core/src/grouped-annotation-envelope.js";
 import { isNavigationalPdfAnnotationSubtype } from "../../../../packages/core/src/pdf-annotation-classification.js";
@@ -52,13 +52,13 @@ type AtomicRefreshProjection =
   | {
       readonly status: "projected";
       readonly observation: Extract<LiveContextRefreshResult, { status: "current" }>;
-      readonly snapshot: ReviewSnapshot;
+      readonly snapshot: DocumentSnapshot;
     };
 
 interface TaskObservationCursor {
   readonly reviewSessionId: string;
   readonly documentGeneration: number;
-  readonly snapshot: ReviewSnapshot;
+  readonly snapshot: DocumentSnapshot;
 }
 
 interface CachedPdfInspection {
@@ -151,18 +151,18 @@ export async function inspectLivePdf(
 ): Promise<LivePdfInspection> {
   const inspected = await inspectPdfAnnotationCatalogWithEmbedPdf(snapshot.sourceBytes);
   const ownedIds = new Set(inspected.portableItems.flatMap((item) => {
-    const anchor = anchorEvidenceFromReviewItem(item);
+    const anchor = anchorEvidenceFromAnnotation(item);
     const projectionCount = anchor.kind === "selection"
-      ? normalizeReviewSelectionAnchor(anchor).pages.length
+      ? normalizeDocumentSelectionAnchor(anchor).pages.length
       : 1;
     return Array.from({ length: projectionCount }, (_, projectionIndex) =>
       portableAnnotationProjectionId(item.id, projectionIndex, projectionCount));
   }));
   for (const { annotationId } of inspected.nativeAnnotations ?? []) ownedIds.add(annotationId);
-  const reviewerAnnotations = inspected.annotations.filter(
+  const readerAnnotations = inspected.annotations.filter(
     ({ id, subtype }) => !ownedIds.has(id) && !isNavigationalPdfAnnotationSubtype(subtype) && !["popup", "widget", "xfawidget"].includes(subtype.toLowerCase()),
   );
-  const existingAnnotations = reviewerAnnotations
+  const existingAnnotations = readerAnnotations
     .map((annotation): ExistingPdfAnnotation => {
       const segmentRects = annotation.segmentRects?.map(toRect);
       const metadata = metadataValue({
@@ -189,7 +189,7 @@ export async function inspectLivePdf(
   return {
     pageCount: inspected.pageCount,
     existingAnnotations,
-    warnings: reviewerAnnotations.some(({ hasNormalAppearance }) => !hasNormalAppearance)
+    warnings: readerAnnotations.some(({ hasNormalAppearance }) => !hasNormalAppearance)
       ? ["Some Existing PDF Annotations do not define a normal appearance stream."]
       : [],
     sourceHints: new Map(),
@@ -243,13 +243,13 @@ export class LiveContextService {
     this.evidence = options.evidence ?? new PdfEvidenceService({
       bindings: options.broker.taskBindings,
       now: this.#now,
-      loadSource: async (reviewSessionId, expected) =>
-        options.broker.loadVerifiedSourceSnapshot(reviewSessionId, expected),
+      loadSource: async (documentSessionId, expected) =>
+        options.broker.loadVerifiedSourceSnapshot(documentSessionId, expected),
     });
     options.broker.onSessionEnd((sessionId) => this.discardSession(sessionId));
   }
 
-  discardTask(taskSessionId: string, reviewSessionId?: string): void {
+  discardTask(taskSessionId: string, documentSessionId?: string): void {
     const observed = this.#observedByTask.get(taskSessionId);
     const pending = this.#pendingDeliveriesByTask.get(taskSessionId)?.values().next().value as
       | TaskObservationCursor
@@ -257,24 +257,24 @@ export class LiveContextService {
     this.#observedByTask.delete(taskSessionId);
     this.#pendingDeliveriesByTask.delete(taskSessionId);
     this.evidence.revokeTask(taskSessionId);
-    const sessionId = observed?.reviewSessionId ?? pending?.reviewSessionId ?? reviewSessionId;
+    const sessionId = observed?.reviewSessionId ?? pending?.reviewSessionId ?? documentSessionId;
     if (sessionId !== undefined) this.#discardSessionCaches(sessionId);
   }
 
-  discardSession(reviewSessionId: string): void {
+  discardSession(documentSessionId: string): void {
     for (const [taskSessionId, observed] of this.#observedByTask) {
-      if (observed.reviewSessionId === reviewSessionId) {
+      if (observed.reviewSessionId === documentSessionId) {
         this.#observedByTask.delete(taskSessionId);
         this.#pendingDeliveriesByTask.delete(taskSessionId);
       }
     }
     for (const [taskSessionId, deliveries] of this.#pendingDeliveriesByTask) {
-      if ([...deliveries.values()].some((delivery) => delivery.reviewSessionId === reviewSessionId)) {
+      if ([...deliveries.values()].some((delivery) => delivery.reviewSessionId === documentSessionId)) {
         this.#pendingDeliveriesByTask.delete(taskSessionId);
       }
     }
-    this.evidence.revokeSession(reviewSessionId);
-    this.#discardSessionCaches(reviewSessionId);
+    this.evidence.revokeSession(documentSessionId);
+    this.#discardSessionCaches(documentSessionId);
   }
 
   discardAll(): void {
@@ -347,7 +347,7 @@ export class LiveContextService {
         const currentSnapshot = await this.#broker.snapshotAtomicSession(binding.reviewSessionId);
         if (currentSnapshot === undefined) break;
         if (!this.#samePublishableState(snapshot, currentSnapshot)) continue;
-        const current = createReviewSnapshot({
+        const current = createDocumentSnapshot({
           cursor: this.#cursor(),
           revision: snapshot.state.revision,
           items: snapshot.state.items,
@@ -367,7 +367,7 @@ export class LiveContextService {
         const diffPrevious = previous ?? (input.cursor === undefined
           ? undefined
           : { ...current, cursor: input.cursor });
-        const reviewItems = diffReviewSnapshots({
+        const annotations = diffDocumentSnapshots({
           current,
           ...(diffPrevious === undefined ? {} : { previous: diffPrevious }),
           cursorStatus,
@@ -379,19 +379,19 @@ export class LiveContextService {
           sourceByteLength: snapshot.sourceByteLength,
           existingAnnotations: inspection.existingAnnotations,
           reviewItems: current.items,
-          reviewChanges: reviewItems,
+          reviewChanges: annotations,
         });
         const observation = createAtomicLiveContextObservation({
           observedAt: checkedAt,
           identity,
           saveStatus: liveSaveStatus(snapshot),
-          reviewItems,
+          reviewItems: annotations,
           existingPdfAnnotations: {
             items: inspection.existingAnnotations,
             warnings: inspection.warnings,
           },
           evidence: catalog,
-          reviewState: createReviewStateSummary(snapshot.state),
+          reviewState: createDocumentStateSummary(snapshot.state),
         });
         projected = { status: "projected", observation, snapshot: current };
         break;
@@ -469,7 +469,7 @@ export class LiveContextService {
     }
     const hints = new Map(staticHints);
     const currentKeys = new Set<string>();
-    const missing: Array<{ readonly item: ReviewItem; readonly key: string }> = [];
+    const missing: Array<{ readonly item: Annotation; readonly key: string }> = [];
     for (const item of snapshot.state.items) {
       const key = this.#sourceHintKey(snapshot, item);
       currentKeys.add(key);
@@ -500,7 +500,7 @@ export class LiveContextService {
     return hints;
   }
 
-  #sourceHintKey(snapshot: AtomicSessionProjection, item: ReviewItem): string {
+  #sourceHintKey(snapshot: AtomicSessionProjection, item: Annotation): string {
     const geometry = item.payload[
       item.kind === "insert" || item.kind === "pageNote" || item.kind === "pdfAnnotation" ? "position" : "rect"
     ];
@@ -516,14 +516,14 @@ export class LiveContextService {
     ]);
   }
 
-  #discardSessionCaches(reviewSessionId: string): void {
-    this.#pdfInspectionBySession.delete(reviewSessionId);
-    this.#discardSourceHints(reviewSessionId);
+  #discardSessionCaches(documentSessionId: string): void {
+    this.#pdfInspectionBySession.delete(documentSessionId);
+    this.#discardSourceHints(documentSessionId);
   }
 
-  #discardSourceHints(reviewSessionId: string): void {
+  #discardSourceHints(documentSessionId: string): void {
     for (const [key, cached] of this.#sourceHints) {
-      if (cached.reviewSessionId === reviewSessionId) this.#sourceHints.delete(key);
+      if (cached.reviewSessionId === documentSessionId) this.#sourceHints.delete(key);
     }
   }
 
@@ -548,8 +548,8 @@ export class LiveContextService {
     before: AtomicSessionProjection,
     after: AtomicSessionProjection,
   ): boolean {
-    const beforeSummary = createReviewStateSummary(before.state);
-    const afterSummary = createReviewStateSummary(after.state);
+    const beforeSummary = createDocumentStateSummary(before.state);
+    const afterSummary = createDocumentStateSummary(after.state);
     return before.sessionId === after.sessionId &&
       before.documentGeneration === after.documentGeneration &&
       before.state.revision === after.state.revision &&

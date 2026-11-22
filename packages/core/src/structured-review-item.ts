@@ -1,7 +1,7 @@
-import type { JsonValue, ReviewAnchorDisposition, ReviewItem } from "./review-model.js";
+import type { JsonValue, DocumentAnchorDisposition, Annotation } from "./review-model.js";
 import {
-  anchorEvidenceFromReviewItem,
-  normalizeReviewSelectionAnchor,
+  anchorEvidenceFromAnnotation,
+  normalizeDocumentSelectionAnchor,
 } from "./review-model.js";
 
 export interface SourceHint {
@@ -12,9 +12,9 @@ export interface SourceHint {
 }
 
 /** Complete model-readable projection of one canonical Review Item. */
-export interface StructuredReviewItem {
+export interface StructuredAnnotation {
   readonly id: string;
-  readonly intent: ReviewItem["kind"];
+  readonly intent: Annotation["kind"];
   readonly pageIndex: number;
   readonly pageRange?: {
     readonly firstPageIndex: number;
@@ -38,17 +38,17 @@ export interface StructuredReviewItem {
   readonly reconciliation?: {
     readonly baseGeneration: number;
     readonly revision: number;
-    readonly disposition: ReviewAnchorDisposition;
+    readonly disposition: DocumentAnchorDisposition;
   };
 }
 
-function string(item: ReviewItem, key: string): string {
+function string(item: Annotation, key: string): string {
   const value = item.payload[key];
   if (typeof value !== "string") throw new Error(`Review item ${item.id} is missing ${key}`);
   return value;
 }
 
-function payload(item: ReviewItem): Record<string, JsonValue> {
+function payload(item: Annotation): Record<string, JsonValue> {
   switch (item.kind) {
     case "replace":
     case "insert":
@@ -68,15 +68,15 @@ function payload(item: ReviewItem): Record<string, JsonValue> {
   }
 }
 
-export function projectStructuredReviewItem(
-  item: ReviewItem,
+export function projectStructuredAnnotation(
+  item: Annotation,
   sourceHint?: SourceHint,
-): StructuredReviewItem {
-  const evidence = anchorEvidenceFromReviewItem(item);
+): StructuredAnnotation {
+  const evidence = anchorEvidenceFromAnnotation(item);
   const geometry = evidence.rect;
   const segmentRects = evidence.kind === "selection" ? evidence.segmentRects : undefined;
   const selectionPages = evidence.kind === "selection"
-    ? normalizeReviewSelectionAnchor(evidence).pages
+    ? normalizeDocumentSelectionAnchor(evidence).pages
     : undefined;
   const coordinates = {
     rect: { ...geometry },
@@ -89,7 +89,7 @@ export function projectStructuredReviewItem(
       })),
     }),
   };
-  const anchor: StructuredReviewItem["anchor"] = item.kind === "insert"
+  const anchor: StructuredAnnotation["anchor"] = item.kind === "insert"
     ? { kind: "caret", leftContext: string(item, "leftContext"), rightContext: string(item, "rightContext") }
     : (item.kind === "pageNote" || item.kind === "pdfAnnotation")
       ? { kind: "page", ...(typeof item.payload.nearbyText === "string" ? { nearbyText: item.payload.nearbyText } : {}) }

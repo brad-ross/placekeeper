@@ -7,7 +7,7 @@ import { subscribeNativeRaster } from './HostRenderLayer.js';
 import type { ViewerResourcePolicy } from './embedpdf-viewer.js';
 import { ANNOTATION_PALETTE } from '../../../../packages/core/src/annotation-appearance.js';
 import { OwnedTextMark } from './OwnedTextMark.js';
-import { ReviewIcon } from '../review/ReviewIcon.js';
+import { ReaderIcon } from '../review/ReviewIcon.js';
 import type { SourceAnnotationStyle } from './source-annotation-style.js';
 
 export interface SourceReaderMark {
@@ -102,7 +102,7 @@ function createSourceAnnotationRenderer(
             width: rect.width * scale, height: rect.height * scale,
             ...{ '--pdf-mark-scale': scale }, ...sourceMarkVariables(annotation, entry.style),
           }}
-        >{kind === 'pageNote' ? <ReviewIcon name="note" size={14} /> : kind === 'squiggly' ? <SourceSquiggle width={rect.width} scale={scale} /> : null}</OwnedTextMark>;
+        >{kind === 'pageNote' ? <ReaderIcon name="note" size={14} /> : kind === 'squiggly' ? <SourceSquiggle width={rect.width} scale={scale} /> : null}</OwnedTextMark>;
       })}</>;
     },
   });

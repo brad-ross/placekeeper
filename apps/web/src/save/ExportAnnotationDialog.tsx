@@ -2,7 +2,7 @@ import { useId, useLayoutEffect, useRef, useState } from 'react';
 import { DEFAULT_ANNOTATION_NAME } from '../../../../packages/core/src/review-model.js';
 import { trapDialogFocus } from '../app/dialog-focus.js';
 import { AnnotationNameField } from './AnnotationNameField.js';
-import { ReviewIcon } from '../review/ReviewIcon.js';
+import { ReaderIcon } from '../review/ReviewIcon.js';
 
 export function ExportAnnotationDialog(props: {
   readonly annotationName?: string | undefined;
@@ -43,7 +43,7 @@ export function ExportAnnotationDialog(props: {
         <button className="review-button" type="button" title="Cancel export" disabled={props.pending} onClick={props.onCancel}><span>Cancel</span></button>
         <button className="review-button review-button--primary" type="button" title="Export annotated PDF" disabled={props.pending}
           onClick={() => props.onConfirm(name)}>
-          {props.pending ? <ReviewIcon name="loading" /> : null}<span>Export</span>
+          {props.pending ? <ReaderIcon name="loading" /> : null}<span>Export</span>
         </button>
       </footer>
     </section>

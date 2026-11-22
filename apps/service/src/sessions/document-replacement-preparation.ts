@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
-import { startReviewGeneration, type ReviewItem, type ReviewState } from "../../../../packages/core/src/review-model.js";
+import { startDocumentGeneration, type Annotation, type DocumentState } from "../../../../packages/core/src/review-model.js";
 import { reconcilePdfAnchorState, type PdfAnchorPage } from "../reconciliation/pdf-anchor-reconciler.js";
 import type { StagedGenerationSnapshot } from "../recovery/source-snapshot.js";
 import type { SessionBrokerOptions } from "./session-contracts.js";
@@ -26,17 +26,17 @@ export async function inspectReplacementCandidate(
 
 // This stays synchronous inside the broker's fenced tail: no new scheduling
 // boundary may separate the currentness checks from state preparation.
-export function prepareReplacementReview(
-  state: ReviewState,
+export function prepareReplacementDocument(
+  state: DocumentState,
   successorGeneration: number,
   fileId: string,
   source: { readonly digest: string; readonly byteLength: number },
   pages: readonly PdfAnchorPage[],
-  importedItems: readonly ReviewItem[] = [],
+  importedItems: readonly Annotation[] = [],
   deletedNativeIds: ReadonlySet<string> = new Set(),
   verifiedPredecessorNativeIds: ReadonlySet<string> = new Set(),
-): ReviewState {
-  let nextState = startReviewGeneration(state, {
+): DocumentState {
+  let nextState = startDocumentGeneration(state, {
     documentGeneration: successorGeneration,
   });
   nextState = reconcilePdfAnchorState(nextState, {
@@ -54,7 +54,7 @@ export function prepareReplacementReview(
   };
   const predecessorById = new Map(state.items.map((item) => [item.id, item]));
   const reconciledNativeIds = new Set<string>();
-  const imported: ReviewItem[] = importedItems.flatMap((candidate): ReviewItem[] => {
+  const imported: Annotation[] = importedItems.flatMap((candidate): Annotation[] => {
     const predecessor = predecessorById.get(candidate.id);
     if (candidate.kind !== "pdfAnnotation") {
       return predecessorById.has(candidate.id) ? [] : [candidate];

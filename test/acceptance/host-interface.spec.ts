@@ -167,10 +167,10 @@ test('Chrome disconnect dims the review and Reopen reloads the owning tab with r
     contentType: 'text/javascript', body: `
       export const chromePdfDisplayName = () => 'paper.pdf';
       export const createChromeInteractionOwnerClaimStore = () => ({ ownerSecret: () => 'fixture-owner' });
-      export const createNativeEmbeddedReview = () => async () => ({
+      export const createNativeEmbeddedDocument = () => async () => ({
         displayName: 'paper.pdf', protected: true,
         runtimePort: { runtimeId: 'fixture', postMessage() {}, subscribe() { return () => {}; } },
-        subscribeLifecycle(listener) { window.disconnectReview = () => listener({type: 'disconnected', protected: true}); return () => {}; },
+        subscribeLifecycle(listener) { window.disconnectDocument = () => listener({type: 'disconnected', protected: true}); return () => {}; },
         async activate() {}, async release() {}, dispose() {}
       });`,
   }));
@@ -205,7 +205,7 @@ test('Chrome disconnect dims the review and Reopen reloads the owning tab with r
   await expect(loading).toBeHidden();
   await expect(page.locator('#root')).toHaveCSS('visibility', 'visible');
   expect(await page.locator('body').evaluate((body) => getComputedStyle(body, '::before').content)).toBe('none');
-  await page.evaluate(() => (window as typeof window & { disconnectReview(): void }).disconnectReview());
+  await page.evaluate(() => (window as typeof window & { disconnectDocument(): void }).disconnectDocument());
   const reopen = page.getByRole('button', { name: 'Reopen PDF', exact: true });
   await expect(reopen).toBeFocused();
   await expect(page.locator('#root')).toHaveAttribute('inert', '');
@@ -303,7 +303,7 @@ test('Chrome popup supports Tab and Space with a neutral keyboard focus ring', a
   await page.screenshot({ path: test.info().outputPath('chrome-popup.png') });
 });
 
-async function openAnimatedHostReview(page: Page, width = 1280) {
+async function openAnimatedHostDocument(page: Page, width = 1280) {
   await page.setViewportSize({ width, height: 900 });
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   await page.goto('/test/acceptance/review-harness/?host-history=1');
@@ -315,7 +315,7 @@ async function openAnimatedHostReview(page: Page, width = 1280) {
 }
 
 test('normal-motion workspace opening and closing refit after the tray settles', async ({ page }) => {
-  await openAnimatedHostReview(page, 960);
+  await openAnimatedHostDocument(page, 960);
   const samples = await page.evaluate(() => new Promise<{ width: number; trayX: number }[]>((resolve) => {
     const pdf = document.querySelector<HTMLElement>('[data-page-index="0"]')!;
     const tray = document.querySelector<HTMLElement>('#review-tools-workspace')!;
@@ -360,7 +360,7 @@ test('normal-motion workspace opening and closing refit after the tray settles',
 
 for (const width of [1280, 640]) {
   test(`References retains its height throughout its animated exit at ${width}px`, async ({ page }) => {
-    await openAnimatedHostReview(page, width);
+    await openAnimatedHostDocument(page, width);
     await page.getByRole('button', { name: 'Open PDF link to Primary result, Page 2', exact: true }).click();
     await page.getByRole('menuitem', { name: 'Open in References', exact: true }).click();
     const references = page.locator('.review-workspace');
@@ -397,7 +397,7 @@ for (const { referencesOpen, tall, zoomPercent } of [
   { referencesOpen: true, tall: false, zoomPercent: 200 },
 ]) {
   test(`workspace opening preserves ${zoomPercent}% manual zoom with References ${referencesOpen ? 'open' : 'closed'} in a ${tall ? 'tall' : 'standard'} viewport`, async ({ page }) => {
-    await openAnimatedHostReview(page);
+    await openAnimatedHostDocument(page);
     if (tall) {
       await page.setViewportSize({ width: 1006, height: 1481 });
       // The fitted page follows the resize; let it settle before using its links.

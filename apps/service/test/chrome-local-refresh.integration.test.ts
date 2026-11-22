@@ -7,11 +7,11 @@ import { pathToFileURL } from "node:url";
 import { PDFDocument, StandardFonts } from "pdf-lib";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createNativeEmbeddedReview } from "../../chrome-extension/src/chrome-runtime.js";
+import { createNativeEmbeddedDocument } from "../../chrome-extension/src/chrome-runtime.js";
 import type { NativePort } from "../../chrome-extension/src/chrome-api.js";
 import { createRpcHostRuntime } from "../../web/src/host/vscode-runtime.js";
-import { anchorEvidenceFromReviewItem } from "../../../packages/core/src/review-model.js";
-import type { ReviewItem } from "../../../packages/core/src/review-model.js";
+import { anchorEvidenceFromAnnotation } from "../../../packages/core/src/review-model.js";
+import type { Annotation } from "../../../packages/core/src/review-model.js";
 import { PlacekeeperHost } from "../src/host/placekeeper-host.js";
 
 const extensionOrigin = "chrome-extension://cgegjjjhbhnfgcoipeffhogoojfoekgg";
@@ -60,7 +60,7 @@ async function pdf(text: string, leadingBlankPages = 0): Promise<Buffer> {
   return Buffer.from(await document.save({ useObjectStreams: false }));
 }
 
-function anchoredItem(id: string, quote: string): ReviewItem {
+function anchoredItem(id: string, quote: string): Annotation {
   return {
     id,
     kind: "highlight",
@@ -100,7 +100,7 @@ describe("local Chrome automatic refresh integration", () => {
     let sequence = 0;
     const blobs = new Map<string, Blob>();
     const revoked: string[] = [];
-    const open = createNativeEmbeddedReview({
+    const open = createNativeEmbeddedDocument({
       connectNative: () => nativePort(host, `chrome-integration-port-${++sequence}`),
       fetchStream: vi.fn(async () => { throw new Error("A local PDF must not use the browser stream."); }),
       createId: () => `chrome_integration_${String(++sequence).padStart(8, "0")}`,
@@ -146,7 +146,7 @@ describe("local Chrome automatic refresh integration", () => {
         kind: "highlight",
         pageIndex: 0,
         text: "Created while the successor waited.",
-        anchor: anchorEvidenceFromReviewItem(anchoredItem(draftId, quote)),
+        anchor: anchorEvidenceFromAnnotation(anchoredItem(draftId, quote)),
         disposition: { kind: "resolved", generation: 1 },
         status: "protected",
         createdAt: "2026-09-16T12:00:00.000Z",

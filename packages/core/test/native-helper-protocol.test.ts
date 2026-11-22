@@ -4,8 +4,8 @@ import {
   ELECTRON_HELPER_MAX_FRAME_BYTES,
   decodeElectronHelperFrame,
   encodeElectronHelperFrame,
-  parseElectronReviewHelperMessage,
-  validElectronReviewHelperResponse,
+  parseElectronDocumentHelperMessage,
+  validElectronDocumentHelperResponse,
 } from "../src/electron-helper-protocol.js";
 
 const base = {
@@ -31,7 +31,7 @@ describe("Electron helper protocols", () => {
   });
 
   it("keeps the review lane closed and generation-bound", () => {
-    expect(parseElectronReviewHelperMessage({
+    expect(parseElectronDocumentHelperMessage({
       ...base,
       type: "read-resource",
       resourceId: "resource_12345678",
@@ -40,7 +40,7 @@ describe("Electron helper protocols", () => {
       offset: 0,
       length: 65_536,
     })).toMatchObject({ type: "read-resource", generation: 3 });
-    expect(parseElectronReviewHelperMessage({
+    expect(parseElectronDocumentHelperMessage({
       ...base,
       type: "register-app",
       processId: 12,
@@ -49,19 +49,19 @@ describe("Electron helper protocols", () => {
 
   it("admits only confirmed canonical Placekeeper links", () => {
     const link = "placekeeper:///private/tmp/Paper.pdf#v=1&page=7";
-    expect(parseElectronReviewHelperMessage({
+    expect(parseElectronDocumentHelperMessage({
       ...base,
       type: "admit-link",
       link,
       confirmed: true,
     })).toMatchObject({ type: "admit-link", link, confirmed: true });
-    expect(parseElectronReviewHelperMessage({
+    expect(parseElectronDocumentHelperMessage({
       ...base,
       type: "admit-link",
       link,
       confirmed: false,
     })).toBeUndefined();
-    expect(parseElectronReviewHelperMessage({
+    expect(parseElectronDocumentHelperMessage({
       ...base,
       type: "admit-link",
       link: "placekeeper://host/private/tmp/Paper.pdf#v=1&page=7",
@@ -71,21 +71,21 @@ describe("Electron helper protocols", () => {
 
   it("admits only bound recovery choices and typed invalidations", () => {
     const offer = { id: "recovery_offer_1234", expiresAt: "2026-09-05T00:00:00.000Z" };
-    expect(parseElectronReviewHelperMessage({
+    expect(parseElectronDocumentHelperMessage({
       ...base,
       type: "recover",
       decision: "resume",
       offer,
       idempotencyKey: "operation_recover_1234",
     })).toMatchObject({ type: "recover", decision: "resume", offer });
-    expect(parseElectronReviewHelperMessage({
+    expect(parseElectronDocumentHelperMessage({
       ...base,
       type: "recover",
       decision: "resume",
       offer: { ...offer, sourcePath: "/private/forbidden.pdf" },
       idempotencyKey: "operation_recover_1234",
     })).toBeUndefined();
-    expect(validElectronReviewHelperResponse({
+    expect(validElectronDocumentHelperResponse({
       ...base,
       type: "invalidation",
       generation: 2,

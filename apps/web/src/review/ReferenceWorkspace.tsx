@@ -14,8 +14,8 @@ import {
   type WorkspaceMode,
 } from './reference-navigation-state.js';
 import { compositeFocusIndex, horizontalTabFocusIndex } from './menu-focus.js';
-import { ReviewIcon } from './ReviewIcon.js';
-import { ReviewTooltipButton } from './ReviewTooltipButton.js';
+import { ReaderIcon } from './ReviewIcon.js';
+import { ReaderTooltipButton } from './ReviewTooltipButton.js';
 import { WorkspaceModeStrip, type WorkspaceDockAction } from './WorkspaceModeStrip.js';
 
 export { WORKSPACE_MODES } from './reference-navigation-state.js';
@@ -57,7 +57,7 @@ function ReferenceReturnButton({
   onReturn,
 }: ReferenceReturnButtonProps) {
   return (
-    <ReviewTooltipButton
+    <ReaderTooltipButton
       label="Return to reference"
       ref={buttonRef}
       type="button"
@@ -74,8 +74,8 @@ function ReferenceReturnButton({
         onReturn(tabIdentity);
       }}
     >
-      <ReviewIcon name="locate" />
-    </ReviewTooltipButton>
+      <ReaderIcon name="locate" />
+    </ReaderTooltipButton>
   );
 }
 
@@ -413,14 +413,14 @@ export function ReferenceWorkspace({
       inert={!open}
     >
       {modes.length > 0 ? <header className="review-workspace__header">
-        {onHide ? <ReviewTooltipButton
+        {onHide ? <ReaderTooltipButton
           label={hideLabel}
           type="button"
           className="review-workspace__close"
           aria-expanded="true"
           aria-controls="review-workspace"
           onClick={onHide}
-        ><ReviewIcon name={presentation === 'bottom' ? 'chevron-down' : 'chevron-right'} /></ReviewTooltipButton> : null}
+        ><ReaderIcon name={presentation === 'bottom' ? 'chevron-down' : 'chevron-right'} /></ReaderTooltipButton> : null}
         <WorkspaceModeStrip
           modes={modes}
           selectedMode={mode}
@@ -501,7 +501,7 @@ export function ReferenceWorkspace({
                   {showActions ? <small className="reference-tab-segment__page" aria-hidden="true">
                     {pageLabel}
                   </small> : null}
-                  <ReviewTooltipButton
+                  <ReaderTooltipButton
                     label={destinationLabel}
                     tooltip={`Show ${destinationLabel}`}
                     tooltipOnFocus={false}
@@ -530,7 +530,7 @@ export function ReferenceWorkspace({
                       className={pageTextClass}
                       aria-hidden={showActions ? true : undefined}
                     >{pageLabel}</small>}
-                  </ReviewTooltipButton>
+                  </ReaderTooltipButton>
                   {showActions && showReferenceReturn ? (
                     <ReferenceReturnButton
                       tabIdentity={tab.identity}
@@ -544,7 +544,7 @@ export function ReferenceWorkspace({
                     />
                   ) : null}
                   {showActions && !tab.failed ? (
-                    <ReviewTooltipButton
+                    <ReaderTooltipButton
                       label="Open in main document"
                       type="button"
                       className="reference-tab-segment__action"
@@ -554,11 +554,11 @@ export function ReferenceWorkspace({
                       aria-disabled={pendingReference !== null || undefined}
                       onClick={() => { if (pendingReference === null) onSendToMain(tab.identity); }}
                     >
-                      <ReviewIcon name="open-main" />
-                    </ReviewTooltipButton>
+                      <ReaderIcon name="open-main" />
+                    </ReaderTooltipButton>
                   ) : null}
                   {showActions ? (
-                    <ReviewTooltipButton
+                    <ReaderTooltipButton
                       label="Close active reference"
                       type="button"
                       className="reference-tab-segment__action"
@@ -568,8 +568,8 @@ export function ReferenceWorkspace({
                       aria-disabled={loadingReference !== null || undefined}
                       onClick={() => { if (loadingReference === null) onReferenceTabClose(tab.identity); }}
                     >
-                      <ReviewIcon name="close" />
-                    </ReviewTooltipButton>
+                      <ReaderIcon name="close" />
+                    </ReaderTooltipButton>
                   ) : null}
                 </span>
               );
@@ -590,13 +590,13 @@ export function ReferenceWorkspace({
               {pendingReference.status === 'loading' ? (
                 <>
                   <p><strong>{pendingReference.label}</strong><span>{pendingReference.pageContext}</span></p>
-                  <p className="workspace-state"><ReviewIcon name="loading" />Opening reference…</p>
+                  <p className="workspace-state"><ReaderIcon name="loading" />Opening reference…</p>
                 </>
               ) : (
                 <div className="workspace-error reference-panel__error" data-reference-state="error">
                   <div className="reference-panel__error-content">
                     <div className="reference-panel__error-heading">
-                      <ReviewIcon name="alert" />
+                      <ReaderIcon name="alert" />
                       <strong>Reference unavailable.</strong>
                     </div>
                     <span className="reference-panel__error-body">

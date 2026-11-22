@@ -2,11 +2,11 @@ import {
   nativePdfAnnotationSubtype,
   type NativePdfAnnotationIdentityProvenance,
 } from './native-pdf-annotation.js';
-import type { ReviewAnnotation } from "./pdf-writer.js";
-import type { JsonValue, ReviewItem } from "./review-model.js";
+import type { PdfWriterAnnotation } from "./pdf-writer.js";
+import type { JsonValue, Annotation } from "./review-model.js";
 import {
-  anchorEvidenceFromReviewItem,
-  normalizeReviewSelectionAnchor,
+  anchorEvidenceFromAnnotation,
+  normalizeDocumentSelectionAnchor,
   normalizeAnnotationName,
 } from "./review-model.js";
 import {
@@ -26,22 +26,22 @@ function record(
     : undefined;
 }
 
-function text(payload: ReviewItem["payload"], field: string): string {
+function text(payload: Annotation["payload"], field: string): string {
   const value = payload[field];
   return typeof value === "string" ? value : "";
 }
 
-export function projectReviewItem(
-  item: ReviewItem,
+export function projectAnnotation(
+  item: Annotation,
   author = item.importedAnnotationAuthor ?? PORTABLE_ANNOTATION_AUTHOR,
-): ReviewAnnotation {
-  const anchor = anchorEvidenceFromReviewItem(item);
+): PdfWriterAnnotation {
+  const anchor = anchorEvidenceFromAnnotation(item);
   const projectedRect = anchor.rect;
   if (!projectedRect) {
     throw new Error(`Review item ${item.id} has no valid PDF geometry`);
   }
   const segmentRects = anchor.kind === "selection" ? anchor.segmentRects : undefined;
-  const annotation: ReviewAnnotation = {
+  const annotation: PdfWriterAnnotation = {
     ...annotationBase(item, author),
     id: item.id,
     reviewItemId: item.id,
@@ -60,7 +60,7 @@ export function projectReviewItem(
   };
 }
 
-function annotationBase(item: ReviewItem, author: string) {
+function annotationBase(item: Annotation, author: string) {
   return {
     kind: item.kind,
     contents: item.kind === "replace" || item.kind === "insert"
@@ -88,23 +88,23 @@ function annotationBase(item: ReviewItem, author: string) {
 }
 
 function projectedAnnotation(input: {
-  readonly item: ReviewItem;
+  readonly item: Annotation;
   readonly pageIndex: number;
-  readonly rect: ReviewAnnotation['rect'];
-  readonly quadPoints?: readonly ReviewAnnotation['rect'][];
+  readonly rect: PdfWriterAnnotation['rect'];
+  readonly quadPoints?: readonly PdfWriterAnnotation['rect'][];
   readonly projectionIndex: number;
   readonly projectionCount: number;
   readonly projectionId?: string;
   readonly author: string;
   readonly custom?: unknown;
-}): ReviewAnnotation {
+}): PdfWriterAnnotation {
   const { item, projectionIndex, projectionCount } = input;
   const projectionId = input.projectionId ?? portableAnnotationProjectionId(
     item.id,
     projectionIndex,
     projectionCount,
   );
-  const annotation: ReviewAnnotation = {
+  const annotation: PdfWriterAnnotation = {
     ...annotationBase(item, input.author),
     id: projectionId,
     reviewItemId: item.id,
@@ -126,14 +126,14 @@ function projectedAnnotation(input: {
 }
 
 /** Projects one logical item into deterministic page-local visual annotations. */
-export function projectReviewItemProjections(
-  item: ReviewItem,
+export function projectAnnotationProjections(
+  item: Annotation,
   author = item.importedAnnotationAuthor ?? PORTABLE_ANNOTATION_AUTHOR,
   options: { readonly includePortableMetadata?: boolean } = {},
-): ReviewAnnotation[] {
-  const anchor = anchorEvidenceFromReviewItem(item);
+): PdfWriterAnnotation[] {
+  const anchor = anchorEvidenceFromAnnotation(item);
   if (anchor.kind === 'selection') {
-    const pages = normalizeReviewSelectionAnchor(anchor).pages;
+    const pages = normalizeDocumentSelectionAnchor(anchor).pages;
     const portableGroup = options.includePortableMetadata !== false
       && pages.length > 1
       ? serializePortableAnnotationGroup(item, author)
@@ -166,27 +166,27 @@ export function projectReviewItemProjections(
   })];
 }
 
-export function projectReviewItems(
-  items: readonly ReviewItem[],
+export function projectAnnotations(
+  items: readonly Annotation[],
   documentGeneration?: number,
   options: { readonly includePortableMetadata?: boolean; readonly annotationName?: string } = {},
-): ReviewAnnotation[] {
+): PdfWriterAnnotation[] {
   const annotationName = options.annotationName === undefined
     ? undefined
     : normalizeAnnotationName(options.annotationName);
   return documentOrderedItems(items)
-    .filter((item) => documentGeneration === undefined || reviewItemIsResolvedForGeneration(item, documentGeneration))
-    .flatMap((item) => projectReviewItemProjections(item, annotationName, options));
+    .filter((item) => documentGeneration === undefined || annotationIsResolvedForGeneration(item, documentGeneration))
+    .flatMap((item) => projectAnnotationProjections(item, annotationName, options));
 }
 
-export function reviewItemPageRange(item: ReviewItem): {
+export function annotationPageRange(item: Annotation): {
   readonly firstPageIndex: number;
   readonly lastPageIndex: number;
 } {
   try {
-    const anchor = anchorEvidenceFromReviewItem(item);
+    const anchor = anchorEvidenceFromAnnotation(item);
     if (anchor.kind === 'selection') {
-      const pages = normalizeReviewSelectionAnchor(anchor).pages;
+      const pages = normalizeDocumentSelectionAnchor(anchor).pages;
       return {
         firstPageIndex: pages[0]?.pageIndex ?? item.pageIndex,
         lastPageIndex: pages.at(-1)?.pageIndex ?? item.pageIndex,
@@ -198,8 +198,8 @@ export function reviewItemPageRange(item: ReviewItem): {
   return { firstPageIndex: item.pageIndex, lastPageIndex: item.pageIndex };
 }
 
-export function reviewItemIsResolvedForGeneration(
-  item: ReviewItem,
+export function annotationIsResolvedForGeneration(
+  item: Annotation,
   documentGeneration: number,
 ): boolean {
   if (item.reconciliation === undefined) return true;
@@ -208,9 +208,9 @@ export function reviewItemIsResolvedForGeneration(
 }
 
 export function documentOrderedItems(
-  items: readonly ReviewItem[],
-): ReviewItem[] {
-  const coordinate = (item: ReviewItem, field: "x" | "y"): number => {
+  items: readonly Annotation[],
+): Annotation[] {
+  const coordinate = (item: Annotation, field: "x" | "y"): number => {
     const value = item.reconciliation?.anchor.rect ?? record(item.payload.rect) ?? record(item.payload.position);
     return typeof value?.[field] === "number"
       ? (value[field] as number)

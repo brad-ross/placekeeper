@@ -1,8 +1,8 @@
 import { createContext, useContext, type FocusEvent, type KeyboardEvent } from 'react';
 
 import type { WorkspaceMode } from './reference-navigation-state.js';
-import { ReviewIcon, type ReviewIconName } from './ReviewIcon.js';
-import { ReviewTooltipButton } from './ReviewTooltipButton.js';
+import { ReaderIcon, type ReaderIconName } from './ReviewIcon.js';
+import { ReaderTooltipButton } from './ReviewTooltipButton.js';
 
 /** Optional host restriction; unavailable modes retain the production tab appearance. */
 export const WorkspaceModeAvailability = createContext<readonly WorkspaceMode[] | null>(null);
@@ -12,7 +12,7 @@ export const WorkspacePresentation = createContext<{ mode: WorkspaceMode; open: 
 
 const MODE_PRESENTATION: Readonly<Record<WorkspaceMode, {
   readonly label: string;
-  readonly icon: ReviewIconName;
+  readonly icon: ReaderIconName;
 }>> = {
   outline: { label: 'Outline', icon: 'outline' },
   search: { label: 'Search', icon: 'search' },
@@ -85,7 +85,7 @@ export function WorkspaceModeStrip<Mode extends WorkspaceMode>({
               data-workspace-mode-selected={selected ? 'true' : 'false'}
               role="presentation"
             >
-              <ReviewTooltipButton
+              <ReaderTooltipButton
                 label={presentation.label}
                 ref={(element) => onModeRef(mode, element)}
                 id={`workspace-mode-${mode}`}
@@ -115,7 +115,7 @@ export function WorkspaceModeStrip<Mode extends WorkspaceMode>({
                   if (!unavailable) onModeChange(mode);
                 }}
               >
-                <ReviewIcon name={presentation.icon} />
+                <ReaderIcon name={presentation.icon} />
                 {selected ? (
                   <span
                     className="review-workspace__mode-label"
@@ -125,13 +125,13 @@ export function WorkspaceModeStrip<Mode extends WorkspaceMode>({
                     {presentation.label}
                   </span>
                 ) : null}
-              </ReviewTooltipButton>
+              </ReaderTooltipButton>
             </span>
           );
         })}
       </div>
       {dockAttached ? (
-        <ReviewTooltipButton
+        <ReaderTooltipButton
           label={`Move References to ${dockAction.destination}`}
           type="button"
           className="review-workspace__move review-workspace__move--activity review-workspace__move--header-action"
@@ -142,15 +142,15 @@ export function WorkspaceModeStrip<Mode extends WorkspaceMode>({
           onFocus={dockAction.onFocus}
           onBlur={dockAction.onBlur}
         >
-          <ReviewIcon
+          <ReaderIcon
             name={dockAction.destination === 'bottom' ? 'panel-bottom' : 'panel-right'}
             size={16}
           >
             <path d={dockAction.destination === 'bottom'
               ? 'M12 6v6M8.75 8.75L12 12l3.25-3.25'
               : 'M6 12h6M8.75 8.75L12 12l-3.25 3.25'} />
-          </ReviewIcon>
-        </ReviewTooltipButton>
+          </ReaderIcon>
+        </ReaderTooltipButton>
       ) : null}
     </div>
   );

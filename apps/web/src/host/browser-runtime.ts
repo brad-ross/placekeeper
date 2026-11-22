@@ -1,19 +1,19 @@
 import { externalWebUrl } from "../../../../packages/core/src/external-web-url.js";
-import type { ReviewExportFence } from "../../../../packages/core/src/review-runtime-protocol.js";
+import type { DocumentExportFence } from "../../../../packages/core/src/review-runtime-protocol.js";
 import type { SaveStatus } from "../../../../packages/core/src/save-status.js";
-import type { ReviewCommand, ReviewStateView, SaveDestinationConfirmation } from "../../../../packages/core/src/review-model.js";
+import type { DocumentCommand, DocumentStateView, SaveDestinationConfirmation } from "../../../../packages/core/src/review-model.js";
 import type {
   ProductionExportResult,
   ProductionScope,
   ProductionSession,
-  ReviewInteractionAttachment,
+  DocumentInteractionAttachment,
   SaveCopyProposal,
 } from "./session-contracts.js";
-import type { RejectedReviewCommand } from "../review/review-command-result.js";
+import type { RejectedDocumentCommand } from "../review/review-command-result.js";
 import { loadProductionSession } from "../app/session-api.js";
 import type { HostRuntime, HostRuntimeInvalidation } from "./runtime.js";
 
-function interactionOwnerCommand(command: ReviewCommand): boolean {
+function interactionOwnerCommand(command: DocumentCommand): boolean {
   return command.type === "put-draft"
     || command.type === "reattach"
     || command.type === "apply-draft"
@@ -82,8 +82,8 @@ export function createBrowserHostRuntime(session: ProductionSession): HostRuntim
   let stopped = false;
   const viewIdentity = crypto.randomUUID();
   const interactionOwnerIdentity = ownerSecret(session.sessionId);
-  let interactionAttachment: ReviewInteractionAttachment | undefined;
-  let attachmentReady = Promise.withResolvers<ReviewInteractionAttachment>();
+  let interactionAttachment: DocumentInteractionAttachment | undefined;
+  let attachmentReady = Promise.withResolvers<DocumentInteractionAttachment>();
   let pendingFinalizations = 0;
   let deferredInvalidation: HostRuntimeInvalidation | undefined;
   let bootstrapped = false;
@@ -124,7 +124,7 @@ export function createBrowserHostRuntime(session: ProductionSession): HostRuntim
           reason?: unknown;
         };
         if (value.kind === "interaction-attachment") {
-          interactionAttachment = (value as unknown as { attachment: ReviewInteractionAttachment }).attachment;
+          interactionAttachment = (value as unknown as { attachment: DocumentInteractionAttachment }).attachment;
           attachmentReady.resolve(interactionAttachment);
           return;
         }
@@ -154,7 +154,7 @@ export function createBrowserHostRuntime(session: ProductionSession): HostRuntim
     socket.addEventListener("close", () => {
       socket = undefined;
       interactionAttachment = undefined;
-      attachmentReady = Promise.withResolvers<ReviewInteractionAttachment>();
+      attachmentReady = Promise.withResolvers<DocumentInteractionAttachment>();
       if (!stopped) {
         retry = setTimeout(connectInvalidations, retryDelayMs);
         retryDelayMs = Math.min(retryDelayMs * 2, 30_000);
@@ -162,7 +162,7 @@ export function createBrowserHostRuntime(session: ProductionSession): HostRuntim
     });
   };
 
-  const browserViewerAssets = (currentSession: ProductionSession, state: ReviewStateView) => ({
+  const browserViewerAssets = (currentSession: ProductionSession, state: DocumentStateView) => ({
     pdfiumWasm: currentSession.appLinkBase === undefined
       ? `/s/${currentSession.sessionId}/assets/pdfium.wasm`
       : "/assets/pdfium.wasm",
@@ -238,7 +238,7 @@ export function createBrowserHostRuntime(session: ProductionSession): HostRuntim
       connectInvalidations();
       return () => undefined;
     },
-    async command(command: ReviewCommand): Promise<ReviewStateView | RejectedReviewCommand> {
+    async command(command: DocumentCommand): Promise<DocumentStateView | RejectedDocumentCommand> {
       const api = (await ensureLoaded()).api;
       if (!interactionOwnerCommand(command)) return api.command(command);
       connectInvalidations();
@@ -259,7 +259,7 @@ export function createBrowserHostRuntime(session: ProductionSession): HostRuntim
       if (resolve === undefined) throw new Error("Reading location resolution is unavailable.");
       return resolve(input);
     },
-    async exportReviewedCopy(confirmPossiblyStale?: true, fence?: ReviewExportFence): Promise<ProductionExportResult> {
+    async exportReviewedCopy(confirmPossiblyStale?: true, fence?: DocumentExportFence): Promise<ProductionExportResult> {
       const method = (await ensureLoaded()).api.exportReviewedCopy;
       if (method === undefined) throw new Error("Annotated Document export is unavailable.");
       return method(confirmPossiblyStale, fence);

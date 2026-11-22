@@ -5,8 +5,8 @@ import { basename, dirname, resolve } from "node:path";
 import { homedir } from "node:os";
 import * as vscode from "vscode";
 import {
-  REVIEW_RUNTIME_PROTOCOL,
-  REVIEW_RUNTIME_VERSION,
+  DOCUMENT_RUNTIME_PROTOCOL,
+  DOCUMENT_RUNTIME_VERSION,
 } from "../../../packages/core/src/review-runtime-protocol.js";
 
 import {
@@ -55,14 +55,14 @@ import {
   rebuildNavigationAction,
   type SourceCursorLocation,
 } from "./rebuild-navigation.js";
-import { ReviewPanelController, type ReviewBinding } from "./review-panel-controller.js";
+import { DocumentPanelController, type DocumentBinding } from "./review-panel-controller.js";
 import {
   RECOVERY_CHOICE_LABELS,
-  buildReviewPanelReattachmentHtml,
-  buildReviewWebviewHtml,
+  buildDocumentPanelReattachmentHtml,
+  buildDocumentWebviewHtml,
   parseSharedAssetManifest,
   recoveryDecisionForLabel,
-  reviewPanelOptions,
+  documentPanelOptions,
 } from "./review-panel.js";
 import { openSourceEditor, sourceLineNumber, sourceLineReveal } from "./source-navigation.js";
 import {
@@ -76,7 +76,7 @@ import {
 } from "./webview-bridge.js";
 
 const VIEW_COMMANDS = ["placekeeper.open", "placekeeper.viewPdf"] as const;
-const RECONNECT_REVIEW_MESSAGE = "Reopen this PDF in Placekeeper to reconnect its annotations.";
+const RECONNECT_DOCUMENT_MESSAGE = "Reopen this PDF in Placekeeper to reconnect its annotations.";
 const PANEL_TYPE = "placekeeper.review";
 const PANEL_BINDINGS_KEY = "placekeeper.panel-bindings.v1";
 const COMPATIBILITY_SETUP_KEY = "placekeeper.latex-workshop-setup.v1";
@@ -126,7 +126,7 @@ async function attachStage<T>(
 }
 
 interface PanelRuntime {
-  readonly binding: ReviewBinding;
+  readonly binding: DocumentBinding;
   readonly client: TrustedRuntimeClient;
   readonly registrationId: string;
   readonly bridge: VersionedWebviewBridge;
@@ -158,7 +158,7 @@ async function showSharedError(error: LaunchErrorPresentation): Promise<void> {
   }
 }
 
-async function chooseBinding(commandArgs: readonly unknown[]): Promise<ReviewBinding | undefined> {
+async function chooseBinding(commandArgs: readonly unknown[]): Promise<DocumentBinding | undefined> {
   const active = vscode.window.activeTextEditor?.document.uri ??
     tabResourceUri(vscode.window.tabGroups.activeTabGroup.activeTab?.input);
   const selected = selectedUriArguments(commandArgs[0], commandArgs[1]);
@@ -195,7 +195,7 @@ async function chooseBinding(commandArgs: readonly unknown[]): Promise<ReviewBin
 }
 
 function editorSourceLocation(
-  binding: ReviewBinding,
+  binding: DocumentBinding,
   editor: vscode.TextEditor | undefined,
 ): SourceCursorLocation | undefined {
   if (!vscode.workspace.isTrusted) return undefined;
@@ -208,12 +208,12 @@ function editorSourceLocation(
   };
 }
 
-function sourceLocation(binding: ReviewBinding): SourceCursorLocation | undefined {
+function sourceLocation(binding: DocumentBinding): SourceCursorLocation | undefined {
   return editorSourceLocation(binding, vscode.window.activeTextEditor);
 }
 
 function savedSourceLocation(
-  binding: ReviewBinding,
+  binding: DocumentBinding,
   document: vscode.TextDocument,
 ): SourceCursorLocation | undefined {
   return editorSourceLocation(binding, preferredSavedEditor(
@@ -224,7 +224,7 @@ function savedSourceLocation(
 }
 
 async function openSourceLocation(
-  binding: ReviewBinding,
+  binding: DocumentBinding,
   location: { readonly sourcePath: string; readonly line: number; readonly column?: number },
   highlight: SourceHighlightState,
   avoidViewColumn?: number,
@@ -294,14 +294,14 @@ async function revealForwardSyncTexTarget(
       if (explicitSequence !== undefined) runtime.rebuildNavigation.awaitExplicitAcknowledgement(
         explicitSequence, target.documentGeneration, () => {
           void panel.webview.postMessage({
-            protocol: REVIEW_RUNTIME_PROTOCOL, version: REVIEW_RUNTIME_VERSION, kind: "event", event: "host-command",
+            protocol: DOCUMENT_RUNTIME_PROTOCOL, version: DOCUMENT_RUNTIME_VERSION, kind: "event", event: "host-command",
             panelId: runtime.client.identity.panelId, payload: { command: "cancel-synctex" },
           });
         },
       );
       const posted = await panel.webview.postMessage({
-        protocol: REVIEW_RUNTIME_PROTOCOL,
-        version: REVIEW_RUNTIME_VERSION,
+        protocol: DOCUMENT_RUNTIME_PROTOCOL,
+        version: DOCUMENT_RUNTIME_VERSION,
         kind: "event",
         event: "host-command",
         panelId: runtime.client.identity.panelId,
@@ -328,7 +328,7 @@ async function revealExplicitForwardSyncTexTarget(panel: vscode.WebviewPanel, ru
   try {
     if (!await runtime.bridge.whenReady() || !runtime.rebuildNavigation.isExplicitCurrent(association)) return "stale";
     await panel.webview.postMessage({
-      protocol: REVIEW_RUNTIME_PROTOCOL, version: REVIEW_RUNTIME_VERSION, kind: "event", event: "host-command",
+      protocol: DOCUMENT_RUNTIME_PROTOCOL, version: DOCUMENT_RUNTIME_VERSION, kind: "event", event: "host-command",
       panelId: runtime.client.identity.panelId, payload: { command: "cancel-synctex" },
     });
     status = await revealForwardSyncTexTarget(panel, runtime, () => runtime.rebuildNavigation.isExplicitCurrent(association), association);
@@ -359,16 +359,16 @@ export function activate(context: vscode.ExtensionContext): void {
   const windowId = randomBytes(18).toString("base64url");
   let activePanel: vscode.WebviewPanel | undefined;
 
-  const panelBindings = (): Record<string, ReviewBinding> =>
-    context.globalState.get<Record<string, ReviewBinding>>(PANEL_BINDINGS_KEY) ?? {};
+  const panelBindings = (): Record<string, DocumentBinding> =>
+    context.globalState.get<Record<string, DocumentBinding>>(PANEL_BINDINGS_KEY) ?? {};
 
-  const persistPanelBinding = async (panelKey: string, binding: ReviewBinding): Promise<void> => {
+  const persistPanelBinding = async (panelKey: string, binding: DocumentBinding): Promise<void> => {
     await context.globalState.update(PANEL_BINDINGS_KEY, { ...panelBindings(), [panelKey]: binding });
   };
 
   const attachPanel = async (
     panel: vscode.WebviewPanel,
-    binding: ReviewBinding,
+    binding: DocumentBinding,
     panelKey = randomBytes(18).toString("base64url"),
   ): Promise<void> => {
     let panelDisposed = false;
@@ -419,7 +419,7 @@ export function activate(context: vscode.ExtensionContext): void {
     }
     const webRootUri = vscode.Uri.file(webRoot);
     const snapshotRootUri = vscode.Uri.file(snapshotRoot);
-    panel.webview.options = reviewPanelOptions([webRootUri, snapshotRootUri]);
+    panel.webview.options = documentPanelOptions([webRootUri, snapshotRootUri]);
     const resourceUri = (name: string) => panel.webview.asWebviewUri(vscode.Uri.file(resolve(webRoot, name))).toString();
     const panelId = randomBytes(18).toString("base64url");
     let runtime: PanelRuntime;
@@ -445,7 +445,7 @@ export function activate(context: vscode.ExtensionContext): void {
       beginReverseNavigation: () => {
         const association = rebuildNavigation.beginExplicit();
         void panel.webview.postMessage({
-          protocol: REVIEW_RUNTIME_PROTOCOL, version: REVIEW_RUNTIME_VERSION, kind: "event", event: "host-command",
+          protocol: DOCUMENT_RUNTIME_PROTOCOL, version: DOCUMENT_RUNTIME_VERSION, kind: "event", event: "host-command",
           panelId, payload: { command: "cancel-synctex" },
         });
         return {
@@ -549,7 +549,7 @@ export function activate(context: vscode.ExtensionContext): void {
     await observer.revalidate("activation");
     requireOpenPanel();
     await attachStage("webview", () => {
-      panel.webview.html = buildReviewWebviewHtml({
+      panel.webview.html = buildDocumentWebviewHtml({
         nonce: randomBytes(18).toString("base64url"),
         panelId,
         panelKey,
@@ -561,14 +561,14 @@ export function activate(context: vscode.ExtensionContext): void {
     await persistPanelBinding(panelKey, binding);
   };
 
-  const controller = new ReviewPanelController<vscode.WebviewPanel>({
+  const controller = new DocumentPanelController<vscode.WebviewPanel>({
     canonicalize: async (path) => realpath(path),
     create: async (binding) => {
       const panel = vscode.window.createWebviewPanel(
         PANEL_TYPE,
         `Placekeeper — ${basename(binding.outputPath)}`,
         vscode.ViewColumn.Beside,
-        reviewPanelOptions([]),
+        documentPanelOptions([]),
       );
       try { await attachPanel(panel, binding); }
       catch (error) {
@@ -588,7 +588,7 @@ export function activate(context: vscode.ExtensionContext): void {
   });
 
   const openPanel = async (
-    binding: ReviewBinding,
+    binding: DocumentBinding,
     revealExisting: boolean,
   ): Promise<vscode.WebviewPanel | undefined> => {
     try {
@@ -633,7 +633,7 @@ export function activate(context: vscode.ExtensionContext): void {
       const runtime = runtimes.get(activePanel);
       if (runtime === undefined) return;
       await activePanel.webview.postMessage({
-        protocol: REVIEW_RUNTIME_PROTOCOL, version: REVIEW_RUNTIME_VERSION,
+        protocol: DOCUMENT_RUNTIME_PROTOCOL, version: DOCUMENT_RUNTIME_VERSION,
         kind: "event", event: "host-command", panelId: runtime.client.identity.panelId,
         payload: { command: "review-command", id },
       });
@@ -688,7 +688,7 @@ export function activate(context: vscode.ExtensionContext): void {
       const association = runtime.rebuildNavigation.beginExplicit();
       try {
         await activePanel.webview.postMessage({
-          protocol: REVIEW_RUNTIME_PROTOCOL, version: REVIEW_RUNTIME_VERSION, kind: "event", event: "host-command",
+          protocol: DOCUMENT_RUNTIME_PROTOCOL, version: DOCUMENT_RUNTIME_VERSION, kind: "event", event: "host-command",
           panelId: runtime.client.identity.panelId, payload: { command: "reverse-synctex" },
         });
       } finally { runtime.rebuildNavigation.finishExplicit(association); }
@@ -700,18 +700,18 @@ export function activate(context: vscode.ExtensionContext): void {
       }
       const runtime = runtimes.get(activePanel);
       if (runtime === undefined) {
-        await vscode.window.showInformationMessage(RECONNECT_REVIEW_MESSAGE);
+        await vscode.window.showInformationMessage(RECONNECT_DOCUMENT_MESSAGE);
         return;
       }
       const posted = await activePanel.webview.postMessage({
-        protocol: REVIEW_RUNTIME_PROTOCOL,
-        version: REVIEW_RUNTIME_VERSION,
+        protocol: DOCUMENT_RUNTIME_PROTOCOL,
+        version: DOCUMENT_RUNTIME_VERSION,
         kind: "event",
         event: "host-command",
         panelId: runtime.client.identity.panelId,
         payload: { command: "reattach" },
       });
-      if (!posted) await vscode.window.showInformationMessage(RECONNECT_REVIEW_MESSAGE);
+      if (!posted) await vscode.window.showInformationMessage(RECONNECT_DOCUMENT_MESSAGE);
     }),
     vscode.commands.registerCommand("placekeeper.exportReviewedPdf", async () => {
       const runtime = activePanel === undefined ? undefined : runtimes.get(activePanel);
@@ -720,14 +720,14 @@ export function activate(context: vscode.ExtensionContext): void {
         return;
       }
       const posted = await activePanel!.webview.postMessage({
-        protocol: REVIEW_RUNTIME_PROTOCOL,
-        version: REVIEW_RUNTIME_VERSION,
+        protocol: DOCUMENT_RUNTIME_PROTOCOL,
+        version: DOCUMENT_RUNTIME_VERSION,
         kind: "event",
         event: "host-command",
         panelId: runtime.client.identity.panelId,
         payload: { command: "export-reviewed-pdf" },
       });
-      if (!posted) await vscode.window.showInformationMessage(RECONNECT_REVIEW_MESSAGE);
+      if (!posted) await vscode.window.showInformationMessage(RECONNECT_DOCUMENT_MESSAGE);
     }),
     vscode.commands.registerCommand("placekeeper.configureLatexWorkshop", async () => {
       if (!vscode.workspace.isTrusted) { await vscode.window.showWarningMessage("Trust this workspace before changing LaTeX Workshop settings."); return; }
@@ -808,7 +808,7 @@ export function activate(context: vscode.ExtensionContext): void {
       async deserializeWebviewPanel(panel, state) {
         const restored = await controller.restore(panel, state);
         if (restored.status === "retry") {
-          panel.webview.html = buildReviewPanelReattachmentHtml();
+          panel.webview.html = buildDocumentPanelReattachmentHtml();
         }
       },
     }),

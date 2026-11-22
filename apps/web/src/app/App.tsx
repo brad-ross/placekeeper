@@ -95,9 +95,9 @@ import {
   REFERENCE_PDF_DOCUMENT_ID,
   type PdfViewerScope,
 } from '../pdf/viewer-document-ids.js';
-import type { ReviewAnnotation } from '../../../../packages/core/src/pdf-writer.js';
-import { REVIEW_OVERLAY_INSET, REVIEW_OVERLAY_FADE_SIZE } from '../review/use-review-overlay-geometry.js';
-import { ReviewIcon } from '../review/ReviewIcon.js';
+import type { PdfWriterAnnotation } from '../../../../packages/core/src/pdf-writer.js';
+import { READER_OVERLAY_INSET, READER_OVERLAY_FADE_SIZE } from '../review/use-review-overlay-geometry.js';
+import { ReaderIcon } from '../review/ReviewIcon.js';
 import type { PdfSearchResult } from '../pdf/pdf-search-model.js';
 import {
   isCurrentPdfAnnotationSurface as isCurrentViewerInputSurface,
@@ -274,8 +274,8 @@ export interface AppProps {
   toolError?: string | null;
   /** Production composes the viewer inside the canonical reading-first ReviewShell. */
   embeddedInReviewShell?: boolean;
-  ownedAnnotations?: readonly ReviewAnnotation[];
-  authoringPreview?: readonly ReviewAnnotation[] | null;
+  ownedAnnotations?: readonly PdfWriterAnnotation[];
+  authoringPreview?: readonly PdfWriterAnnotation[] | null;
   onViewerInteraction?: (event: ViewerInteractionEvent) => void;
   reverseSyncTexEnabled?: boolean;
   keyboardPageNoteActive?: boolean;
@@ -335,7 +335,7 @@ export function App({
   onCopySelectionUpdate,
   documentTitle = 'Local PDF',
   toolError = null,
-  embeddedInReviewShell = false,
+  embeddedInReviewShell: embeddedInReaderShell = false,
   ownedAnnotations = [],
   authoringPreview = null,
   onViewerInteraction,
@@ -1113,7 +1113,7 @@ export function App({
         fitTextMargins: () => {
           const stage = workspaceElementRef.current?.closest<HTMLElement>('[data-review-stage]');
           const rightFade = stage?.dataset.rightSurfaceOpen === 'true'
-            ? REVIEW_OVERLAY_INSET + REVIEW_OVERLAY_FADE_SIZE
+            ? READER_OVERLAY_INSET + READER_OVERLAY_FADE_SIZE
             : 0;
           // The dock is already outside the reading viewport. Balance text
           // against its clear area, before the remaining decorative fade.
@@ -1122,7 +1122,7 @@ export function App({
         fitWidthMargins: () => {
           const stage = workspaceElementRef.current?.closest<HTMLElement>('[data-review-stage]');
           if (stage?.dataset.rightSurfaceOpen === 'true') {
-            const gap = REVIEW_OVERLAY_INSET + REVIEW_OVERLAY_FADE_SIZE;
+            const gap = READER_OVERLAY_INSET + READER_OVERLAY_FADE_SIZE;
             return { left: gap, right: gap };
           }
           return undefined;
@@ -1624,7 +1624,7 @@ export function App({
       {...(keyboardPageNoteSurface === undefined ? {} : { keyboardPageNoteSurface })}
       onKeyboardPageNoteKey={keyboardCursorKey}
       onPageContextMenu={pageContextMenu}
-      fillContainer={embeddedInReviewShell}
+      fillContainer={embeddedInReaderShell}
       {...(activeOwnedAnnotationId === undefined ? {} : { activeOwnedAnnotationId })}
       {...(correspondingOwnedAnnotationId === undefined ? {} : { correspondingOwnedAnnotationId })}
       onOwnedMarkInteraction={(value) => emitFromSurface(
@@ -1669,13 +1669,13 @@ export function App({
           role="alert"
           data-viewer-status
         >
-          <ReviewIcon name="alert" />{toolError}
+          <ReaderIcon name="alert" />{toolError}
         </p>
       ) : null}
     </div>
   );
 
-  if (embeddedInReviewShell) return workspaceWithStatus;
+  if (embeddedInReaderShell) return workspaceWithStatus;
 
   const content = (
     <main>

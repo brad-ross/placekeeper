@@ -31,7 +31,7 @@ export function createTrailingTaskScheduler(
   };
 }
 
-export async function waitForReviewNavigationReady(input: {
+export async function waitForDocumentNavigationReady(input: {
   readonly isReady: () => boolean;
   readonly isCurrent: () => boolean;
   readonly wait?: () => Promise<void>;

@@ -1,8 +1,8 @@
 import { createHash, randomBytes } from "node:crypto";
 import { digestSecretHex } from "../../../../packages/core/src/session-security.js";
 
-export const REVIEW_INTERACTION_PROTOCOL_VERSION = 1 as const;
-export const REVIEW_INTERACTION_CAPABILITIES = [
+export const DOCUMENT_INTERACTION_PROTOCOL_VERSION = 1 as const;
+export const DOCUMENT_INTERACTION_CAPABILITIES = [
   "session-wide-holds",
   "durable-finalize-receipts",
   "connection-incarnations",
@@ -10,25 +10,25 @@ export const REVIEW_INTERACTION_CAPABILITIES = [
 const AUTHORING_DRAFT_ID = /^[A-Za-z0-9_-]{8,128}$/u;
 const MAX_ACTIVE_AUTHORING_DRAFTS = 256;
 
-export type ReviewInteractionOutcome = "applied" | "discarded";
+export type DocumentInteractionOutcome = "applied" | "discarded";
 
-export interface ReviewInteractionAttachment {
+export interface DocumentInteractionAttachment {
   readonly sessionId: string;
   readonly attachmentId: string;
   readonly incarnationId: string;
   readonly capability: string;
-  readonly protocolVersion: typeof REVIEW_INTERACTION_PROTOCOL_VERSION;
-  readonly capabilities: typeof REVIEW_INTERACTION_CAPABILITIES;
+  readonly protocolVersion: typeof DOCUMENT_INTERACTION_PROTOCOL_VERSION;
+  readonly capabilities: typeof DOCUMENT_INTERACTION_CAPABILITIES;
 }
 
-export interface ReviewInteractionReceipt {
+export interface DocumentInteractionReceipt {
   readonly status: "finalized";
   readonly sessionId: string;
   readonly attachmentId: string;
   readonly interactionToken: string;
   readonly draftId?: string;
   readonly generation: number;
-  readonly outcome: ReviewInteractionOutcome;
+  readonly outcome: DocumentInteractionOutcome;
   readonly reviewRevision: number;
 }
 
@@ -37,7 +37,7 @@ type LifecycleResult =
   | { readonly status: "released" | "missing" | "unauthorized" | "out-of-order" }
   | { readonly status: "stale"; readonly generation: number }
   | { readonly status: "backpressure" }
-  | ReviewInteractionReceipt;
+  | DocumentInteractionReceipt;
 
 interface AttachmentRecord {
   readonly sessionId: string;
@@ -60,9 +60,9 @@ interface AuthenticatedOperation {
   readonly order: number;
 }
 
-export interface ReviewInteractionsOptions {
+export interface DocumentInteractionsOptions {
   readonly currentGeneration: (sessionId: string) => number | undefined;
-  readonly persistReceipt?: (receipt: ReviewInteractionReceipt) => Promise<void>;
+  readonly persistReceipt?: (receipt: DocumentInteractionReceipt) => Promise<void>;
   readonly onLastRelease?: (sessionId: string) => void;
   readonly onPresenceChange?: (sessionId: string) => void;
   readonly reconnectPresenceMs?: number;
@@ -88,11 +88,11 @@ function stableAttachmentId(stableOwner: string): string {
  * and can be hydrated from recovery so reconnect can recover an uncertain
  * finalize without authorizing the old connection.
  */
-export class ReviewInteractions {
-  readonly #options: ReviewInteractionsOptions;
+export class DocumentInteractions {
+  readonly #options: DocumentInteractionsOptions;
   readonly #attachments = new Map<string, AttachmentRecord>();
   readonly #attachmentByOwner = new Map<string, string>();
-  readonly #receipts = new Map<string, ReviewInteractionReceipt>();
+  readonly #receipts = new Map<string, DocumentInteractionReceipt>();
   readonly #reconnectPresence = new Map<string, {
     readonly ownerKey: string;
     readonly sessionId: string;
@@ -102,7 +102,7 @@ export class ReviewInteractions {
     readonly timer: ReturnType<typeof setTimeout>;
   }>();
 
-  constructor(options: ReviewInteractionsOptions) {
+  constructor(options: DocumentInteractionsOptions) {
     const reconnectPresenceMs = options.reconnectPresenceMs ?? 5_000;
     if (!Number.isSafeInteger(reconnectPresenceMs) || reconnectPresenceMs <= 0) {
       throw new RangeError("reconnectPresenceMs must be a positive safe integer");
@@ -110,7 +110,7 @@ export class ReviewInteractions {
     this.#options = options;
   }
 
-  register(sessionId: string, ownerKey: string): ReviewInteractionAttachment {
+  register(sessionId: string, ownerKey: string): DocumentInteractionAttachment {
     const stableOwner = `${sessionId}\0${ownerKey}`;
     const previousId = this.#attachmentByOwner.get(stableOwner);
     const previous = previousId === undefined ? undefined : this.#attachments.get(previousId);
@@ -140,8 +140,8 @@ export class ReviewInteractions {
       attachmentId,
       incarnationId: record.incarnationId,
       capability,
-      protocolVersion: REVIEW_INTERACTION_PROTOCOL_VERSION,
-      capabilities: REVIEW_INTERACTION_CAPABILITIES,
+      protocolVersion: DOCUMENT_INTERACTION_PROTOCOL_VERSION,
+      capabilities: DOCUMENT_INTERACTION_CAPABILITIES,
     };
   }
 
@@ -189,13 +189,13 @@ export class ReviewInteractions {
     return this.#authenticate(input) !== undefined;
   }
 
-  hydrate(receipts: readonly ReviewInteractionReceipt[]): void {
+  hydrate(receipts: readonly DocumentInteractionReceipt[]): void {
     for (const receipt of receipts) {
       this.#receipts.set(receiptKey(receipt.attachmentId, receipt.interactionToken), receipt);
     }
   }
 
-  recoverFinalized(receipt: ReviewInteractionReceipt): void {
+  recoverFinalized(receipt: DocumentInteractionReceipt): void {
     this.#receipts.set(receiptKey(receipt.attachmentId, receipt.interactionToken), receipt);
     const record = this.#attachments.get(receipt.attachmentId);
     if (record?.sessionId === receipt.sessionId) {
@@ -270,12 +270,12 @@ export class ReviewInteractions {
   }
 
   async finalize(input: AuthenticatedOperation & {
-    readonly outcome: ReviewInteractionOutcome;
+    readonly outcome: DocumentInteractionOutcome;
     readonly draftId: string;
     readonly reviewRevision?: number;
     readonly commit?: () => Promise<number | {
       readonly reviewRevision: number;
-      readonly persist: (receipt: ReviewInteractionReceipt) => Promise<void>;
+      readonly persist: (receipt: DocumentInteractionReceipt) => Promise<void>;
     }>;
   }): Promise<LifecycleResult> {
     const record = this.#authenticate(input);
@@ -294,12 +294,12 @@ export class ReviewInteractions {
     const committed = input.commit === undefined
       ? input.reviewRevision
       : await input.commit();
-    const reviewRevision = typeof committed === "object" && committed !== null
+    const annotationRevision = typeof committed === "object" && committed !== null
       ? committed.reviewRevision : committed;
-    if (!Number.isSafeInteger(reviewRevision) || (reviewRevision as number) < 0) {
+    if (!Number.isSafeInteger(annotationRevision) || (annotationRevision as number) < 0) {
       throw new Error("A terminal interaction receipt requires an authoritative review revision");
     }
-    const receipt: ReviewInteractionReceipt = {
+    const receipt: DocumentInteractionReceipt = {
       status: "finalized",
       sessionId: record.sessionId,
       attachmentId: record.attachmentId,
@@ -307,7 +307,7 @@ export class ReviewInteractions {
       draftId: input.draftId,
       generation: hold.generation,
       outcome: input.outcome,
-      reviewRevision: reviewRevision as number,
+      reviewRevision: annotationRevision as number,
     };
     // Persistence is the commit point. A rejection leaves both the editor hold
     // and its retry identity intact.
@@ -323,7 +323,7 @@ export class ReviewInteractions {
   }
 
   async acknowledge(input: AuthenticatedOperation & {
-    readonly persist?: (receipt: ReviewInteractionReceipt) => Promise<void>;
+    readonly persist?: (receipt: DocumentInteractionReceipt) => Promise<void>;
   }): Promise<LifecycleResult> {
     const record = this.#authenticate(input);
     if (record === undefined) return { status: "unauthorized" };
@@ -375,7 +375,7 @@ export class ReviewInteractions {
       ? record : undefined;
   }
 
-  #receipt(input: Pick<AuthenticatedOperation, "sessionId" | "attachmentId" | "interactionToken">): ReviewInteractionReceipt | undefined {
+  #receipt(input: Pick<AuthenticatedOperation, "sessionId" | "attachmentId" | "interactionToken">): DocumentInteractionReceipt | undefined {
     const record = this.#attachments.get(input.attachmentId);
     if (record === undefined || record.sessionId !== input.sessionId) return undefined;
     return this.#receipts.get(receiptKey(record.attachmentId, input.interactionToken));

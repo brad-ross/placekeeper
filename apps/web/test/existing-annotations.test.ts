@@ -2,8 +2,8 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 
-import { createReviewState, type ReviewState } from '../../../packages/core/src/review-model.js';
-import { ReviewShell } from '../src/app/ReviewShell.js';
+import { createDocumentState, type DocumentState } from '../../../packages/core/src/review-model.js';
+import { ReaderShell } from '../src/app/ReviewShell.js';
 import type { DestinationBand } from '../src/review/navigation-coordinator.js';
 
 import {
@@ -121,8 +121,8 @@ describe('Destination Bands and annotation projections', () => {
     pageIndex: 13,
     rects: [{ origin: { x: 72, y: 100 }, size: { width: 400, height: 12 } }],
   };
-  const reviewState: ReviewState = {
-    ...createReviewState({
+  const documentState: DocumentState = {
+    ...createDocumentState({
       sessionId: 'band-session',
       source: { fileId: 'paper', digest: 'b'.repeat(64), byteLength: 10 },
     }),
@@ -136,11 +136,11 @@ describe('Destination Bands and annotation projections', () => {
 
   // Bands reach the shell only inside the rendered viewer, as they do in production.
   function annotationsList(bands: boolean): string {
-    return renderToStaticMarkup(createElement(ReviewShell, {
-      state: reviewState,
+    return renderToStaticMarkup(createElement(ReaderShell, {
+      state: documentState,
       save: {},
       selection: { selectionUpdate: { kind: 'cleared', generation: 0 } },
-      authoring: { onCommand: async () => reviewState },
+      authoring: { onCommand: async () => documentState },
       viewer: {},
       existingAnnotations: { status: 'ready', generation: 1, items: inventory },
       workspace: { listOpen: true },

@@ -1,4 +1,4 @@
-import { reviewEdgeGeometry } from '../../scripts/testing/review-edge-geometry.js';
+import { documentEdgeGeometry } from '../../scripts/testing/review-edge-geometry.js';
 import { expect, test, type Page } from '@playwright/test';
 import { addStaticKeyboardPageNote, waitForStaticPdf } from '../../scripts/static-browser-journey.js';
 
@@ -469,7 +469,7 @@ for (const scrollbarWidth of [null, 15]) {
     await fit(page, 'text');
     const expectBalancedMargins = async (index = 0) => {
       await expect.poll(async () => {
-        const { clearRight } = await page.locator('[data-review-stage]').evaluate(reviewEdgeGeometry);
+        const { clearRight } = await page.locator('[data-review-stage]').evaluate(documentEdgeGeometry);
         return mainPage(page, index).evaluate((element, { pageIndex, clearRight }) => {
           const bounds = element.getBoundingClientRect();
           const zoom = bounds.width / 600;

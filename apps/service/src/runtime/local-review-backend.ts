@@ -1,22 +1,22 @@
-import type { ReviewCommand, SaveDestinationConfirmation } from "../../../../packages/core/src/review-model.js";
-import type { ReviewExportFence, ReviewRuntimeBrokerMethod } from "../../../../packages/core/src/review-runtime-protocol.js";
+import type { DocumentCommand, SaveDestinationConfirmation } from "../../../../packages/core/src/review-model.js";
+import type { DocumentExportFence, DocumentRuntimeBrokerMethod } from "../../../../packages/core/src/review-runtime-protocol.js";
 import type { ExportCoordinator } from "../export/export-coordinator.js";
 import { rejectedDestinationName, type PdfSaveCoordinator } from "../saving/pdf-save-coordinator.js";
 import type { SessionBroker } from "../sessions/session-broker.js";
-import type { ReviewInteractionAttachment } from "../sessions/review-interactions.js";
+import type { DocumentInteractionAttachment } from "../sessions/review-interactions.js";
 
-const reviewSideEffectMethods = new Set<ReviewRuntimeBrokerMethod>([
+const documentSideEffectMethods = new Set<DocumentRuntimeBrokerMethod>([
   "command", "chooseCopy", "chooseFolder", "chooseOriginal", "retrySave", "locateSave", "exportReviewedCopy",
 ]);
 
-export function isReviewSideEffectMethod(method: ReviewRuntimeBrokerMethod): boolean {
-  return reviewSideEffectMethods.has(method);
+export function isDocumentSideEffectMethod(method: DocumentRuntimeBrokerMethod): boolean {
+  return documentSideEffectMethods.has(method);
 }
 
 /** Trusted session effects shared by host adapters. The caller owns admission,
  * operation journaling, source staging, and host-specific destination defaults.
  * All durable review state and physical PDF writes remain broker/coordinator owned. */
-export class LocalReviewBackend {
+export class LocalDocumentBackend {
   readonly #broker: SessionBroker;
   readonly #saving: PdfSaveCoordinator;
   readonly #exporting: ExportCoordinator;
@@ -34,12 +34,12 @@ export class LocalReviewBackend {
   async invoke(
     sessionId: string,
     generation: number,
-    method: Exclude<ReviewRuntimeBrokerMethod, "saveProposal">,
+    method: Exclude<DocumentRuntimeBrokerMethod, "saveProposal">,
     payload: unknown,
     options: { readonly expectedDocumentGeneration?: number; readonly assertAuthority?: () => void;
       readonly trustedDestinationSelection?: { readonly selectedPath: string | null; readonly assertAuthority: () => void } } = {},
   ): Promise<unknown> {
-    if (isReviewSideEffectMethod(method)) {
+    if (isDocumentSideEffectMethod(method)) {
       // Establish the durable recovery boundary before attempting a side
       // effect. A rejected operation may conservatively retain a clean draft;
       // a committed operation can never lose its protection marker.
@@ -49,11 +49,11 @@ export class LocalReviewBackend {
     let result: unknown;
     switch (method) {
       case "command":
-        result = await this.#broker.acceptMutation(sessionId, payload as ReviewCommand, {
+        result = await this.#broker.acceptMutation(sessionId, payload as DocumentCommand, {
           expectedGeneration: generation,
           ...(options.assertAuthority === undefined ? {} : { assertAuthority: options.assertAuthority }),
         });
-        if ((payload as ReviewCommand).type !== "put-draft" && this.#broker.saveStatus(sessionId)?.destination.phase === "active") {
+        if ((payload as DocumentCommand).type !== "put-draft" && this.#broker.saveStatus(sessionId)?.destination.phase === "active") {
           void this.#saving.requestSave(sessionId);
         }
         break;
@@ -92,7 +92,7 @@ export class LocalReviewBackend {
         result = await this.#broker.resolveReadingLocation(sessionId, payload as import("../../../../packages/core/src/review-runtime-protocol.js").ReadingLocationResolutionRequestV1);
         break;
       case "exportReviewedCopy": {
-        const value = payload as { readonly confirmPossiblyStale?: true; readonly fence?: ReviewExportFence };
+        const value = payload as { readonly confirmPossiblyStale?: true; readonly fence?: DocumentExportFence };
         const frozen = await this.#broker.freezeDelivery(sessionId, value.fence, options.expectedDocumentGeneration);
         options.assertAuthority?.();
         result = await this.#exporting.exportReviewedCopy({
@@ -108,7 +108,7 @@ export class LocalReviewBackend {
 
   async interaction(
     sessionId: string,
-    attachment: ReviewInteractionAttachment,
+    attachment: DocumentInteractionAttachment,
     action: "begin" | "finalize" | "release" | "acknowledge",
     payload: unknown,
     assertAuthority?: () => void,
@@ -124,9 +124,9 @@ export class LocalReviewBackend {
       return this.#broker.beginReviewInteraction({ ...common, generation: value.generation as number,
         ...(typeof value.draftId === "string" ? { draftId: value.draftId } : {}) });
     }
-    if (action === "release") return this.#broker.releaseReviewInteraction(common);
-    if (action === "acknowledge") return this.#broker.acknowledgeReviewInteraction(common);
-    const result = await this.#broker.finalizeReviewInteraction({
+    if (action === "release") return this.#broker.releaseDocumentInteraction(common);
+    if (action === "acknowledge") return this.#broker.acknowledgeDocumentInteraction(common);
+    const result = await this.#broker.finalizeDocumentInteraction({
       ...common,
       outcome: value.outcome as "applied" | "discarded",
       draftId: value.draftId as string,

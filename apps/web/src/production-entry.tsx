@@ -1,5 +1,5 @@
 import { DocumentLoading } from "./app/DocumentLoading.js";
-import { ReviewUpgradePreparation, UpgradeCommandGate } from "./host/upgrade-preparation.js";
+import { DocumentUpgradePreparation, UpgradeCommandGate } from "./host/upgrade-preparation.js";
 import type { NativeForwardState } from "../../../packages/core/src/native-synctex-protocol.js";
 import { createRoot } from "react-dom/client";
 import { flushSync } from "react-dom";
@@ -17,9 +17,9 @@ import {
   decodePlacekeeperLinkFragment,
   encodePlacekeeperLinkFragment,
 } from "../../../packages/core/src/placekeeper-link.js";
-import { createReviewState } from "../../../packages/core/src/review-model.js";
-import { isReviewPanelKey } from "../../../packages/core/src/review-runtime-protocol.js";
-import { ProductionReviewApp } from "./app/ProductionReviewApp.js";
+import { createDocumentState } from "../../../packages/core/src/review-model.js";
+import { isDocumentPanelKey } from "../../../packages/core/src/review-runtime-protocol.js";
+import { ProductionReaderApp } from "./app/ProductionReviewApp.js";
 import type { HostForwardSyncTexRequest, ProductionSession } from "./host/session-contracts.js";
 import {
   reopenProductionSession,
@@ -30,7 +30,7 @@ import {
   createCopyLinkCommand,
   type CopyLinkStatus,
 } from "./review/CopyLinkControl.js";
-import { ReviewIcon, type ReviewIconName } from "./review/ReviewIcon.js";
+import { ReaderIcon, type ReaderIconName } from "./review/ReviewIcon.js";
 import { createBrowserHostRuntime } from "./host/browser-runtime.js";
 import {
   createRpcHostRuntime,
@@ -41,8 +41,8 @@ import {
 import type { HostRuntime, HostRuntimeBootstrap } from "./host/runtime.js";
 import { subscribeRuntimeDocumentSource } from "./host/runtime-document-source.js";
 import type {
-  ReviewCommandInvocation,
-  ReviewCommandSurfaceSnapshot,
+  DocumentCommandInvocation,
+  DocumentCommandSurfaceSnapshot,
 } from "./review/review-command-surface.js";
 import {
   AccessibilityTransitionCoordinator,
@@ -149,7 +149,7 @@ export function showTerminalRecovery(viewId: string): void {
   }>();
   const setButtonContent = (
     control: HTMLButtonElement,
-    iconName: ReviewIconName,
+    iconName: ReaderIconName,
     label: string,
   ): void => {
     let view = buttonViews.get(control);
@@ -163,7 +163,7 @@ export function showTerminalRecovery(viewId: string): void {
       buttonViews.set(control, view);
     }
     control.dataset.icon = iconName;
-    view.iconRoot.render(<ReviewIcon name={iconName} size={14} />);
+    view.iconRoot.render(<ReaderIcon name={iconName} size={14} />);
     view.label.textContent = label;
   };
 
@@ -190,7 +190,7 @@ export function showTerminalRecovery(viewId: string): void {
   };
   const button = (
     label: string,
-    iconName: ReviewIconName,
+    iconName: ReaderIconName,
     onClick: () => void,
     className = 'terminal-recovery__secondary',
   ): HTMLButtonElement => {
@@ -422,7 +422,7 @@ export async function startRuntime(
     <RuntimeFailureBoundary {...(options.onRuntimeError === undefined
       ? {}
       : { onError: options.onRuntimeError })}>
-      <RuntimeProductionReviewApp runtime={runtime} initial={loaded} {...options} />
+      <RuntimeProductionReaderApp runtime={runtime} initial={loaded} {...options} />
     </RuntimeFailureBoundary>,
   );
   return () => reactRoot.unmount();
@@ -470,7 +470,7 @@ const pendingApi: HostRuntime = {
 };
 
 export function pendingRuntimeBootstrap(documentTitle: string): HostRuntimeBootstrap {
-  const created = createReviewState({
+  const created = createDocumentState({
     sessionId: PENDING_SESSION_ID,
     source: { fileId: PENDING_FILE_ID, digest: "0".repeat(64), byteLength: 5 },
   });
@@ -529,9 +529,9 @@ export function RuntimeLoadingWorkspace(props: {
   </section>;
 }
 
-export function RuntimeProductionReviewApp(props: {
-  readonly onContextSnapshot?: (snapshot: import('./host/review-context-snapshot.js').ReviewContextSnapshot) => void;
-  readonly agentBridge?: import('./host/review-agent-bridge.js').ReviewAgentBridge;
+export function RuntimeProductionReaderApp(props: {
+  readonly onContextSnapshot?: (snapshot: import('./host/review-context-snapshot.js').DocumentContextSnapshot) => void;
+  readonly agentBridge?: import('./host/review-agent-bridge.js').DocumentAgentBridge;
   readonly runtime?: HostRuntime;
   readonly initial?: HostRuntimeBootstrap;
   readonly loadingDocumentTitle?: string;
@@ -541,8 +541,8 @@ export function RuntimeProductionReviewApp(props: {
   readonly onDocumentTitleChange?: (title: string, generation: number) => void;
   readonly onRuntimeError?: (error: Error) => void;
   readonly registerCloseSettlement?: (settle: (() => Promise<void>) | undefined) => void;
-  readonly onCommandSurfaceChange?: (snapshot: ReviewCommandSurfaceSnapshot) => void;
-  readonly commandInvocation?: ReviewCommandInvocation;
+  readonly onCommandSurfaceChange?: (snapshot: DocumentCommandSurfaceSnapshot) => void;
+  readonly commandInvocation?: DocumentCommandInvocation;
   readonly transitionAttemptId?: string;
   readonly transitionVisible?: boolean;
 }) {
@@ -554,7 +554,7 @@ export function RuntimeProductionReviewApp(props: {
   useEffect(() => {
     const runtime = props.runtime;
     if (!runtime?.upgradePoll || !runtime.upgradeSettle) return;
-    const preparation = new ReviewUpgradePreparation({
+    const preparation = new DocumentUpgradePreparation({
       poll: () => runtime.upgradePoll!(), settle: request => runtime.upgradeSettle!(request),
       frozen: (frozen, reason) => { flushSync(() => { setUpgradeFrozen(frozen); setUpgradeMessage(reason); }); },
       protectInput: async () => {
@@ -574,7 +574,7 @@ export function RuntimeProductionReviewApp(props: {
   const [seed, setSeed] = useState(props.initial);
   const [loaded, setLoaded] = useState(props.initial);
   const [refreshStatus, setRefreshStatus] = useState<GenerationRefreshStatus>("idle");
-  const [hostReviewCommand, setHostReviewCommand] = useState<ReviewCommandInvocation>();
+  const [hostDocumentCommand, setHostDocumentCommand] = useState<DocumentCommandInvocation>();
   const [hostReattachRequestToken, setHostReattachRequestToken] = useState(0);
   const hostExportSequenceRef = useRef(0);
   const [hostExportRequest, setHostExportRequest] = useState<{ readonly token: number }>();
@@ -626,7 +626,7 @@ export function RuntimeProductionReviewApp(props: {
       return;
     }
     if (command.command === "review-command") {
-      setHostReviewCommand((current) => ({ id: command.id, token: (current?.token ?? 0) + 1 }));
+      setHostDocumentCommand((current) => ({ id: command.id, token: (current?.token ?? 0) + 1 }));
       return;
     }
     if (command.command === "reattach") {
@@ -678,14 +678,14 @@ export function RuntimeProductionReviewApp(props: {
   ]);
 
   const nativeInvocation = upgradeCommands.current.filter(props.commandInvocation, upgradeFrozen, "native");
-  const hostInvocation = upgradeCommands.current.filter(hostReviewCommand, upgradeFrozen, "host");
+  const hostInvocation = upgradeCommands.current.filter(hostDocumentCommand, upgradeFrozen, "host");
   const commandInvocation = props.commandInvocation === undefined ? hostInvocation : nativeInvocation;
   const visible = loaded ?? pendingRuntimeBootstrap(props.loadingDocumentTitle ?? "Opening PDF");
   // Initial preparation owns no document viewer or reading state. Mount the
   // real session afresh so its first render cannot reuse placeholder resources.
   // Later generations keep this instance and its predecessor reading capture.
   if (upgradeClosed) return <div role="status">This document was protected and closed for the upgrade. Reopen it in Placekeeper after installation finishes.</div>;
-  return <>{upgradeMessage && <div className="review-upgrade-status" role="status">{upgradeMessage}</div>}<div className="review-upgrade-content" inert={upgradeFrozen}><ProductionReviewApp
+  return <>{upgradeMessage && <div className="review-upgrade-status" role="status">{upgradeMessage}</div>}<div className="review-upgrade-content" inert={upgradeFrozen}><ProductionReaderApp
     key={loaded === undefined ? 'preparing-runtime' : 'active-runtime'}
     {...(props.onContextSnapshot === undefined ? {} : { onContextSnapshot: props.onContextSnapshot })}
     {...(props.agentBridge === undefined ? {} : { agentBridge: props.agentBridge })}
@@ -828,7 +828,7 @@ export async function startVscode(options: {
     setState(state: unknown): unknown;
   };
 }): Promise<void> {
-  if (options.panelKey !== undefined && !isReviewPanelKey(options.panelKey)) {
+  if (options.panelKey !== undefined && !isDocumentPanelKey(options.panelKey)) {
     throw new Error("A safe panel key is required.");
   }
   const runtime = createRpcHostRuntime(createVscodeMessagePort(options.panelId, options.vscode), {
@@ -840,7 +840,7 @@ export async function startVscode(options: {
   const rawPanelKey = typeof rawState === "object" && rawState !== null
     ? (rawState as { panelKey?: unknown }).panelKey
     : undefined;
-  const persistedPanelKey = isReviewPanelKey(rawPanelKey)
+  const persistedPanelKey = isDocumentPanelKey(rawPanelKey)
     ? rawPanelKey
     : undefined;
   const panelKey = options.panelKey ?? persistedPanelKey;

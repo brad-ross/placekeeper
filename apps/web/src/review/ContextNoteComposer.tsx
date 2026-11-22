@@ -1,6 +1,6 @@
 import { useId, useLayoutEffect, useRef, useState } from 'react';
-import { ReviewIcon } from './ReviewIcon.js';
-import { MAX_REVIEW_CONTEXT_NOTE_LENGTH } from '../host/review-agent-bridge.js';
+import { ReaderIcon } from './ReviewIcon.js';
+import { MAX_DOCUMENT_CONTEXT_NOTE_LENGTH } from '../host/review-agent-bridge.js';
 
 interface ContextNoteComposerProps {
   readonly kind: 'selection' | 'annotations';
@@ -53,7 +53,7 @@ export function ContextNoteComposer({ kind, excerpt, note, onNoteChange, onCance
       }
     }}>
       <header className="comment-composer__header compact-editorial-modal__header">
-        <h2 id={titleId}><ReviewIcon name="agent" size={16} /><span>Add {kind === 'selection' ? 'selection' : 'annotation'} to chat</span></h2>
+        <h2 id={titleId}><ReaderIcon name="agent" size={16} /><span>Add {kind === 'selection' ? 'selection' : 'annotation'} to chat</span></h2>
       </header>
       <div className="comment-composer__body compact-editorial-modal__body">
         {excerpt === '' ? null : <p className="context-note-composer__excerpt">{excerpt}</p>}
@@ -66,7 +66,7 @@ export function ContextNoteComposer({ kind, excerpt, note, onNoteChange, onCance
             ref={noteRef}
             value={note}
             rows={3}
-            maxLength={MAX_REVIEW_CONTEXT_NOTE_LENGTH}
+            maxLength={MAX_DOCUMENT_CONTEXT_NOTE_LENGTH}
             readOnly={pending}
             onChange={(event) => onNoteChange(event.currentTarget.value)}
           />

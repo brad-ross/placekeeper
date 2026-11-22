@@ -1,9 +1,9 @@
 import {
   DEFAULT_ANNOTATION_NAME,
-  anchorEvidenceFromReviewItem,
-  normalizeReviewSelectionAnchor,
-  type ReviewItem,
-  type ReviewSelectionPageEvidenceV1,
+  anchorEvidenceFromAnnotation,
+  normalizeDocumentSelectionAnchor,
+  type Annotation,
+  type DocumentSelectionPageEvidenceV1,
 } from './review-model.js';
 import { hasSafePortableAnnotationShape } from './portable-annotation-shape.js';
 
@@ -28,15 +28,15 @@ export interface SerializedPortableAnnotationChild {
       readonly projectionId: string;
       readonly projectionIndex: number;
       readonly projectionCount: number;
-      readonly item: ReviewItem;
+      readonly item: Annotation;
       readonly projection: {
         readonly id: string;
         readonly pageIndex: number;
         readonly subtype: 'strikeOut' | 'highlight';
         readonly contents: string;
         readonly author: string;
-        readonly rect: ReviewSelectionPageEvidenceV1['rect'];
-        readonly segmentRects: ReviewSelectionPageEvidenceV1['segmentRects'];
+        readonly rect: DocumentSelectionPageEvidenceV1['rect'];
+        readonly segmentRects: DocumentSelectionPageEvidenceV1['segmentRects'];
         readonly quote: string;
         readonly prefix: string;
         readonly suffix: string;
@@ -69,12 +69,12 @@ export function portableAnnotationProjectionId(
  * Writer/importer code and pre-acknowledgement validation share this exact contract.
  */
 export function serializePortableAnnotationGroup(
-  item: ReviewItem,
+  item: Annotation,
   author = DEFAULT_ANNOTATION_NAME,
 ): readonly SerializedPortableAnnotationChild[] {
-  const anchor = anchorEvidenceFromReviewItem(item);
+  const anchor = anchorEvidenceFromAnnotation(item);
   if (anchor.kind !== 'selection') return [];
-  const canonical = normalizeReviewSelectionAnchor(anchor);
+  const canonical = normalizeDocumentSelectionAnchor(anchor);
   const projectionCount = canonical.pages.length;
   const {
     prefix: _legacyPrefix,
@@ -89,7 +89,7 @@ export function serializePortableAnnotationGroup(
     importedAnnotationAuthor: _importedAuthor,
     ...portableItem
   } = item;
-  const canonicalItem: ReviewItem = {
+  const canonicalItem: Annotation = {
     ...portableItem,
     payload: canonicalPayload,
   };
@@ -140,7 +140,7 @@ export function serializePortableAnnotationGroup(
   });
 }
 
-export function assertPortableAnnotationGroupWritable(item: ReviewItem): void {
+export function assertPortableAnnotationGroupWritable(item: Annotation): void {
   const children = serializePortableAnnotationGroup(item);
   if (children.some(({ custom }) => !hasSafePortableAnnotationShape(custom))) {
     throw new PortableAnnotationGroupError(PORTABLE_ANNOTATION_UNSAFE_SHAPE_MESSAGE);

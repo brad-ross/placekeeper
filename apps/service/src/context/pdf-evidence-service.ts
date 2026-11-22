@@ -5,9 +5,9 @@ import {
   type ExistingPdfAnnotation,
   type LiveObservationIdentity,
   type PdfEvidenceCatalog,
-  type ReviewItemChanges,
+  type AnnotationChanges,
 } from "../../../../packages/core/src/live-context.js";
-import type { StructuredReviewItem } from "../../../../packages/core/src/structured-review-item.js";
+import type { StructuredAnnotation } from "../../../../packages/core/src/structured-review-item.js";
 import type { TaskBindingRegistry } from "./task-binding-registry.js";
 import {
   inspectPdfPageEvidence,
@@ -55,7 +55,7 @@ export type PdfEvidenceRetrievalResult =
     }
   | EvidenceUnavailable;
 
-export type ReviewItemRetrievalResult =
+export type AnnotationRetrievalResult =
   | {
       readonly status: "ok";
       readonly kind: "review-items";
@@ -64,7 +64,7 @@ export type ReviewItemRetrievalResult =
     }
   | EvidenceUnavailable;
 
-export type ReviewChangeRetrievalResult =
+export type DocumentChangeRetrievalResult =
   | {
       readonly status: "ok";
       readonly kind: "review-changes";
@@ -91,8 +91,8 @@ interface EvidencePayload {
   references: number;
   readonly byteLength: number;
   readonly existingAnnotations: readonly ExistingPdfAnnotation[];
-  readonly reviewItems: readonly StructuredReviewItem[];
-  readonly reviewChanges: ReviewItemChanges;
+  readonly reviewItems: readonly StructuredAnnotation[];
+  readonly reviewChanges: AnnotationChanges;
 }
 
 interface EvidenceCacheEntry {
@@ -107,7 +107,7 @@ export type EvidenceHandleAuthorization =
 export interface PdfEvidenceServiceOptions {
   readonly bindings: TaskBindingRegistry;
   readonly loadSource: (
-    reviewSessionId: string,
+    documentSessionId: string,
     expected: { readonly documentGeneration: number; readonly sourceDigest: string },
   ) => Promise<PdfEvidenceSource | undefined>;
   readonly inspectPage?: (
@@ -181,8 +181,8 @@ export class PdfEvidenceService {
     readonly pageCount: number;
     readonly sourceByteLength: number;
     readonly existingAnnotations: readonly ExistingPdfAnnotation[];
-    readonly reviewItems: readonly StructuredReviewItem[];
-    readonly reviewChanges?: ReviewItemChanges;
+    readonly reviewItems: readonly StructuredAnnotation[];
+    readonly reviewChanges?: AnnotationChanges;
   }): PdfEvidenceCatalog {
     this.#sweep();
     const binding = this.#bindings.bindingForTask(input.taskSessionId);
@@ -203,7 +203,7 @@ export class PdfEvidenceService {
     const value = this.#randomHandle();
     const recordKey = digest(value);
     const expiresAtMs = this.#now().getTime() + this.#handleTtlMs;
-    const reviewChanges: ReviewItemChanges = input.reviewChanges ?? {
+    const documentChanges: AnnotationChanges = input.reviewChanges ?? {
       mode: "full",
       reason: "initial",
       cursor: "evidence-only",
@@ -217,14 +217,14 @@ export class PdfEvidenceService {
       input.identity.placekeeperSessionId,
       input.identity.documentGeneration,
       input.identity.stateDigest,
-      digest(JSON.stringify([input.existingAnnotations, input.reviewItems, reviewChanges])),
+      digest(JSON.stringify([input.existingAnnotations, input.reviewItems, documentChanges])),
     ].join("\0");
     let payload = this.#payloads.get(payloadKey);
     if (payload === undefined) {
       const byteLength = Buffer.byteLength(JSON.stringify([
         input.existingAnnotations,
         input.reviewItems,
-        reviewChanges,
+        documentChanges,
       ]));
       if (byteLength > this.#maxRetainedPayloadBytes) {
         throw new RangeError("PDF evidence payload exceeds the retained evidence byte limit");
@@ -234,7 +234,7 @@ export class PdfEvidenceService {
         byteLength,
         existingAnnotations: structuredClone(input.existingAnnotations),
         reviewItems: structuredClone(input.reviewItems),
-        reviewChanges: structuredClone(reviewChanges),
+        reviewChanges: structuredClone(documentChanges),
       };
       this.#payloads.set(payloadKey, payload);
       this.#retainedPayloadBytes += byteLength;
@@ -290,9 +290,9 @@ export class PdfEvidenceService {
     }
   }
 
-  revokeSession(reviewSessionId: string): void {
+  revokeSession(documentSessionId: string): void {
     for (const [key, record] of this.#records) {
-      if (record.identity.placekeeperSessionId === reviewSessionId) this.#deleteRecord(key);
+      if (record.identity.placekeeperSessionId === documentSessionId) this.#deleteRecord(key);
     }
   }
 
@@ -341,13 +341,13 @@ export class PdfEvidenceService {
     });
   }
 
-  retrieveReviewItemsWithHandle(input: {
+  retrieveAnnotationsWithHandle(input: {
     readonly handle: string;
     readonly offset?: number;
     readonly limit?: number;
     readonly pageIndex?: number;
     readonly maxBytes?: number;
-  }): ReviewItemRetrievalResult {
+  }): AnnotationRetrievalResult {
     const authorization = this.authorizeHandle(input.handle);
     if (authorization.status === "unavailable") return authorization;
     const record = this.#records.get(digest(input.handle))!;
@@ -378,12 +378,12 @@ export class PdfEvidenceService {
     return { status: "ok", kind: "review-items", mediaType: "application/json", bytes };
   }
 
-  retrieveReviewChangesWithHandle(input: {
+  retrieveDocumentChangesWithHandle(input: {
     readonly handle: string;
     readonly offset?: number;
     readonly limit?: number;
     readonly maxBytes?: number;
-  }): ReviewChangeRetrievalResult {
+  }): DocumentChangeRetrievalResult {
     const authorization = this.authorizeHandle(input.handle);
     if (authorization.status === "unavailable") return authorization;
     const record = this.#records.get(digest(input.handle))!;

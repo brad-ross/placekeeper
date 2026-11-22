@@ -1,4 +1,4 @@
-import { reviewEdgeGeometry } from '../../scripts/testing/review-edge-geometry.js';
+import { documentEdgeGeometry } from '../../scripts/testing/review-edge-geometry.js';
 import { randomUUID } from 'node:crypto';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -6,9 +6,9 @@ import { join, resolve } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { PDFDocument, StandardFonts, degrees } from 'pdf-lib';
 import { PlacekeeperHost } from '../../apps/service/src/host/placekeeper-host.js';
-import { addDelete, addHighlight, addInsert, addPageNote, addReplace, editReviewItem } from '../../packages/core/src/review-commands.js';
-import type { ReviewSelectionAnchor } from '../../packages/core/src/review-commands.js';
-import type { ReviewState } from '../../packages/core/src/review-model.js';
+import { addDelete, addHighlight, addInsert, addPageNote, addReplace, editAnnotation } from '../../packages/core/src/review-commands.js';
+import type { DocumentSelectionAnchor } from '../../packages/core/src/review-commands.js';
+import type { DocumentState } from '../../packages/core/src/review-model.js';
 
 let root: string;
 let host: PlacekeeperHost;
@@ -45,7 +45,7 @@ async function fixture(page: Page, pageIndex = 0, multiline = false) {
   const launched = await host.open({ pdfPath, fork: true });
   if (!launched.ok || launched.kind === 'recovery-offered') throw new Error('PDF mark fixture failed');
   const current = () => host.broker.state(launched.sessionId)!;
-  const anchor = (lineIndex: number, prefix: string, quote: string): ReviewSelectionAnchor => {
+  const anchor = (lineIndex: number, prefix: string, quote: string): DocumentSelectionAnchor => {
     const rect = { x: 72 + phraseWidth(prefix), y: 792 - lines[lineIndex]![1] - 14,
       width: phraseWidth(quote), height: 18 };
     return { pageIndex, quote, prefix, suffix: '', rect, segmentRects: [rect], reliable: true };
@@ -53,19 +53,19 @@ async function fixture(page: Page, pageIndex = 0, multiline = false) {
   const firstHighlight = anchor(0, '', multiline ? lines[0][0] : 'Local comparisons');
   const nextLine = anchor(1, '', 'We hold');
   for (const command of [
-    (state: ReviewState) => addHighlight(state, multiline ? {
+    (state: DocumentState) => addHighlight(state, multiline ? {
       ...firstHighlight,
       quote: `${firstHighlight.quote}\n${nextLine.quote}`,
       rect: { ...firstHighlight.rect, height: nextLine.rect.y + nextLine.rect.height - firstHighlight.rect.y },
       segmentRects: [firstHighlight.rect, nextLine.rect],
     } : firstHighlight),
-    (state: ReviewState) => addHighlight(state, anchor(1, 'We hold ', 'market composition'), 'Which comparison group?'),
-    (state: ReviewState) => addDelete(state, anchor(2, 'This ', 'necessarily')),
-    (state: ReviewState) => addReplace(state, anchor(3, 'This implies ', 'a unique equilibrium.'), 'a local equilibrium.'),
-    (state: ReviewState) => addInsert(state, { pageIndex,
+    (state: DocumentState) => addHighlight(state, anchor(1, 'We hold ', 'market composition'), 'Which comparison group?'),
+    (state: DocumentState) => addDelete(state, anchor(2, 'This ', 'necessarily')),
+    (state: DocumentState) => addReplace(state, anchor(3, 'This implies ', 'a unique equilibrium.'), 'a local equilibrium.'),
+    (state: DocumentState) => addInsert(state, { pageIndex,
       position: { x: 72 + phraseWidth('The effect is'), y: 792 - 450 - 14, width: 2, height: 18 },
       leftContext: 'The effect is', rightContext: ' identified locally.', reliable: true }, 'precisely '),
-    (state: ReviewState) => addPageNote(state, pageIndex, { x: 535, y: 178, width: 18, height: 18 }, 'Connect this to Table 4.'),
+    (state: DocumentState) => addPageNote(state, pageIndex, { x: 535, y: 178, width: 18, height: 18 }, 'Connect this to Table 4.'),
   ]) await host.broker.acceptMutation(launched.sessionId, command(current()));
   await page.goto(launched.url);
   const pageInput = page.getByRole('textbox', { name: /^Current page/ });
@@ -144,7 +144,7 @@ test('marks preserve color through hover, activation, zoom, and comment removal'
   const selected = pdfPage.locator(`[data-owned-mark][data-review-id="${itemId}"]`);
   await expect(selected).toHaveCSS('background-color', before.background);
   const originalBoxStyle = await selected.evaluate((element) => ({ height: (element as HTMLElement).style.height, transform: (element as HTMLElement).style.transform }));
-  await host.broker.acceptMutation(sessionId, editReviewItem(current(), itemId, { comment: '' }));
+  await host.broker.acceptMutation(sessionId, editAnnotation(current(), itemId, { comment: '' }));
   await expect(selected).toHaveAttribute('data-has-attached-text', 'false');
   expect(await selected.evaluate((element) => ({ height: (element as HTMLElement).style.height, transform: (element as HTMLElement).style.transform }))).toEqual(originalBoxStyle);
   expect((await paint(selected)).underline).toBe('none');
@@ -386,7 +386,7 @@ for (const width of [1280, 620]) {
     await expect(peek).toBeVisible();
     const tray = page.locator('[data-tools-workspace-open="true"], [data-workspace-open="true"]').filter({ visible: true }).first();
     const trayBox = (await tray.boundingBox())!;
-    const edge = await page.locator('[data-review-stage]').evaluate(reviewEdgeGeometry);
+    const edge = await page.locator('[data-review-stage]').evaluate(documentEdgeGeometry);
     expect(edge.fadeSize).toBe(12);
     const start = width > 700 ? edge.rightStart : edge.bottomStart;
     expect((width > 700 ? trayBox.x : trayBox.y) - start).toBeCloseTo(12, 2);

@@ -1,4 +1,4 @@
-import type { ReviewCommand, ReviewStateView } from '../../../../packages/core/src/review-model.js';
+import type { DocumentCommand, DocumentStateView } from '../../../../packages/core/src/review-model.js';
 import { authoringAuthorityMatches, authoringAuthorityFor, type AuthoringAuthority } from '../review/authoring-session.js';
 export type PendingDestinationOutcome =
   | 'cancelled'
@@ -22,7 +22,7 @@ export function pendingDestinationDisposition(outcome: PendingDestinationOutcome
 
 export function pendingDestinationIsCurrent(
   pending: Pick<PendingAuthoringCommand, 'authority'>,
-  state: Pick<ReviewStateView, 'sessionId' | 'source'>,
+  state: Pick<DocumentStateView, 'sessionId' | 'source'>,
   documentGeneration: number,
 ): boolean {
   return authoringAuthorityMatches(
@@ -35,7 +35,7 @@ export function pendingDestinationAttemptIsCurrent(
   attempt: number,
   currentAttempt: number,
   pending: Pick<PendingAuthoringCommand, 'authority'> | undefined,
-  state: Pick<ReviewStateView, 'sessionId' | 'source'>,
+  state: Pick<DocumentStateView, 'sessionId' | 'source'>,
   documentGeneration: number,
 ): boolean {
   return attempt === currentAttempt
@@ -47,6 +47,6 @@ export function pendingDestinationAttemptIsCurrent(
 }
 
 export interface PendingAuthoringCommand {
-  readonly command: ReviewCommand;
+  readonly command: DocumentCommand;
   readonly authority: AuthoringAuthority;
 }

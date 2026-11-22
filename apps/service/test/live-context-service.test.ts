@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ExistingPdfAnnotation } from "../../../packages/core/src/live-context.js";
-import type { ReviewItem } from "../../../packages/core/src/review-model.js";
+import type { Annotation } from "../../../packages/core/src/review-model.js";
 import * as embedPdfAdapter from "../../../packages/pdf-backends/src/embedpdf-adapter.js";
 import { inspectLivePdf, LiveContextService } from "../src/context/live-context-service.js";
 import { RestartReconnectStore } from "../src/context/restart-reconnect-store.js";
@@ -21,7 +21,7 @@ afterEach(async () => {
 const id = (suffix: number) =>
   `00000000-0000-4000-8000-${suffix.toString().padStart(12, "0")}`;
 
-function item(suffix: number, proposedText = `replacement ${suffix}`): ReviewItem {
+function item(suffix: number, proposedText = `replacement ${suffix}`): Annotation {
   const rect = { x: 72, y: 100 + suffix * 20, width: 100, height: 14 };
   return {
     id: id(suffix),
@@ -121,7 +121,7 @@ describe("atomic live-context service", () => {
       rect: { x: 40, y: 80, width: 100, height: 14 },
       segmentRects: [{ x: 40, y: 80, width: 100, height: 14 }],
     }));
-    const owned: ReviewItem = {
+    const owned: Annotation = {
       ...item(7),
       payload: {
         quote: "claim across\npages",

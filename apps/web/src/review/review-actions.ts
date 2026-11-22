@@ -1,12 +1,12 @@
-import type { ReviewItemKind } from '../../../../packages/core/src/review-model.js';
+import type { AnnotationKind } from '../../../../packages/core/src/review-model.js';
 
-export interface ReviewActionMetadata {
-  readonly kind: ReviewItemKind;
+export interface DocumentActionMetadata {
+  readonly kind: AnnotationKind;
   readonly label: string;
   readonly shortcut: string;
 }
 
-export const reviewActions: readonly ReviewActionMetadata[] = Object.freeze([
+export const documentActions: readonly DocumentActionMetadata[] = Object.freeze([
   { kind: 'replace', label: 'Replace', shortcut: 'Alt+Shift+R' },
   { kind: 'delete', label: 'Delete', shortcut: 'Alt+Shift+D' },
   { kind: 'insert', label: 'Insert', shortcut: 'Alt+Shift+I' },
@@ -14,11 +14,11 @@ export const reviewActions: readonly ReviewActionMetadata[] = Object.freeze([
   { kind: 'pageNote', label: 'Page Note', shortcut: 'Alt+Shift+N' },
 ]);
 
-export function reviewActionForKey(key: string): ReviewItemKind | undefined {
-  const action = reviewActions.find(({ shortcut }) => shortcut.endsWith(key.toUpperCase()));
+export function documentActionForKey(key: string): AnnotationKind | undefined {
+  const action = documentActions.find(({ shortcut }) => shortcut.endsWith(key.toUpperCase()));
   return action?.kind === 'insert' ? undefined : action?.kind;
 }
 
-export function shortcutForReviewAction(kind: ReviewItemKind): string {
-  return reviewActions.find((action) => action.kind === kind)!.shortcut;
+export function shortcutForDocumentAction(kind: AnnotationKind): string {
+  return documentActions.find((action) => action.kind === kind)!.shortcut;
 }

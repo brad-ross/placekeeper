@@ -67,7 +67,7 @@ export interface ActiveTaskBinding {
   readonly lastVerified?: LiveObservationIdentity;
 }
 
-export interface LiveReviewIdentity {
+export interface LiveDocumentIdentity {
   readonly documentGeneration: number;
   readonly reviewRevision: number;
   readonly sourceDigest: string;
@@ -122,9 +122,9 @@ export class TaskBindingRegistry {
   #upgradeAuthorityEpoch = 0;
   readonly #nativePending = new Map<string, PendingBinding>();
   readonly #pendingByTask = new Map<string, PendingBinding>();
-  readonly #pendingByReview = new Map<string, PendingBinding>();
+  readonly #pendingByDocument = new Map<string, PendingBinding>();
   readonly #activeByTask = new Map<string, ActiveBinding>();
-  readonly #activeByReview = new Map<string, ActiveBinding>();
+  readonly #activeByDocument = new Map<string, ActiveBinding>();
   readonly #expiredTasks = new Map<string, number>();
   // Advisory, daemon-local history. Not consulted by ownership or authority checks.
   readonly #nativeReconnectHints = new Map<string, { reviewSessionId: string; pdfPath: string; expiresAtMs: number }>();
@@ -204,32 +204,32 @@ export class TaskBindingRegistry {
     if (!this.#associationAvailable(input)) return { status: "denied" };
     this.#invalidateReplacedSnapshots(input);
     this.#discardDifferentNativeHint(input.taskSessionId, input.reviewSessionId);
-    const activeForReview = this.#activeByReview.get(input.reviewSessionId);
+    const activeForDocument = this.#activeByDocument.get(input.reviewSessionId);
     const activeForTask = this.#activeByTask.get(input.taskSessionId);
-    if (activeForReview !== undefined || activeForTask !== undefined) {
+    if (activeForDocument !== undefined || activeForTask !== undefined) {
       if (
-        activeForReview === activeForTask &&
-        activeForReview?.taskSessionId === input.taskSessionId &&
-        activeForReview.reviewSessionId === input.reviewSessionId &&
-        activeForReview.documentGeneration === input.documentGeneration
+        activeForDocument === activeForTask &&
+        activeForDocument?.taskSessionId === input.taskSessionId &&
+        activeForDocument.reviewSessionId === input.reviewSessionId &&
+        activeForDocument.documentGeneration === input.documentGeneration
       ) {
-        activeForReview.browserCapabilityHashes.add(proof.browserCapabilityHash);
-        activeForReview.leaseExpiresAtMs = this.#nowMs() + this.#activeLeaseTtlMs;
-        return { status: "active", leaseExpiresAt: iso(activeForReview.leaseExpiresAtMs) };
+        activeForDocument.browserCapabilityHashes.add(proof.browserCapabilityHash);
+        activeForDocument.leaseExpiresAtMs = this.#nowMs() + this.#activeLeaseTtlMs;
+        return { status: "active", leaseExpiresAt: iso(activeForDocument.leaseExpiresAtMs) };
       }
       return { status: "denied" };
     }
 
-    const pendingForReview = this.#pendingByReview.get(input.reviewSessionId);
+    const pendingForDocument = this.#pendingByDocument.get(input.reviewSessionId);
     const pendingForTask = this.#pendingByTask.get(input.taskSessionId);
-    if (pendingForReview !== undefined || pendingForTask !== undefined) {
+    if (pendingForDocument !== undefined || pendingForTask !== undefined) {
       if (
-        pendingForReview === pendingForTask &&
-        pendingForReview?.taskSessionId === input.taskSessionId &&
-        pendingForReview.reviewSessionId === input.reviewSessionId &&
-        pendingForReview.documentGeneration === input.documentGeneration
+        pendingForDocument === pendingForTask &&
+        pendingForDocument?.taskSessionId === input.taskSessionId &&
+        pendingForDocument.reviewSessionId === input.reviewSessionId &&
+        pendingForDocument.documentGeneration === input.documentGeneration
       ) {
-        this.#removePending(pendingForReview);
+        this.#removePending(pendingForDocument);
       } else {
         return { status: "denied" };
       }
@@ -243,7 +243,7 @@ export class TaskBindingRegistry {
       expiresAtMs: proof.expiresAtMs,
     };
     this.#pendingByTask.set(input.taskSessionId, pending);
-    this.#pendingByReview.set(input.reviewSessionId, pending);
+    this.#pendingByDocument.set(input.reviewSessionId, pending);
     return { status: "pending", expiresAt: iso(pending.expiresAtMs) };
   }
 
@@ -397,9 +397,9 @@ export class TaskBindingRegistry {
     return true;
   }
 
-  relocateNativeReconnect(reviewSessionId: string, pdfPath: string): void {
+  relocateNativeReconnect(documentSessionId: string, pdfPath: string): void {
     for (const [task, hint] of this.#nativeReconnectHints) {
-      if (hint.reviewSessionId !== reviewSessionId) continue;
+      if (hint.reviewSessionId !== documentSessionId) continue;
       if (!this.#validReconnectPath(pdfPath)) this.#nativeReconnectHints.delete(task);
       else hint.pdfPath = pdfPath;
     }
@@ -408,7 +408,7 @@ export class TaskBindingRegistry {
   nativeReconnectForTask(taskSessionId: string): NativeReconnectGuidance | undefined {
     this.#sweep();
     const hint = this.#nativeReconnectHints.get(taskSessionId);
-    const owner = hint === undefined ? undefined : this.#activeByReview.get(hint.reviewSessionId);
+    const owner = hint === undefined ? undefined : this.#activeByDocument.get(hint.reviewSessionId);
     if (hint === undefined || (owner !== undefined && owner.taskSessionId !== taskSessionId)) return undefined;
     return { kind: "reopen-previous-source", pdfPath: hint.pdfPath, expiresAt: iso(hint.expiresAtMs) };
   }
@@ -417,9 +417,9 @@ export class TaskBindingRegistry {
     return isAbsolute(path) && path.length <= 4096 && !/[\u0000-\u001f\u007f]/u.test(path);
   }
 
-  #discardDifferentNativeHint(taskSessionId: string, reviewSessionId: string): void {
+  #discardDifferentNativeHint(taskSessionId: string, documentSessionId: string): void {
     const hint = this.#nativeReconnectHints.get(taskSessionId);
-    if (hint !== undefined && hint.reviewSessionId !== reviewSessionId) this.#nativeReconnectHints.delete(taskSessionId);
+    if (hint !== undefined && hint.reviewSessionId !== documentSessionId) this.#nativeReconnectHints.delete(taskSessionId);
   }
 
   hasPresentationAuthority(input: {
@@ -473,7 +473,7 @@ export class TaskBindingRegistry {
     ) return { status: "ignored" };
 
     const browserCapabilityHash = digestSecretHex(input.browserCapability);
-    const pending = this.#pendingByReview.get(input.reviewSessionId);
+    const pending = this.#pendingByDocument.get(input.reviewSessionId);
     if (
       pending === undefined ||
       pending.documentGeneration !== input.documentGeneration ||
@@ -489,7 +489,7 @@ export class TaskBindingRegistry {
       return { status: "ignored" };
     }
 
-    const existing = this.#activeByReview.get(input.reviewSessionId);
+    const existing = this.#activeByDocument.get(input.reviewSessionId);
     if (existing !== undefined) {
       if (
         existing.taskSessionId !== pending.taskSessionId ||
@@ -511,7 +511,7 @@ export class TaskBindingRegistry {
       leaseExpiresAtMs: this.#nowMs() + this.#activeLeaseTtlMs,
     };
     this.#activeByTask.set(active.taskSessionId, active);
-    this.#activeByReview.set(active.reviewSessionId, active);
+    this.#activeByDocument.set(active.reviewSessionId, active);
     return { status: "active", leaseExpiresAt: iso(active.leaseExpiresAtMs) };
   }
 
@@ -553,26 +553,26 @@ export class TaskBindingRegistry {
     if (!this.#associationAvailable(input)) return { status: "denied" };
     this.#invalidateReplacedSnapshots(input);
     this.#discardDifferentNativeHint(input.taskSessionId, input.reviewSessionId);
-    const activeForReview = this.#activeByReview.get(input.reviewSessionId);
+    const activeForDocument = this.#activeByDocument.get(input.reviewSessionId);
     const activeForTask = this.#activeByTask.get(input.taskSessionId);
-    if (activeForReview !== undefined || activeForTask !== undefined) {
+    if (activeForDocument !== undefined || activeForTask !== undefined) {
       if (
-        activeForReview === activeForTask &&
-        activeForReview?.taskSessionId === input.taskSessionId &&
-        activeForReview.reviewSessionId === input.reviewSessionId &&
-        activeForReview.documentGeneration === input.documentGeneration
+        activeForDocument === activeForTask &&
+        activeForDocument?.taskSessionId === input.taskSessionId &&
+        activeForDocument.reviewSessionId === input.reviewSessionId &&
+        activeForDocument.documentGeneration === input.documentGeneration
       ) {
-        activeForReview.browserCapabilityHashes.add(input.browserCapabilityHash);
-        activeForReview.leaseExpiresAtMs = this.#nowMs() + this.#activeLeaseTtlMs;
-        return { status: "active", leaseExpiresAt: iso(activeForReview.leaseExpiresAtMs) };
+        activeForDocument.browserCapabilityHashes.add(input.browserCapabilityHash);
+        activeForDocument.leaseExpiresAtMs = this.#nowMs() + this.#activeLeaseTtlMs;
+        return { status: "active", leaseExpiresAt: iso(activeForDocument.leaseExpiresAtMs) };
       }
       return { status: "denied" };
     }
 
-    const pendingForReview = this.#pendingByReview.get(input.reviewSessionId);
+    const pendingForDocument = this.#pendingByDocument.get(input.reviewSessionId);
     const pendingForTask = this.#pendingByTask.get(input.taskSessionId);
     if (
-      (pendingForReview !== undefined || pendingForTask !== undefined) &&
+      (pendingForDocument !== undefined || pendingForTask !== undefined) &&
       !allowSameAssociationPending
     ) {
       return { status: "denied" };
@@ -587,7 +587,7 @@ export class TaskBindingRegistry {
     };
     this.#expiredTasks.delete(input.taskSessionId);
     this.#activeByTask.set(active.taskSessionId, active);
-    this.#activeByReview.set(active.reviewSessionId, active);
+    this.#activeByDocument.set(active.reviewSessionId, active);
     return { status: "active", leaseExpiresAt: iso(active.leaseExpiresAtMs) };
   }
 
@@ -620,7 +620,7 @@ export class TaskBindingRegistry {
       !validId(input.reviewSessionId) ||
       !validGeneration(input.documentGeneration)
     ) return { status: "ignored" };
-    const active = this.#activeByReview.get(input.reviewSessionId);
+    const active = this.#activeByDocument.get(input.reviewSessionId);
     if (
       active === undefined ||
       active.documentGeneration !== input.documentGeneration ||
@@ -656,9 +656,9 @@ export class TaskBindingRegistry {
         };
   }
 
-  taskForGeneration(reviewSessionId: string, documentGeneration: number): string | undefined {
+  taskForGeneration(documentSessionId: string, documentGeneration: number): string | undefined {
     this.#sweep();
-    const active = this.#activeByReview.get(reviewSessionId);
+    const active = this.#activeByDocument.get(documentSessionId);
     return active?.documentGeneration === documentGeneration ? active.taskSessionId : undefined;
   }
 
@@ -669,12 +669,12 @@ export class TaskBindingRegistry {
   }
 
   statusForReview(
-    reviewSessionId: string,
-    live: LiveReviewIdentity,
+    documentSessionId: string,
+    live: LiveDocumentIdentity,
     browserCapabilityHash: string,
   ): LiveContextBindingStatus {
     this.#sweep();
-    const active = this.#activeByReview.get(reviewSessionId);
+    const active = this.#activeByDocument.get(documentSessionId);
     if (
       active?.documentGeneration === live.documentGeneration &&
       active.browserCapabilityHashes.has(browserCapabilityHash)
@@ -682,7 +682,7 @@ export class TaskBindingRegistry {
       const verified = active.lastVerified;
       const verifiedCurrent =
         verified !== undefined &&
-        verified.placekeeperSessionId === reviewSessionId &&
+        verified.placekeeperSessionId === documentSessionId &&
         verified.documentGeneration === live.documentGeneration &&
         verified.reviewRevision === live.reviewRevision &&
         verified.source.digest === live.sourceDigest &&
@@ -690,7 +690,7 @@ export class TaskBindingRegistry {
       return !verifiedCurrent
         ? {
             status: "refreshing",
-            placekeeperSessionId: reviewSessionId,
+            placekeeperSessionId: documentSessionId,
             documentGeneration: live.documentGeneration,
             ...(verified === undefined ? {} : { lastVerified: verified }),
           }
@@ -700,27 +700,27 @@ export class TaskBindingRegistry {
             leaseExpiresAt: iso(active.leaseExpiresAtMs),
           };
     }
-    const pending = this.#pendingByReview.get(reviewSessionId);
+    const pending = this.#pendingByDocument.get(documentSessionId);
     if (
       pending?.documentGeneration === live.documentGeneration &&
       pending.browserCapabilityHash === browserCapabilityHash
     ) {
       return {
         status: "pending",
-        placekeeperSessionId: reviewSessionId,
+        placekeeperSessionId: documentSessionId,
         documentGeneration: live.documentGeneration,
         expiresAt: iso(pending.expiresAtMs),
       };
     }
     for (const proof of this.#proofsByHash.values()) {
       if (
-        proof.reviewSessionId === reviewSessionId &&
+        proof.reviewSessionId === documentSessionId &&
         proof.documentGeneration === live.documentGeneration &&
         proof.browserCapabilityHash === browserCapabilityHash
       ) {
         return {
           status: "pending",
-          placekeeperSessionId: reviewSessionId,
+          placekeeperSessionId: documentSessionId,
           documentGeneration: live.documentGeneration,
           expiresAt: iso(proof.expiresAtMs),
         };
@@ -749,36 +749,36 @@ export class TaskBindingRegistry {
     this.#expiredTasks.delete(taskSessionId);
   }
 
-  revokeSession(reviewSessionId: string): void {
-    for (const [task, hint] of this.#nativeReconnectHints) if (hint.reviewSessionId === reviewSessionId) this.#nativeReconnectHints.delete(task);
-    this.#invalidateAuthoritySnapshots((check) => check.reviewSessionId === reviewSessionId);
-    this.#invalidateAuthorityChecks((check) => check.reviewSessionId === reviewSessionId);
+  revokeSession(documentSessionId: string): void {
+    for (const [task, hint] of this.#nativeReconnectHints) if (hint.reviewSessionId === documentSessionId) this.#nativeReconnectHints.delete(task);
+    this.#invalidateAuthoritySnapshots((check) => check.reviewSessionId === documentSessionId);
+    this.#invalidateAuthorityChecks((check) => check.reviewSessionId === documentSessionId);
     for (const [key, pending] of this.#nativePending) {
-      if (pending.reviewSessionId === reviewSessionId) {
+      if (pending.reviewSessionId === documentSessionId) {
         this.#nativePending.delete(key);
       }
     }
     for (const proof of [...this.#proofsByHash.values()]) {
-      if (proof.reviewSessionId === reviewSessionId) {
+      if (proof.reviewSessionId === documentSessionId) {
         this.#consumeProof(proof);
       }
     }
-    const pending = this.#pendingByReview.get(reviewSessionId);
+    const pending = this.#pendingByDocument.get(documentSessionId);
     if (pending !== undefined) {
       this.#removePending(pending);
     }
-    const active = this.#activeByReview.get(reviewSessionId);
+    const active = this.#activeByDocument.get(documentSessionId);
     if (active !== undefined) {
       this.#removeActive(active);
     }
   }
 
-  revokeGeneration(reviewSessionId: string, currentGeneration: number): void {
+  revokeGeneration(documentSessionId: string, currentGeneration: number): void {
     this.#invalidateAuthorityChecks((check) =>
-      check.reviewSessionId === reviewSessionId && check.documentGeneration !== currentGeneration);
+      check.reviewSessionId === documentSessionId && check.documentGeneration !== currentGeneration);
     for (const [key, pending] of this.#nativePending) {
       if (
-        pending.reviewSessionId === reviewSessionId &&
+        pending.reviewSessionId === documentSessionId &&
         pending.documentGeneration !== currentGeneration
       ) {
         this.#nativePending.delete(key);
@@ -786,20 +786,20 @@ export class TaskBindingRegistry {
     }
     for (const proof of [...this.#proofsByHash.values()]) {
       if (
-        proof.reviewSessionId === reviewSessionId &&
+        proof.reviewSessionId === documentSessionId &&
         proof.documentGeneration !== currentGeneration
       ) {
         this.#consumeProof(proof);
       }
     }
-    const pending = this.#pendingByReview.get(reviewSessionId);
+    const pending = this.#pendingByDocument.get(documentSessionId);
     if (
       pending !== undefined &&
       pending.documentGeneration !== currentGeneration
     ) {
       this.#removePending(pending);
     }
-    const active = this.#activeByReview.get(reviewSessionId);
+    const active = this.#activeByDocument.get(documentSessionId);
     if (
       active !== undefined &&
       active.documentGeneration !== currentGeneration
@@ -837,11 +837,11 @@ export class TaskBindingRegistry {
         this.#nativePending.delete(key);
       }
     }
-    const pending = this.#pendingByReview.get(input.reviewSessionId);
+    const pending = this.#pendingByDocument.get(input.reviewSessionId);
     if (pending !== undefined) {
       this.#removePending(pending);
     }
-    const active = this.#activeByReview.get(input.reviewSessionId);
+    const active = this.#activeByDocument.get(input.reviewSessionId);
     if (active === undefined) {
       return {
         status: "unbound",
@@ -869,9 +869,9 @@ export class TaskBindingRegistry {
     this.#proofsByHash.clear();
     this.#proofHashByBrowserCapabilityHash.clear();
     this.#pendingByTask.clear();
-    this.#pendingByReview.clear();
+    this.#pendingByDocument.clear();
     this.#activeByTask.clear();
-    this.#activeByReview.clear();
+    this.#activeByDocument.clear();
     this.#expiredTasks.clear();
   }
 
@@ -905,8 +905,8 @@ export class TaskBindingRegistry {
     if (this.#pendingByTask.get(binding.taskSessionId) === binding) {
       this.#pendingByTask.delete(binding.taskSessionId);
     }
-    if (this.#pendingByReview.get(binding.reviewSessionId) === binding) {
-      this.#pendingByReview.delete(binding.reviewSessionId);
+    if (this.#pendingByDocument.get(binding.reviewSessionId) === binding) {
+      this.#pendingByDocument.delete(binding.reviewSessionId);
     }
   }
 
@@ -914,8 +914,8 @@ export class TaskBindingRegistry {
     if (this.#activeByTask.get(binding.taskSessionId) === binding) {
       this.#activeByTask.delete(binding.taskSessionId);
     }
-    if (this.#activeByReview.get(binding.reviewSessionId) === binding) {
-      this.#activeByReview.delete(binding.reviewSessionId);
+    if (this.#activeByDocument.get(binding.reviewSessionId) === binding) {
+      this.#activeByDocument.delete(binding.reviewSessionId);
     }
   }
 

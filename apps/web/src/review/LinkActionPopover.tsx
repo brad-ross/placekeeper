@@ -22,8 +22,8 @@ import { PDF_LINK_ACTION_MENU_ID } from '../pdf/viewer-interaction-events.js';
 import { CopyLinkControl, type CopyLinkControlProps } from './CopyLinkControl.js';
 import { DestinationSnippetFrame, useDestinationSnippet } from './DestinationSnippet.js';
 import { compositeFocusIndex, enabledMenuItems } from './menu-focus.js';
-import { ReviewIcon, type ReviewIconName } from './ReviewIcon.js';
-import { ReviewTooltipButton } from './ReviewTooltipButton.js';
+import { ReaderIcon, type ReaderIconName } from './ReviewIcon.js';
+import { ReaderTooltipButton } from './ReviewTooltipButton.js';
 
 export type LinkActionChoice = 'references' | 'main' | 'same-reference';
 export type LinkActionDismissReason =
@@ -131,7 +131,7 @@ function LinkActionItem({
   onChoose,
 }: {
   readonly label: string;
-  readonly icon: ReviewIconName;
+  readonly icon: ReaderIconName;
   readonly choice: LinkActionChoice;
   readonly itemRef?: Ref<HTMLButtonElement> | undefined;
   readonly disabled?: boolean;
@@ -140,7 +140,7 @@ function LinkActionItem({
 }) {
   const busy = busyChoice !== null;
   return (
-    <ReviewTooltipButton
+    <ReaderTooltipButton
       label={label}
       ref={itemRef}
       type="button"
@@ -154,8 +154,8 @@ function LinkActionItem({
         if (!busy) onChoose(choice);
       }}
     >
-      <ReviewIcon name={icon} />
-    </ReviewTooltipButton>
+      <ReaderIcon name={icon} />
+    </ReaderTooltipButton>
   );
 }
 
@@ -249,7 +249,7 @@ export function LinkActionMenuContent({
           <div className="link-action-popover__action-group" role="group" aria-label="Preview controls">
             {previewZoom ? (
               <>
-                <ReviewTooltipButton
+                <ReaderTooltipButton
                   label="Zoom out"
                   type="button"
                   role="menuitem"
@@ -257,9 +257,9 @@ export function LinkActionMenuContent({
                   disabled={!previewZoom.canZoomOut}
                   onClick={previewZoom.zoomOut}
                 >
-                  <ReviewIcon name="minus" />
-                </ReviewTooltipButton>
-                <ReviewTooltipButton
+                  <ReaderIcon name="minus" />
+                </ReaderTooltipButton>
+                <ReaderTooltipButton
                   label="Zoom in"
                   type="button"
                   role="menuitem"
@@ -267,12 +267,12 @@ export function LinkActionMenuContent({
                   disabled={!previewZoom.canZoomIn}
                   onClick={previewZoom.zoomIn}
                 >
-                  <ReviewIcon name="plus" />
-                </ReviewTooltipButton>
+                  <ReaderIcon name="plus" />
+                </ReaderTooltipButton>
               </>
             ) : null}
             {onReturnToReference === undefined ? null : (
-              <ReviewTooltipButton
+              <ReaderTooltipButton
                 label="Return to reference"
                 type="button"
                 role="menuitem"
@@ -280,8 +280,8 @@ export function LinkActionMenuContent({
                 aria-label="Return to reference"
                 onClick={onReturnToReference}
               >
-                <ReviewIcon name="locate" />
-              </ReviewTooltipButton>
+                <ReaderIcon name="locate" />
+              </ReaderTooltipButton>
             )}
           </div>
         ) : null}
@@ -301,7 +301,7 @@ function completeFocusableSurface(surface: HTMLElement): readonly HTMLElement[] 
   ].join(','))];
 }
 
-export function visibleReviewViewport(): ViewportRect {
+export function visibleDocumentViewport(): ViewportRect {
   const viewport = globalThis.visualViewport;
   if (viewport) {
     return {
@@ -390,7 +390,7 @@ export function LinkActionPopover({
       const nextPlacement = placeLinkActionPopover({
         anchor: request.clientRect,
         menu: { width: bounds.width, height: bounds.height },
-        viewport: visibleReviewViewport(),
+        viewport: visibleDocumentViewport(),
       });
       setPlacement((current) => current?.left === nextPlacement.left
         && current.top === nextPlacement.top

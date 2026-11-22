@@ -4,9 +4,9 @@ import { codexPickerTimeouts, isCodexCapability, parseCodexAppRequest, parseCode
 export const EXTENSION_TOOL = 'extension_app';
 export const EXTENSION_META_KEY = 'placekeeper/extension';
 export type ExtensionPresentation = Extract<CodexAppResponse, { status: 'active' }>;
-export interface RecentReviewSummary { id: string; title: string; updatedAt: string; page?: number }
+export interface RecentDocumentSummary { id: string; title: string; updatedAt: string; page?: number }
 export type ExtensionResult =
-  | { status: 'recent-reviews'; items: RecentReviewSummary[] }
+  | { status: 'recent-reviews'; items: RecentDocumentSummary[] }
   | { status: 'position-saved' }
   | { status: 'provisional'; grant: string; hostFile?: HostResourceFile }
   | { status: 'active'; grant: string; presentation: ExtensionPresentation; contextPublished?: boolean }
@@ -60,7 +60,7 @@ export function parseExtensionResult(value: unknown): ExtensionResult | undefine
   if(!object(value)) return;
   if(value.status==='position-saved')return {status:'position-saved'};
   if(value.status==='recent-reviews'&&Array.isArray(value.items)&&value.items.length<=50){
-    const items:RecentReviewSummary[]=[];
+    const items:RecentDocumentSummary[]=[];
     for(const item of value.items){if(!object(item)||typeof item.id!=='string'||!(/^[A-Za-z0-9_-]{32}$/).test(item.id)||typeof item.title!=='string'||item.title.length>180||typeof item.updatedAt!=='string'||!Number.isFinite(Date.parse(item.updatedAt))||item.page!==undefined&&(!Number.isSafeInteger(item.page)||(item.page as number)<1||(item.page as number)>1000000))return;
       items.push({id:item.id,title:item.title,updatedAt:item.updatedAt,...(item.page===undefined?{}:{page:item.page as number})});}
     return {status:'recent-reviews',items};

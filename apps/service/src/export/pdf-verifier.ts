@@ -3,13 +3,13 @@ import { createHash } from "node:crypto";
 
 import type {
   PdfStructuralEvidence,
-  ReviewAnnotation,
+  PdfWriterAnnotation,
 } from "../../../../packages/core/src/pdf-writer.js";
 import {
   inspectPortableAnnotationsForImport,
   inspectProjectedPortableAnnotations,
 } from "../../../../packages/core/src/portable-annotation.js";
-import type { ReviewItem } from "../../../../packages/core/src/review-model.js";
+import type { Annotation } from "../../../../packages/core/src/review-model.js";
 import {
   inspectPdfWithEmbedPdf,
   type InspectedPdf,
@@ -21,7 +21,7 @@ export interface PdfVerificationInput {
   readonly sourcePdf: Uint8Array;
   readonly candidatePdf: Uint8Array;
   readonly evidence: PdfStructuralEvidence;
-  readonly annotations: readonly ReviewAnnotation[];
+  readonly annotations: readonly PdfWriterAnnotation[];
   readonly manageNativeAnnotations?: boolean;
   readonly sourceInspection?: InspectedPdf;
   readonly candidateInspection?: InspectedPdf;
@@ -54,7 +54,7 @@ function fail(message: string): never {
 }
 
 function portableInventory(inspection: InspectedPdf): {
-  readonly items: readonly ReviewItem[];
+  readonly items: readonly Annotation[];
   readonly physicalIdentities: ReadonlySet<string>;
 } {
   const nativeIds = new Set((inspection.nativeAnnotations ?? []).map(({ item }) => item.id));
@@ -107,7 +107,7 @@ function sameNumber(left: number, right: number): boolean {
 
 function sameRect(
   inspected: InspectedPdfAnnotation["rect"],
-  requested: ReviewAnnotation["rect"],
+  requested: PdfWriterAnnotation["rect"],
 ): boolean {
   return (
     sameNumber(inspected.origin.x, requested.x) &&
@@ -119,7 +119,7 @@ function sameRect(
 
 function sameIconAnchor(
   inspected: InspectedPdfAnnotation["rect"],
-  requested: ReviewAnnotation["rect"],
+  requested: PdfWriterAnnotation["rect"],
 ): boolean {
   return (
     Math.abs(inspected.origin.x - requested.x) <= 20.01 &&
@@ -129,7 +129,7 @@ function sameIconAnchor(
 
 function sameSegments(
   inspected: readonly InspectedPdfAnnotation["rect"][] | undefined,
-  requested: readonly ReviewAnnotation["rect"][] | undefined,
+  requested: readonly PdfWriterAnnotation["rect"][] | undefined,
 ): boolean {
   if (requested === undefined || requested.length === 0) return true;
   return (
@@ -141,7 +141,7 @@ function sameSegments(
   );
 }
 
-const subtypeByKind: Readonly<Record<ReviewAnnotation["kind"], string>> = {
+const subtypeByKind: Readonly<Record<PdfWriterAnnotation["kind"], string>> = {
   replace: "strikeOut",
   delete: "strikeOut",
   insert: "text",
@@ -150,7 +150,7 @@ const subtypeByKind: Readonly<Record<ReviewAnnotation["kind"], string>> = {
   pdfAnnotation: "unknown",
 };
 
-export const verifyReviewedPdf: PdfExportVerifier = async ({
+export const verifyAnnotatedPdf: PdfExportVerifier = async ({
   sourcePdf,
   candidatePdf,
   evidence,

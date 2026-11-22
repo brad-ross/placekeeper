@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createReviewState } from "../../../packages/core/src/review-model.js";
+import { createDocumentState } from "../../../packages/core/src/review-model.js";
 import { loadProductionSession, reopenProductionSession } from "../src/app/session-api.js";
 
 function jsonResponse(value: unknown, status = 200): Response {
@@ -132,7 +132,7 @@ describe("stale production-session reopen", () => {
 
 describe("production review commands", () => {
   it("surfaces an actionable invalid-command response without advancing local state", async () => {
-    const state = createReviewState({
+    const state = createDocumentState({
       sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
       source: { fileId: "source", digest: "a".repeat(64), byteLength: 100 },
     });
@@ -179,7 +179,7 @@ describe("production review commands", () => {
 
   it("rehydrates a generation conflict without replaying the rejected mutation", async () => {
     const sessionId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
-    const predecessor = createReviewState({
+    const predecessor = createDocumentState({
       sessionId,
       source: { fileId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", digest: "a".repeat(64), byteLength: 10 },
       workflowMode: "generated-output",

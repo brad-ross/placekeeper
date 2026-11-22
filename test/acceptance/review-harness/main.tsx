@@ -1,24 +1,24 @@
-import type { ReviewCommandInvocation } from '../../../apps/web/src/review/review-command-surface.js';
-import type { RejectedReviewCommand } from '../../../apps/web/src/review/review-command-result.js';
+import type { DocumentCommandInvocation } from '../../../apps/web/src/review/review-command-surface.js';
+import type { RejectedDocumentCommand } from '../../../apps/web/src/review/review-command-result.js';
 import { createRoot } from 'react-dom/client';
-import { ProductionReviewApp } from '../../../apps/web/src/app/ProductionReviewApp.js';
+import { ProductionReaderApp } from '../../../apps/web/src/app/ProductionReviewApp.js';
 import type { ProductionSessionApi } from '../../../apps/web/src/host/session-contracts.js';
-import { RuntimeProductionReviewApp } from '../../../apps/web/src/production-entry.js';
+import { RuntimeProductionReaderApp } from '../../../apps/web/src/production-entry.js';
 import type { HostRuntime, HostRuntimeBootstrap } from '../../../apps/web/src/host/runtime.js';
 import { createStaticHostRuntime } from '../../../apps/web/src/host/static-runtime.js';
-import { MemoryReviewLocationHistory } from '../../../apps/web/src/review/review-location-history.js';
+import { MemoryDocumentLocationHistory } from '../../../apps/web/src/review/review-location-history.js';
 import { createPortal } from 'react-dom';
 import { useRef, useState, useSyncExternalStore } from 'react';
 import { PdfZoomMode } from '@embedpdf/models';
 
 import {
-  ReviewShell,
+  ReaderShell,
 } from '../../../apps/web/src/app/ReviewShell.js';
 import { SaveDestinationDialog } from '../../../apps/web/src/save/SaveDestinationDialog.js';
 import { CommentComposer } from '../../../apps/web/src/review/CommentComposer.js';
 import { PdfSearchWorkspace } from '../../../apps/web/src/review/PdfSearchWorkspace.js';
 import { initialPdfSearchState } from '../../../apps/web/src/pdf/pdf-search-model.js';
-import { projectReviewItems } from '../../../apps/web/src/review/annotation-projection.js';
+import { projectAnnotations } from '../../../apps/web/src/review/annotation-projection.js';
 import { inventoryExistingAnnotations } from '../../../apps/web/src/pdf/existing-annotations.js';
 import { attachmentOrderedInteractionTransport } from '../../../apps/web/src/review/authoring-session.js';
 import type { CaretAnchor, SelectionAnchor } from '../../../apps/web/src/pdf/selection-anchor.js';
@@ -37,9 +37,9 @@ import {
   reduceReferenceNavigation,
   type ReferenceNavigationState,
 } from '../../../apps/web/src/review/reference-navigation-state.js';
-import { createReviewState, type ReviewCommand, type ReviewState } from '../../../packages/core/src/review-model.js';
-import { addPageNote, removeReviewItem } from '../../../packages/core/src/review-commands.js';
-import { reduceReview } from '../../../packages/core/src/review-reducer.js';
+import { createDocumentState, type DocumentCommand, type DocumentState } from '../../../packages/core/src/review-model.js';
+import { addPageNote, removeAnnotation } from '../../../packages/core/src/review-commands.js';
+import { reduceDocument } from '../../../packages/core/src/review-reducer.js';
 import { resolveVisualScenario, VisualDocument } from './visual-scenarios.js';
 
 const root = document.querySelector('#root');
@@ -165,8 +165,8 @@ const caret: CaretAnchor = {
   reliable: true,
 };
 
-function createReconciliationPreviewState(variant = 'default'): ReviewState {
-  const state = createReviewState({
+function createReconciliationPreviewState(variant = 'default'): DocumentState {
+  const state = createDocumentState({
     sessionId: '00000000-0000-4000-8000-000000000201',
     source: {
       fileId: '00000000-0000-4000-8000-000000000202',
@@ -289,7 +289,7 @@ function createReconciliationPreviewState(variant = 'default'): ReviewState {
       }],
     };
   }
-  const unresolvedState: ReviewState = {
+  const unresolvedState: DocumentState = {
     ...state,
     items: [{
       id: '00000000-0000-4000-8000-000000000203',
@@ -586,12 +586,12 @@ function activateVisualReference(
 function Harness() {
   const [state, setState] = useState(() => reconciliationPreview !== null
     ? createReconciliationPreviewState(reconciliationPreview)
-    : (visualScenario?.state ?? createReviewState({
+    : (visualScenario?.state ?? createDocumentState({
       sessionId: 'acceptance',
       source: { fileId: 'source', digest: 'a'.repeat(64), byteLength: 100 },
     })));
-  const reviewStateRef = useRef(state);
-  reviewStateRef.current = state;
+  const documentStateRef = useRef(state);
+  documentStateRef.current = state;
   const [anchorKind, setAnchorKind] = useState<'selection' | 'caret' | 'none'>(
     visualScenario ? (visualScenario.name === 'contextual' ? 'selection' : 'none') : 'selection',
   );
@@ -626,7 +626,7 @@ function Harness() {
   const [activeItemId, setActiveItemId] = useState<string>();
   const [activationRequest, setActivationRequest] = useState<{ id: string; token: number }>();
   const authoringActiveRef = useRef(false);
-  const [nativeInvocation, setNativeInvocation] = useState<ReviewCommandInvocation>({ id: 'zoom-out', token: 0 });
+  const [nativeInvocation, setNativeInvocation] = useState<DocumentCommandInvocation>({ id: 'zoom-out', token: 0 });
   const [saveDestinationOpen, setSaveDestinationOpen] = useState(false);
   const [exportCount, setExportCount] = useState(0);
   const hostExportSequenceRef = useRef(hostExportPreview ? 1 : 0);
@@ -676,7 +676,7 @@ function Harness() {
     viewerControls.zoomRequestsSnapshot,
   );
 
-  const accept = async (command: ReviewCommand): Promise<ReviewState | RejectedReviewCommand> => {
+  const accept = async (command: DocumentCommand): Promise<DocumentState | RejectedDocumentCommand> => {
     await Promise.resolve();
     if (holdNextCommand) {
       setHoldNextCommand(false);
@@ -687,13 +687,13 @@ function Harness() {
       setRejectNextCommand(false);
       return { accepted: false, state, message: 'Review changed elsewhere. Try again.' };
     }
-    const next = reduceReview(state, command);
+    const next = reduceDocument(state, command);
     setState(next);
     return next;
   };
 
   const shell = (
-    <ReviewShell
+    <ReaderShell
       key={shellMount}
       {...(nativeCommandsPreview ? {
         commandModalOpen: saveDestinationOpen,
@@ -769,7 +769,7 @@ function Harness() {
             }
           } : {})
         } : {}),
-        onExportReviewedCopy: async () => {
+        onExportAnnotatedCopy: async () => {
           setExportCount((count) => count + 1);
           if (exportPreview === 'delayed') {
             await new Promise<void>((resolve) => { finishExportRef.current = resolve; });
@@ -840,10 +840,10 @@ function Harness() {
                 ]));
                 return recovered;
               }
-              const current = reviewStateRef.current;
+              const current = documentStateRef.current;
               const draft = current.pendingDrafts.find(({ id }) => id === input.draftId);
               if (draft === undefined) throw new Error('Harness draft missing');
-              const next = reduceReview(current, input.outcome === 'applied' ? {
+              const next = reduceDocument(current, input.outcome === 'applied' ? {
                 type: 'apply-draft', expectedRevision: current.revision,
                 id: draft.id, expectedDraftRevision: input.expectedDraftRevision,
                 ownerViewId: 'harness-attachment', updatedAt: new Date().toISOString(),
@@ -861,7 +861,7 @@ function Harness() {
                 source: { ...next.source, digest: 'b'.repeat(64) },
                 workflow: { ...next.workflow, documentGeneration: next.workflow.documentGeneration + 1 },
               } : next;
-              reviewStateRef.current = published;
+              documentStateRef.current = published;
               setState(published);
               rootElement.setAttribute('data-interaction-hold', 'released');
               rootElement.setAttribute('data-interaction-events', JSON.stringify([
@@ -1045,7 +1045,7 @@ function Harness() {
         <button type="button" onClick={() => setState((current) => {
           let seeded = current;
           for (let index = 0; index < 16; index += 1) {
-            seeded = reduceReview(seeded, addPageNote(
+            seeded = reduceDocument(seeded, addPageNote(
               seeded,
               index % 4,
               { x: 80 + index, y: 120 + (index * 18), width: 18, height: 18 },
@@ -1054,7 +1054,7 @@ function Harness() {
           }
           return seeded;
         })}>Seed annotations</button>
-        <button type="button" onClick={() => setState((current) => reduceReview(current, addPageNote(
+        <button type="button" onClick={() => setState((current) => reduceDocument(current, addPageNote(
           current,
           2,
           { x: 112, y: 228, width: 18, height: 18 },
@@ -1066,7 +1066,7 @@ function Harness() {
         }))}>Replace source authority</button>
         {previewParameters.has('interaction-reconnect') ? <button type="button" onClick={async () => {
           rootElement.setAttribute('data-interaction-hold', 'released');
-          const current = reviewStateRef.current;
+          const current = documentStateRef.current;
           await Promise.all([...interactionReconnectListenersRef.current].map((listener) => listener({
             generation: current.workflow.documentGeneration,
             revision: current.revision,
@@ -1090,7 +1090,7 @@ function Harness() {
           if (targetItemId === undefined || !current.items.some(({ id }) => id === targetItemId)) {
             return current;
           }
-          return reduceReview(current, removeReviewItem(current, targetItemId));
+          return reduceDocument(current, removeAnnotation(current, targetItemId));
         })}>Remove active annotation</button>
         {previewParameters.has('external-reconciliation-removal') ? <button
           type="button"
@@ -1100,7 +1100,7 @@ function Harness() {
             ));
             return target === undefined
               ? current
-              : reduceReview(current, removeReviewItem(current, target.id));
+              : reduceDocument(current, removeAnnotation(current, target.id));
           })}
         >Resolve selected reconciliation elsewhere</button> : null}
         <button type="button" onClick={() => setPageMenuOpen(true)}>Open page actions</button>
@@ -1230,7 +1230,7 @@ function Harness() {
           </div>
         </div>
         <div aria-label="Owned annotation overlays" data-owned-annotation-layer>
-          {projectReviewItems(state.items).map((annotation) => (
+          {projectAnnotations(state.items).map((annotation) => (
             <span key={annotation.id}>
               <span
                 data-owned-mark={annotation.kind}
@@ -1286,7 +1286,7 @@ function Harness() {
           finishInteractionBeginRef.current = null;
         }}>Finish interaction begin</button> : null}
       </div>}
-    </ReviewShell>
+    </ReaderShell>
   );
 
   if (!visualScenario) return <>
@@ -1375,7 +1375,7 @@ function HostReattachmentPreview() {
   return <>
     <button type="button" style={{ position: 'fixed', bottom: 10, left: 10, zIndex: 1000 }}
       onClick={() => setToken((value) => value + 1)}>Request host reattachment</button>
-    <ProductionReviewApp session={{ sessionId: state.sessionId }} initialState={state}
+    <ProductionReaderApp session={{ sessionId: state.sessionId }} initialState={state}
       scope={{ documentTitle: 'Paper.pdf', launchSurface: 'vscode' }} api={api}
       hostReattachRequestToken={token} locationHistory={null}
       viewer={<div aria-label="Host fixture document" />} />
@@ -1388,7 +1388,7 @@ function DeferredHostHistoryPreview() {
     release: () => void;
   } | null>(null);
   if (fixture.current === null) {
-    const initialState = createReviewState({
+    const initialState = createDocumentState({
       sessionId: '00000000-0000-4000-8000-000000000301',
       source: { fileId: '00000000-0000-4000-8000-000000000302', digest: 'a'.repeat(64), byteLength: 12 },
     });
@@ -1409,7 +1409,7 @@ function DeferredHostHistoryPreview() {
         pdfiumWasm: '/dist/web/pdfium.wasm', workerUrl: '/dist/web/pdfium-worker.js',
       },
       resourcePolicy: { host: 'browser', origin: window.location.origin },
-      locationHistory: new MemoryReviewLocationHistory(),
+      locationHistory: new MemoryDocumentLocationHistory(),
     };
     let release!: () => void;
     const ready = new Promise<HostRuntimeBootstrap>((resolve) => { release = () => resolve(bootstrap); });
@@ -1431,7 +1431,7 @@ function DeferredHostHistoryPreview() {
   return <>
     <button type="button" style={{ position: 'fixed', bottom: 10, left: 10, zIndex: 1000 }}
       onClick={activeFixture.release}>Finish host bootstrap</button>
-    <RuntimeProductionReviewApp runtime={activeFixture.runtime} loadingDocumentTitle="Loading history fixture" />
+    <RuntimeProductionReaderApp runtime={activeFixture.runtime} loadingDocumentTitle="Loading history fixture" />
   </>;
 }
 
@@ -1444,7 +1444,7 @@ if (previewParameters.has('fit-modes')) {
       source: { name: filename, bytes: new Uint8Array(await response.arrayBuffer()) },
       viewerAssets: { pdfiumWasm: '/dist/web/pdfium.wasm', workerUrl: '/dist/web/pdfium-worker.js' },
     });
-    reactRoot.render(<RuntimeProductionReviewApp runtime={runtime} onDocumentReady={generation => root.setAttribute('data-runtime-ready-generation', String(generation))} />);
+    reactRoot.render(<RuntimeProductionReaderApp runtime={runtime} onDocumentReady={generation => root.setAttribute('data-runtime-ready-generation', String(generation))} />);
   }).catch((error: unknown) => reactRoot.render(<div role="alert">{String(error)}</div>));
 } else {
   reactRoot.render(previewParameters.has('host-history') ? <DeferredHostHistoryPreview />

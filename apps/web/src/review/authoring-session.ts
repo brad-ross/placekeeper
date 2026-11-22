@@ -1,21 +1,21 @@
 import type {
   JsonValue,
-  PendingReviewDraftV1,
-  ReviewItem,
-  ReviewStateView,
+  PendingDocumentDraftV1,
+  Annotation,
+  DocumentStateView,
 } from '../../../../packages/core/src/review-model.js';
 import {
-  anchorEvidenceFromReviewItem,
-  canonicalReviewSelectionEvidence,
-  normalizeReviewSelectionAnchor,
-  reviewSelectionPayload,
+  anchorEvidenceFromAnnotation,
+  canonicalDocumentSelectionEvidence,
+  normalizeDocumentSelectionAnchor,
+  documentSelectionPayload,
 } from '../../../../packages/core/src/review-model.js';
 import {
-  projectReviewItem,
-  projectReviewItemProjections,
+  projectAnnotation,
+  projectAnnotationProjections,
 } from '../../../../packages/core/src/annotation-projection.js';
-import type { ReviewAnnotation } from '../../../../packages/core/src/pdf-writer.js';
-import type { ReviewRect } from '../../../../packages/core/src/review-commands.js';
+import type { PdfWriterAnnotation } from '../../../../packages/core/src/pdf-writer.js';
+import type { DocumentRect } from '../../../../packages/core/src/review-commands.js';
 import type { CaretAnchor, SelectionAnchor } from '../pdf/selection-anchor.js';
 import type { PdfNaturalPoint } from '../pdf/viewer-navigation.js';
 import type { PdfAnnotationSurface } from '../pdf/annotation-surface.js';
@@ -23,19 +23,19 @@ import type { PdfNavigationTarget } from '../pdf/pdf-navigation-target.js';
 import type { WorkspaceMode } from './reference-navigation-state.js';
 import type { AnnotationReaderIdentity } from './annotation-reader.js';
 
-export type ReviewInteractionOutcome = 'applied' | 'discarded';
+export type DocumentInteractionOutcome = 'applied' | 'discarded';
 
-export interface ReviewInteractionReceipt {
+export interface DocumentInteractionReceipt {
   readonly status: 'finalized';
   readonly interactionToken: string;
   readonly generation: number;
-  readonly outcome: ReviewInteractionOutcome;
+  readonly outcome: DocumentInteractionOutcome;
   readonly reviewRevision: number;
   readonly sessionId?: string;
   readonly attachmentId?: string;
 }
 
-export interface ReviewInteractionTransport {
+export interface DocumentInteractionTransport {
   beginInteraction(input: {
     readonly interactionToken: string;
     readonly order: number;
@@ -45,7 +45,7 @@ export interface ReviewInteractionTransport {
   finalizeInteraction(input: {
     readonly interactionToken: string;
     readonly order: number;
-    readonly outcome: ReviewInteractionOutcome;
+    readonly outcome: DocumentInteractionOutcome;
     readonly draftId: string;
     readonly expectedDraftRevision: number;
   }): Promise<unknown>;
@@ -53,17 +53,17 @@ export interface ReviewInteractionTransport {
   acknowledgeInteraction(input: { readonly interactionToken: string; readonly order: number }): Promise<unknown>;
 }
 
-export interface ReviewInteractionHandle {
+export interface DocumentInteractionHandle {
   readonly interactionToken: string;
   readonly generation: number;
   readonly ownerViewId: string;
-  reacquire(): Promise<ReviewInteractionReceipt | undefined>;
-  finalize(outcome: ReviewInteractionOutcome, draftId: string, expectedDraftRevision: number): Promise<ReviewInteractionReceipt>;
-  acknowledge(receipt: ReviewInteractionReceipt): Promise<void>;
+  reacquire(): Promise<DocumentInteractionReceipt | undefined>;
+  finalize(outcome: DocumentInteractionOutcome, draftId: string, expectedDraftRevision: number): Promise<DocumentInteractionReceipt>;
+  acknowledge(receipt: DocumentInteractionReceipt): Promise<void>;
   release(): Promise<void>;
 }
 
-export interface OrderedReviewInteractionTransport extends ReviewInteractionTransport {
+export interface OrderedDocumentInteractionTransport extends DocumentInteractionTransport {
   dispose(): void;
 }
 
@@ -170,7 +170,7 @@ function schedulePendingInteractionReleaseDrain(state: AttachmentInteractionOrde
 
 function retainPendingInteractionRelease(
   state: AttachmentInteractionOrderState,
-  transport: ReviewInteractionTransport,
+  transport: DocumentInteractionTransport,
   request: { readonly interactionToken: string; readonly order: number },
   retainResult: boolean,
 ): void {
@@ -185,8 +185,8 @@ function retainPendingInteractionRelease(
 /** Shares the attachment-wide monotonic order fence across every editor surface and remount. */
 export function attachmentOrderedInteractionTransport(
   attachmentIdentity: object,
-  transport: ReviewInteractionTransport,
-): OrderedReviewInteractionTransport {
+  transport: DocumentInteractionTransport,
+): OrderedDocumentInteractionTransport {
   let state = attachmentInteractionOrders.get(attachmentIdentity);
   if (state === undefined) {
     state = {
@@ -342,13 +342,13 @@ function lifecycleRecord(value: unknown): Record<string, unknown> | null {
 }
 
 /** Starts one broker-owned interaction and retains an exact finalization request for retries. */
-export async function beginReviewInteraction(
-  transport: ReviewInteractionTransport,
+export async function beginDocumentInteraction(
+  transport: DocumentInteractionTransport,
   generation: number,
   interactionToken: string = crypto.randomUUID(),
   startingOrder = 1,
   draftId?: string,
-): Promise<ReviewInteractionHandle> {
+): Promise<DocumentInteractionHandle> {
   const beginRequest = {
     interactionToken,
     order: startingOrder,
@@ -363,7 +363,7 @@ export async function beginReviewInteraction(
   let finalization: {
     readonly interactionToken: string;
     readonly order: number;
-    readonly outcome: ReviewInteractionOutcome;
+    readonly outcome: DocumentInteractionOutcome;
     readonly draftId: string;
     readonly expectedDraftRevision: number;
   } | null = null;
@@ -382,7 +382,7 @@ export async function beginReviewInteraction(
       if (value?.status === 'finalized' && value.interactionToken === interactionToken &&
         value.generation === generation && (value.outcome === 'applied' || value.outcome === 'discarded') &&
         typeof value.reviewRevision === 'number') {
-        return value as unknown as ReviewInteractionReceipt;
+        return value as unknown as DocumentInteractionReceipt;
       }
       const current = typeof value?.generation === 'number' ? ` Current generation: ${value.generation}.` : '';
       throw new Error(`The annotation interaction could not be reacquired safely.${current}`);
@@ -399,7 +399,7 @@ export async function beginReviewInteraction(
         typeof value.reviewRevision !== 'number') {
         throw new Error('The annotation completion was not durably acknowledged.');
       }
-      return value as unknown as ReviewInteractionReceipt;
+      return value as unknown as DocumentInteractionReceipt;
     },
     async acknowledge(receipt) {
       if (consumed) return;
@@ -489,12 +489,12 @@ export type AuthoringSource =
   | {
       readonly kind: 'pageNote';
       readonly pageIndex: number;
-      readonly position: ReviewRect;
+      readonly position: DocumentRect;
       readonly nearbyText?: string;
     }
   | {
       readonly kind: 'edit';
-      readonly item: ReviewItem;
+      readonly item: Annotation;
     };
 
 export interface AuthoringSemantics {
@@ -511,7 +511,7 @@ export interface AuthoringSessionSeed {
   readonly source: AuthoringSource;
   readonly origin: AuthoringOrigin;
   readonly workspace: AuthoringWorkspaceSnapshot;
-  readonly interaction?: ReviewInteractionHandle;
+  readonly interaction?: DocumentInteractionHandle;
 }
 
 export interface AuthoringSession {
@@ -522,7 +522,7 @@ export interface AuthoringSession {
   readonly origin: AuthoringOrigin;
   readonly workspace: AuthoringWorkspaceSnapshot;
   readonly semantics: AuthoringSemantics;
-  readonly interaction?: ReviewInteractionHandle;
+  readonly interaction?: DocumentInteractionHandle;
 }
 
 export interface AuthoringAnchorSnapshot {
@@ -534,19 +534,19 @@ export interface AuthoringAnchorSnapshot {
   readonly referenceRecovery?: AuthoringReferenceRecovery;
 }
 
-export function reviewSourceIdentity(
-  state: Pick<ReviewStateView, 'sessionId' | 'source'>,
+export function documentSourceIdentity(
+  state: Pick<DocumentStateView, 'sessionId' | 'source'>,
 ): string {
   return JSON.stringify([state.sessionId, state.source.fileId, state.source.digest]);
 }
 
 export function authoringAuthorityFor(
-  state: Pick<ReviewStateView, 'sessionId' | 'source'>,
+  state: Pick<DocumentStateView, 'sessionId' | 'source'>,
   documentGeneration: number,
 ): AuthoringAuthority {
   return Object.freeze({
     sessionId: state.sessionId,
-    sourceIdentity: reviewSourceIdentity(state),
+    sourceIdentity: documentSourceIdentity(state),
     documentGeneration,
   });
 }
@@ -567,12 +567,12 @@ export function authoringSessionIsCurrent(
   return authoringAuthorityMatches(session.authority, current);
 }
 
-function cloneRect(rect: ReviewRect): ReviewRect {
+function cloneRect(rect: DocumentRect): DocumentRect {
   return Object.freeze({ x: rect.x, y: rect.y, width: rect.width, height: rect.height });
 }
 
 function cloneSelectionAnchor(anchor: SelectionAnchor): SelectionAnchor {
-  const canonical = normalizeReviewSelectionAnchor(anchor);
+  const canonical = normalizeDocumentSelectionAnchor(anchor);
   return Object.freeze({
     pageIndex: canonical.pageIndex,
     quote: canonical.quote,
@@ -610,7 +610,7 @@ function cloneJson(value: JsonValue): JsonValue {
   return value;
 }
 
-function cloneReviewItem(item: ReviewItem): ReviewItem {
+function cloneAnnotation(item: Annotation): Annotation {
   return Object.freeze({
     ...item,
     payload: Object.freeze(Object.fromEntries(
@@ -683,7 +683,7 @@ function cloneSource(source: AuthoringSource): AuthoringSource {
     case 'edit':
       return Object.freeze({
         ...source,
-        item: cloneReviewItem(source.item),
+        item: cloneAnnotation(source.item),
       });
   }
 }
@@ -759,13 +759,13 @@ export function pendingDraftForAuthoring(input: {
   readonly revision: number;
   readonly createdAt: string;
   readonly updatedAt: string;
-}): PendingReviewDraftV1 {
+}): PendingDocumentDraftV1 {
   const { session } = input;
   const source = session.source;
   const anchor = source.kind === 'replace' || source.kind === 'highlight'
     ? {
         kind: 'selection' as const,
-        ...canonicalReviewSelectionEvidence(source.anchor),
+        ...canonicalDocumentSelectionEvidence(source.anchor),
       }
     : source.kind === 'insert'
       ? {
@@ -782,7 +782,7 @@ export function pendingDraftForAuthoring(input: {
             ...(source.nearbyText === undefined ? {} : { nearbyText: source.nearbyText }),
             rect: source.position,
           }
-        : anchorEvidenceFromReviewItem(source.item);
+        : anchorEvidenceFromAnnotation(source.item);
   return Object.freeze({
     id: session.draftId,
     ownerViewId: input.ownerViewId,
@@ -800,7 +800,7 @@ export function pendingDraftForAuthoring(input: {
   });
 }
 
-function payloadPoint(item: ReviewItem): PdfNaturalPoint | null {
+function payloadPoint(item: Annotation): PdfNaturalPoint | null {
   const value = item.payload[item.kind === 'insert' || item.kind === 'pageNote' || item.kind === 'pdfAnnotation'
     ? 'position'
     : 'rect'];
@@ -853,10 +853,10 @@ export function canStartAuthoringSession(current: AuthoringSession | null): curr
 function selectionPayload(
   source: Extract<AuthoringSource, { readonly kind: 'replace' | 'highlight' }>,
 ): Record<string, JsonValue> {
-  return { ...reviewSelectionPayload(source.anchor, { canonical: true }) };
+  return { ...documentSelectionPayload(source.anchor, { canonical: true }) };
 }
 
-function editableField(item: ReviewItem): 'proposedText' | 'comment' | null {
+function editableField(item: Annotation): 'proposedText' | 'comment' | null {
   if (item.kind === 'replace' || item.kind === 'insert') return 'proposedText';
   if (item.kind === 'highlight' || item.kind === 'pageNote' || item.kind === 'pdfAnnotation') return 'comment';
   return null;
@@ -865,7 +865,7 @@ function editableField(item: ReviewItem): 'proposedText' | 'comment' | null {
 function authoringPreviewItem(
   session: AuthoringSession,
   value: string,
-): ReviewItem | null {
+): Annotation | null {
   const source = session.source;
   if (source.kind === 'edit') {
     const field = editableField(source.item);
@@ -882,7 +882,7 @@ function authoringPreviewItem(
     createdAt: timestamp,
     updatedAt: timestamp,
   } as const;
-  const item: ReviewItem = source.kind === 'replace'
+  const item: Annotation = source.kind === 'replace'
     ? {
         ...base,
         kind: 'replace',
@@ -931,23 +931,23 @@ function authoringPreviewItem(
 export function authoringPreviewAnnotation(
   session: AuthoringSession,
   value: string,
-): ReviewAnnotation | null {
+): PdfWriterAnnotation | null {
   const item = authoringPreviewItem(session, value);
-  return item === null ? null : projectReviewItem(item);
+  return item === null ? null : projectAnnotation(item);
 }
 
 /** Page-local visual previews backed by one immutable authoring session and draft. */
 export function authoringPreviewAnnotations(
   session: AuthoringSession,
   value: string,
-): readonly ReviewAnnotation[] {
+): readonly PdfWriterAnnotation[] {
   const item = authoringPreviewItem(session, value);
   return item === null
     ? []
-    : projectReviewItemProjections(item, undefined, { includePortableMetadata: false });
+    : projectAnnotationProjections(item, undefined, { includePortableMetadata: false });
 }
 
-export function mutableField(item: ReviewItem): 'proposedText' | 'comment' | undefined {
+export function mutableField(item: Annotation): 'proposedText' | 'comment' | undefined {
   if (item.kind === 'replace' || item.kind === 'insert') return 'proposedText';
   if (item.kind === 'highlight' || item.kind === 'pageNote' || item.kind === 'pdfAnnotation') return 'comment';
   return undefined;

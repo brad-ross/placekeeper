@@ -1,8 +1,8 @@
 import { it, expect, vi } from 'vitest';
 import { FocusedLaunchNavigation } from '../src/host/electron-focused-navigation.js';
-import { MemoryReviewLocationHistory } from '../src/review/review-location-history.js';
+import { MemoryDocumentLocationHistory } from '../src/review/review-location-history.js';
 it('focused activation waits shared navigation and paint rather than acknowledging the old page', async () => {
-    const history = new MemoryReviewLocationHistory();
+    const history = new MemoryDocumentLocationHistory();
     let settle!: (value: boolean) => void;
     const requested: unknown[] = [];
     history.start(async () => { requested.push(history.read()); return new Promise<boolean>(resolve => { settle = resolve; }); });
@@ -27,7 +27,7 @@ it('superseded or retired focused navigation cannot authorize the next launch', 
     controller.dispose(); completions[1]!(); await current; expect(visible).not.toHaveBeenCalled();
 });
 it('a stale or failed shared restore fails focused activation without retiring the reader', async () => {
-    const history = new MemoryReviewLocationHistory(); history.start(async () => false);
+    const history = new MemoryDocumentLocationHistory(); history.start(async () => false);
     const failed = vi.fn(async () => {}); const visible = vi.fn(async () => {});
     const controller = new FocusedLaunchNavigation({ navigate: location => history.navigate(location), painted: async () => {}, visible, failed });
     await expect(controller.apply({ type: 'confirm-visible', generation: 1, token: 'failed', location: { kind: 'page', page: 2 } })).rejects.toThrow('superseded');

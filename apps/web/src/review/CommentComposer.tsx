@@ -8,8 +8,8 @@ import {
 } from 'react';
 
 import type { PdfTargetVisibility } from '../pdf/viewer-navigation.js';
-import { ReviewIcon } from './ReviewIcon.js';
-import { ReviewTooltipButton } from './ReviewTooltipButton.js';
+import { ReaderIcon } from './ReviewIcon.js';
+import { ReaderTooltipButton } from './ReviewTooltipButton.js';
 
 function composerIcon(title: string) {
   const normalized = title.toLocaleLowerCase();
@@ -68,7 +68,7 @@ function AnchorReturn({ navigation, onActivate }: {
   if (state !== 'outside' && state !== 'pending') return null;
   const label = state === 'pending' ? 'Returning to passage' : 'Back to passage';
   return (
-    <ReviewTooltipButton
+    <ReaderTooltipButton
       className="comment-composer__anchor review-button review-button--secondary"
       type="button"
       label={label}
@@ -79,8 +79,8 @@ function AnchorReturn({ navigation, onActivate }: {
         onActivate?.();
       }}
     >
-      <ReviewIcon name={state === 'pending' ? 'loading' : 'locate'} size={16} />
-    </ReviewTooltipButton>
+      <ReaderIcon name={state === 'pending' ? 'loading' : 'locate'} size={16} />
+    </ReaderTooltipButton>
   );
 }
 
@@ -274,7 +274,7 @@ export function CommentComposer({
     >
       <header className="comment-composer__header compact-editorial-modal__header">
         <h2 id={titleId}>
-          <ReviewIcon name={composerIcon(title)} size={16} />
+          <ReaderIcon name={composerIcon(title)} size={16} />
           <span>{title}{anchorNavigation?.visibility === 'outside' && anchorNavigation.pageNumber !== undefined
             ? <span className="comment-composer__page-cue"> · {anchorNavigation.pageNumber}</span>
             : null}</span>
@@ -287,7 +287,7 @@ export function CommentComposer({
             title="Resume editing"
             onClick={resumeEditing}
           >
-            <ReviewIcon name="edit" size={16} />
+            <ReaderIcon name="edit" size={16} />
             <span>Resume editing</span>
           </button>
         ) : anchorNavigation?.visibility === 'outside' || anchorNavigation?.pending
@@ -362,7 +362,7 @@ export function CommentComposer({
             aria-busy={busy ? 'true' : undefined}
             data-submitting={busy ? 'true' : undefined}
           >
-            {busy ? <ReviewIcon name="loading" /> : null}
+            {busy ? <ReaderIcon name="loading" /> : null}
             <span>{saveLabel}</span>
           </button>
         </div>

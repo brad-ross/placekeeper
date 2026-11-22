@@ -4,38 +4,38 @@ import {
   type PlacekeeperLinkLocation,
 } from '../../../../packages/core/src/placekeeper-link.js';
 
-export interface ReviewLocationHistorySnapshot {
+export interface DocumentLocationHistorySnapshot {
   readonly canBack: boolean;
   readonly canForward: boolean;
 }
 
-export type ReviewLocationRestore = (direction: 'back' | 'forward' | 'unknown') => void | boolean | Promise<void | boolean>;
+export type DocumentLocationRestore = (direction: 'back' | 'forward' | 'unknown') => void | boolean | Promise<void | boolean>;
 
-export interface ReviewLocationHistoryPort {
-  start(onPop: ReviewLocationRestore): void;
+export interface DocumentLocationHistoryPort {
+  start(onPop: DocumentLocationRestore): void;
   read(): PlacekeeperLinkLocation;
   replace(location: PlacekeeperLinkLocation): void;
   push(location: PlacekeeperLinkLocation): void;
   back(): boolean;
   forward(): boolean;
-  snapshot(): ReviewLocationHistorySnapshot;
-  subscribe(listener: (snapshot: ReviewLocationHistorySnapshot) => void): () => void;
+  snapshot(): DocumentLocationHistorySnapshot;
+  subscribe(listener: (snapshot: DocumentLocationHistorySnapshot) => void): () => void;
   dispose(): void;
 }
 
-export interface ReviewLocationHistoryEnvironment {
+export interface DocumentLocationHistoryEnvironment {
   readonly location: { hash: string };
   readonly history: Pick<History, 'state' | 'length' | 'replaceState' | 'pushState' | 'back' | 'forward'>;
   addEventListener(type: 'popstate', listener: () => void): void;
   removeEventListener(type: 'popstate', listener: () => void): void;
 }
 
-export class MemoryReviewLocationHistory implements ReviewLocationHistoryPort {
+export class MemoryDocumentLocationHistory implements DocumentLocationHistoryPort {
   private readonly entries: PlacekeeperLinkLocation[];
   private index = 0;
-  private onPop: ReviewLocationRestore | null = null;
-  private readonly listeners = new Set<(snapshot: ReviewLocationHistorySnapshot) => void>();
-  private lastPublishedSnapshot: ReviewLocationHistorySnapshot = {
+  private onPop: DocumentLocationRestore | null = null;
+  private readonly listeners = new Set<(snapshot: DocumentLocationHistorySnapshot) => void>();
+  private lastPublishedSnapshot: DocumentLocationHistorySnapshot = {
     canBack: false,
     canForward: false,
   };
@@ -44,7 +44,7 @@ export class MemoryReviewLocationHistory implements ReviewLocationHistoryPort {
     this.entries = [structuredClone(initial)];
   }
 
-  start(onPop: ReviewLocationRestore): void {
+  start(onPop: DocumentLocationRestore): void {
     this.onPop = onPop;
     this.publish();
   }
@@ -82,11 +82,11 @@ export class MemoryReviewLocationHistory implements ReviewLocationHistoryPort {
     return this.move(1, 'forward');
   }
 
-  snapshot(): ReviewLocationHistorySnapshot {
+  snapshot(): DocumentLocationHistorySnapshot {
     return { canBack: this.index > 0, canForward: this.index < this.entries.length - 1 };
   }
 
-  subscribe(listener: (snapshot: ReviewLocationHistorySnapshot) => void): () => void {
+  subscribe(listener: (snapshot: DocumentLocationHistorySnapshot) => void): () => void {
     this.listeners.add(listener);
     listener(this.snapshot());
     return () => this.listeners.delete(listener);
@@ -139,21 +139,21 @@ function historyState(value: unknown): PlacekeeperHistoryState | null {
     : null;
 }
 
-export class BrowserReviewLocationHistory implements ReviewLocationHistoryPort {
+export class BrowserDocumentLocationHistory implements DocumentLocationHistoryPort {
   private index = 0;
   private maximumIndex = 0;
   private baseline = 0;
-  private onPop: ReviewLocationRestore | null = null;
-  private readonly listeners = new Set<(snapshot: ReviewLocationHistorySnapshot) => void>();
-  private lastPublishedSnapshot: ReviewLocationHistorySnapshot = {
+  private onPop: DocumentLocationRestore | null = null;
+  private readonly listeners = new Set<(snapshot: DocumentLocationHistorySnapshot) => void>();
+  private lastPublishedSnapshot: DocumentLocationHistorySnapshot = {
     canBack: false,
     canForward: false,
   };
   private started = false;
 
-  constructor(private readonly environment: ReviewLocationHistoryEnvironment) {}
+  constructor(private readonly environment: DocumentLocationHistoryEnvironment) {}
 
-  start(onPop: ReviewLocationRestore): void {
+  start(onPop: DocumentLocationRestore): void {
     this.onPop = onPop;
     if (this.started) return;
     this.started = true;
@@ -210,11 +210,11 @@ export class BrowserReviewLocationHistory implements ReviewLocationHistoryPort {
     return true;
   }
 
-  snapshot(): ReviewLocationHistorySnapshot {
+  snapshot(): DocumentLocationHistorySnapshot {
     return { canBack: this.index > 0, canForward: this.index < this.maximumIndex };
   }
 
-  subscribe(listener: (snapshot: ReviewLocationHistorySnapshot) => void): () => void {
+  subscribe(listener: (snapshot: DocumentLocationHistorySnapshot) => void): () => void {
     this.listeners.add(listener);
     listener(this.snapshot());
     return () => this.listeners.delete(listener);

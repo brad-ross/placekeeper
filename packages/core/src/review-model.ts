@@ -1,10 +1,10 @@
-import type { CompactReviewHistoryEntry } from './review-history.js';
+import type { CompactDocumentHistoryEntry } from './review-history.js';
 export type JsonPrimitive = boolean | number | string | null;
 export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue };
 
 export const DEFAULT_ANNOTATION_NAME = "Placekeeper";
 
-export type ReviewItemKind =
+export type AnnotationKind =
   | "replace"
   | "delete"
   | "insert"
@@ -12,23 +12,23 @@ export type ReviewItemKind =
   | "pageNote"
   | "pdfAnnotation";
 
-export interface ReviewItem {
+export interface Annotation {
   /** Author recovered only after portable ownership and visible projection validation. */
   readonly importedAnnotationAuthor?: string;
   readonly id: string;
-  readonly kind: ReviewItemKind;
+  readonly kind: AnnotationKind;
   readonly pageIndex: number;
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly payload: Readonly<Record<string, JsonValue>>;
   /** Generation-bound anchor state lives outside kind-specific semantics. */
-  readonly reconciliation?: ReviewItemReconciliationV1;
+  readonly reconciliation?: AnnotationReconciliationV1;
 }
 
-export type ReviewWorkflowMode = "standard" | "generated-output";
-export type ReviewDocumentFreshness = "current" | "possibly-stale";
+export type DocumentWorkflowMode = "standard" | "generated-output";
+export type DocumentFreshness = "current" | "possibly-stale";
 
-export interface ReviewRectEvidence {
+export interface DocumentRectEvidence {
   readonly x: number;
   readonly y: number;
   readonly width: number;
@@ -37,45 +37,45 @@ export interface ReviewRectEvidence {
 
 export const PDF_SELECTION_PAGE_LIMIT = 12;
 
-export interface ReviewSelectionPageEvidenceV1 {
+export interface DocumentSelectionPageEvidenceV1 {
   readonly pageIndex: number;
   readonly quote: string;
   readonly prefix: string;
   readonly suffix: string;
-  readonly rect: ReviewRectEvidence;
-  readonly segmentRects: readonly ReviewRectEvidence[];
+  readonly rect: DocumentRectEvidence;
+  readonly segmentRects: readonly DocumentRectEvidence[];
 }
 
-export interface ReviewSelectionPageBoundaryV1 {
+export interface DocumentSelectionPageBoundaryV1 {
   /** The source page immediately before this synthetic clipboard separator. */
   readonly afterPageIndex: number;
   readonly separator: string;
 }
 
-export interface ReviewSelectionAnchorV1 {
+export interface DocumentSelectionAnchorV1 {
   readonly pageIndex: number;
   /** Complete selected plain text in document order, including declared synthetic separators. */
   readonly quote: string;
   /** Compatibility aliases for the lead page and trailing context. */
   readonly prefix: string;
   readonly suffix: string;
-  readonly rect: ReviewRectEvidence;
-  readonly segmentRects: readonly ReviewRectEvidence[];
+  readonly rect: DocumentRectEvidence;
+  readonly segmentRects: readonly DocumentRectEvidence[];
   /** Absent only on legacy one-page payloads at a compatibility boundary. */
-  readonly pages?: readonly ReviewSelectionPageEvidenceV1[];
+  readonly pages?: readonly DocumentSelectionPageEvidenceV1[];
   /** Synthetic separators are metadata, never page-source text. */
-  readonly pageBoundaries?: readonly ReviewSelectionPageBoundaryV1[];
+  readonly pageBoundaries?: readonly DocumentSelectionPageBoundaryV1[];
 }
 
-export type CanonicalReviewSelectionAnchorV1 = ReviewSelectionAnchorV1 & {
-  readonly pages: readonly ReviewSelectionPageEvidenceV1[];
-  readonly pageBoundaries: readonly ReviewSelectionPageBoundaryV1[];
+export type CanonicalDocumentSelectionAnchorV1 = DocumentSelectionAnchorV1 & {
+  readonly pages: readonly DocumentSelectionPageEvidenceV1[];
+  readonly pageBoundaries: readonly DocumentSelectionPageBoundaryV1[];
 };
 
 /** Normalize legacy one-page selection evidence without changing its compatibility aliases. */
-export function normalizeReviewSelectionAnchor<T extends ReviewSelectionAnchorV1>(
+export function normalizeDocumentSelectionAnchor<T extends DocumentSelectionAnchorV1>(
   anchor: T,
-): T & CanonicalReviewSelectionAnchorV1 {
+): T & CanonicalDocumentSelectionAnchorV1 {
   const legacyPage = {
     pageIndex: anchor.pageIndex,
     quote: anchor.quote,
@@ -92,10 +92,10 @@ export function normalizeReviewSelectionAnchor<T extends ReviewSelectionAnchorV1
   };
 }
 
-export function canonicalReviewSelectionEvidence(
-  anchor: ReviewSelectionAnchorV1,
-): CanonicalReviewSelectionAnchorV1 {
-  const canonical = normalizeReviewSelectionAnchor(anchor);
+export function canonicalDocumentSelectionEvidence(
+  anchor: DocumentSelectionAnchorV1,
+): CanonicalDocumentSelectionAnchorV1 {
+  const canonical = normalizeDocumentSelectionAnchor(anchor);
   return {
     pageIndex: canonical.pageIndex,
     quote: canonical.quote,
@@ -112,11 +112,11 @@ export function canonicalReviewSelectionEvidence(
   };
 }
 
-export function reviewSelectionPayload(
-  anchor: ReviewSelectionAnchorV1,
+export function documentSelectionPayload(
+  anchor: DocumentSelectionAnchorV1,
   options: { readonly canonical?: boolean } = {},
 ): Readonly<Record<string, JsonValue>> {
-  const evidence = canonicalReviewSelectionEvidence(anchor);
+  const evidence = canonicalDocumentSelectionEvidence(anchor);
   const includeCanonical = options.canonical === true
     || anchor.pages !== undefined || anchor.pageBoundaries !== undefined;
   return {
@@ -137,8 +137,8 @@ export function reviewSelectionPayload(
   };
 }
 
-export type ReviewAnchorEvidenceV1 =
-  | (ReviewSelectionAnchorV1 & {
+export type DocumentAnchorEvidenceV1 =
+  | (DocumentSelectionAnchorV1 & {
       readonly kind: "selection";
     })
   | {
@@ -146,27 +146,27 @@ export type ReviewAnchorEvidenceV1 =
       readonly pageIndex: number;
       readonly leftContext: string;
       readonly rightContext: string;
-      readonly rect: ReviewRectEvidence;
+      readonly rect: DocumentRectEvidence;
     }
   | {
       readonly kind: "page";
       readonly pageIndex: number;
       readonly nearbyText?: string;
-      readonly rect: ReviewRectEvidence;
+      readonly rect: DocumentRectEvidence;
     };
 
 /** Keep a Review Item's compatibility payload and canonical reconciliation
  * anchor in lockstep when semantic evidence moves to a new document layout. */
-export function synchronizeReviewItemAnchor(
-  item: ReviewItem,
-  anchor: ReviewAnchorEvidenceV1,
-): ReviewItem {
+export function synchronizeAnnotationAnchor(
+  item: Annotation,
+  anchor: DocumentAnchorEvidenceV1,
+): Annotation {
   let payload: Readonly<Record<string, JsonValue>>;
   if (anchor.kind === "selection") {
     if (item.kind !== "replace" && item.kind !== "delete" && item.kind !== "highlight") {
       throw new Error(`Review item ${item.kind} cannot use a selection anchor`);
     }
-    const selection = reviewSelectionPayload(anchor, { canonical: true });
+    const selection = documentSelectionPayload(anchor, { canonical: true });
     if (item.kind === "replace") {
       const proposedText = item.payload.proposedText;
       if (typeof proposedText !== "string") throw new Error("Replace item is missing proposed text");
@@ -213,46 +213,46 @@ export function synchronizeReviewItemAnchor(
   };
 }
 
-export type ReviewAnchorDisposition =
+export type DocumentAnchorDisposition =
   | { readonly kind: "resolved"; readonly generation: number }
   | { readonly kind: "ambiguous"; readonly reason: string }
   | { readonly kind: "missing"; readonly reason: string }
   | { readonly kind: "unsupported"; readonly reason: string };
 
-export interface ReviewPredecessorAnchorV1 {
+export interface DocumentPredecessorAnchorV1 {
   readonly generation: number;
-  readonly anchor: ReviewAnchorEvidenceV1;
-  readonly disposition: ReviewAnchorDisposition;
+  readonly anchor: DocumentAnchorEvidenceV1;
+  readonly disposition: DocumentAnchorDisposition;
 }
 
-export interface ReviewItemReconciliationV1 {
+export interface AnnotationReconciliationV1 {
   readonly schemaVersion: 1;
   readonly ownerViewId: string;
   readonly baseGeneration: number;
   readonly revision: number;
-  readonly anchor: ReviewAnchorEvidenceV1;
-  readonly disposition: ReviewAnchorDisposition;
-  readonly previousAnchors: readonly ReviewPredecessorAnchorV1[];
+  readonly anchor: DocumentAnchorEvidenceV1;
+  readonly disposition: DocumentAnchorDisposition;
+  readonly previousAnchors: readonly DocumentPredecessorAnchorV1[];
 }
 
-export interface PendingReviewDraftV1 {
+export interface PendingDocumentDraftV1 {
   readonly id: string;
   readonly ownerViewId: string;
   readonly baseGeneration: number;
   readonly revision: number;
-  readonly kind: ReviewItemKind;
+  readonly kind: AnnotationKind;
   /** Present when the draft edits an existing Review Item instead of creating one. */
   readonly targetItemId?: string;
   readonly pageIndex: number;
   readonly text: string;
-  readonly anchor: ReviewAnchorEvidenceV1;
-  readonly disposition: ReviewAnchorDisposition;
+  readonly anchor: DocumentAnchorEvidenceV1;
+  readonly disposition: DocumentAnchorDisposition;
   readonly status: "protected" | "frozen";
   readonly createdAt: string;
   readonly updatedAt: string;
 }
 
-export interface ReviewDiscardAuditV1 {
+export interface DocumentDiscardAuditV1 {
   readonly target: "item" | "draft";
   readonly id: string;
   readonly generation: number;
@@ -262,23 +262,23 @@ export interface ReviewDiscardAuditV1 {
   readonly discardedAt: string;
 }
 
-export interface ReviewWorkflowStateV1 {
+export interface DocumentWorkflowStateV1 {
   readonly schemaVersion: 1;
-  readonly mode: ReviewWorkflowMode;
+  readonly mode: DocumentWorkflowMode;
   readonly documentRole: "source-pdf" | "generated-output";
   readonly documentGeneration: number;
-  readonly freshness: ReviewDocumentFreshness;
+  readonly freshness: DocumentFreshness;
   /** Entries before this cursor belong to predecessor document geometry. */
   readonly historyBoundary: number;
 }
 
-export interface ReviewSourceIdentity {
+export interface DocumentSourceIdentity {
   readonly fileId: string;
   readonly digest: string;
   readonly byteLength: number;
 }
 
-export interface ReviewState {
+export interface DocumentState {
   /** Undefined preserves imported authors; a confirmed blank is explicitly Placekeeper. */
   readonly annotationName?: string;
   /** Durable import boundary: absence identifies recovery state from before standard-PDF editing. */
@@ -286,16 +286,16 @@ export interface ReviewState {
   /** v1 stored page geometry with an erroneous CropBox offset; v2 is crop-relative. */
   readonly schemaVersion: 1 | 2;
   readonly sessionId: string;
-  readonly source: ReviewSourceIdentity;
+  readonly source: DocumentSourceIdentity;
   readonly sourceRootId?: string;
   readonly revision: number;
   readonly lifecycle: "active" | "finished" | "discarded";
-  readonly items: readonly ReviewItem[];
-  readonly workflow: ReviewWorkflowStateV1;
-  readonly pendingDrafts: readonly PendingReviewDraftV1[];
-  readonly discardAudit: readonly ReviewDiscardAuditV1[];
+  readonly items: readonly Annotation[];
+  readonly workflow: DocumentWorkflowStateV1;
+  readonly pendingDrafts: readonly PendingDocumentDraftV1[];
+  readonly discardAudit: readonly DocumentDiscardAuditV1[];
   /** Canonical semantic history. The cursor points just after the last applied entry. */
-  readonly history: readonly ReviewHistoryEntry[];
+  readonly history: readonly DocumentHistoryEntry[];
   readonly historyCursor: number;
 }
 
@@ -303,28 +303,28 @@ export interface ReviewState {
  * a renderer only needs the history length and cursor to enable Undo and Redo.
  * Full ReviewState is also a valid view (for browser/static hosts).
  */
-export type ReviewStateView = Omit<ReviewState, "history"> & {
+export type DocumentStateView = Omit<DocumentState, "history"> & {
   readonly history: { readonly length: number };
 };
 
-export type ReviewHistoryEntry = LegacyReviewHistoryEntry | CompactReviewHistoryEntry;
+export type DocumentHistoryEntry = LegacyDocumentHistoryEntry | CompactDocumentHistoryEntry;
 
-export interface LegacyReviewHistoryEntry {
-  readonly beforeItems: readonly ReviewItem[];
-  readonly afterItems: readonly ReviewItem[];
+export interface LegacyDocumentHistoryEntry {
+  readonly beforeItems: readonly Annotation[];
+  readonly afterItems: readonly Annotation[];
   readonly generation?: number;
-  readonly beforePendingDrafts?: readonly PendingReviewDraftV1[];
-  readonly afterPendingDrafts?: readonly PendingReviewDraftV1[];
-  readonly beforeDiscardAudit?: readonly ReviewDiscardAuditV1[];
-  readonly afterDiscardAudit?: readonly ReviewDiscardAuditV1[];
+  readonly beforePendingDrafts?: readonly PendingDocumentDraftV1[];
+  readonly afterPendingDrafts?: readonly PendingDocumentDraftV1[];
+  readonly beforeDiscardAudit?: readonly DocumentDiscardAuditV1[];
+  readonly afterDiscardAudit?: readonly DocumentDiscardAuditV1[];
 }
 
-export type ReviewCommand =
+export type DocumentCommand =
   | { readonly type: "set-annotation-name"; readonly expectedRevision: number; readonly annotationName: string }
   | {
       readonly type: "add";
       readonly expectedRevision: number;
-      readonly item: ReviewItem;
+      readonly item: Annotation;
       readonly authoring?: {
         readonly ownerViewId: string;
         readonly baseGeneration: number;
@@ -354,7 +354,7 @@ export type ReviewCommand =
       readonly type: "put-draft";
       readonly expectedRevision: number;
       readonly expectedDraftRevision: number;
-      readonly draft: PendingReviewDraftV1;
+      readonly draft: PendingDocumentDraftV1;
     }
   | {
       readonly type: "reattach";
@@ -362,7 +362,7 @@ export type ReviewCommand =
       readonly id: string;
       readonly expectedReconciliationRevision: number;
       readonly ownerViewId: string;
-      readonly anchor: ReviewAnchorEvidenceV1;
+      readonly anchor: DocumentAnchorEvidenceV1;
       readonly updatedAt: string;
     }
   | {
@@ -391,7 +391,7 @@ function record(value: JsonValue | undefined): Readonly<Record<string, JsonValue
   return value;
 }
 
-function rectEvidence(value: JsonValue | undefined): ReviewRectEvidence {
+function rectEvidence(value: JsonValue | undefined): DocumentRectEvidence {
   const valueRecord = record(value);
   const { x, y, width, height } = valueRecord;
   if (![x, y, width, height].every((part) => typeof part === "number" && Number.isFinite(part))) {
@@ -400,7 +400,7 @@ function rectEvidence(value: JsonValue | undefined): ReviewRectEvidence {
   return { x: x as number, y: y as number, width: width as number, height: height as number };
 }
 
-function selectionPages(value: JsonValue | undefined): readonly ReviewSelectionPageEvidenceV1[] | undefined {
+function selectionPages(value: JsonValue | undefined): readonly DocumentSelectionPageEvidenceV1[] | undefined {
   if (value === undefined) return undefined;
   if (!Array.isArray(value)) throw new Error("Review selection pages are malformed");
   return value.map((entry) => {
@@ -423,7 +423,7 @@ function selectionPages(value: JsonValue | undefined): readonly ReviewSelectionP
   });
 }
 
-function selectionBoundaries(value: JsonValue | undefined): readonly ReviewSelectionPageBoundaryV1[] | undefined {
+function selectionBoundaries(value: JsonValue | undefined): readonly DocumentSelectionPageBoundaryV1[] | undefined {
   if (value === undefined) return undefined;
   if (!Array.isArray(value)) throw new Error("Review selection boundaries are malformed");
   return value.map((entry) => {
@@ -438,13 +438,13 @@ function selectionBoundaries(value: JsonValue | undefined): readonly ReviewSelec
   });
 }
 
-function payloadText(item: ReviewItem, key: string): string {
+function payloadText(item: Annotation, key: string): string {
   const value = item.payload[key];
   if (typeof value !== "string") throw new Error(`Review item ${item.id} is missing ${key}`);
   return value;
 }
 
-export function anchorEvidenceFromReviewItem(item: ReviewItem): ReviewAnchorEvidenceV1 {
+export function anchorEvidenceFromAnnotation(item: Annotation): DocumentAnchorEvidenceV1 {
   if (item.reconciliation !== undefined) return structuredClone(item.reconciliation.anchor);
   if (item.kind === "insert") {
     return {
@@ -480,10 +480,10 @@ export function anchorEvidenceFromReviewItem(item: ReviewItem): ReviewAnchorEvid
   };
 }
 
-export function canonicalizeReviewItem(
-  item: ReviewItem,
+export function canonicalizeAnnotation(
+  item: Annotation,
   input: { readonly ownerViewId: string; readonly baseGeneration: number },
-): ReviewItem {
+): Annotation {
   return item.reconciliation !== undefined
     ? item
     : {
@@ -493,20 +493,20 @@ export function canonicalizeReviewItem(
           ownerViewId: input.ownerViewId,
           baseGeneration: input.baseGeneration,
           revision: 0,
-          anchor: anchorEvidenceFromReviewItem(item),
+          anchor: anchorEvidenceFromAnnotation(item),
           disposition: { kind: "resolved", generation: input.baseGeneration },
           previousAnchors: [],
         },
       };
 }
 
-export function createReviewState(input: {
+export function createDocumentState(input: {
   sessionId: string;
-  source: ReviewSourceIdentity;
+  source: DocumentSourceIdentity;
   sourceRootId?: string;
-  workflowMode?: ReviewWorkflowMode;
+  workflowMode?: DocumentWorkflowMode;
   documentGeneration?: number;
-}): ReviewState {
+}): DocumentState {
   const mode = input.workflowMode ?? "standard";
   const documentGeneration = input.documentGeneration ?? 1;
   return {
@@ -538,7 +538,7 @@ export function normalizeAnnotationName(value: string): string {
   return value.trim() || DEFAULT_ANNOTATION_NAME;
 }
 
-export function normalizeReviewState(state: ReviewState): ReviewState {
+export function normalizeDocumentState(state: DocumentState): DocumentState {
   const workflow = state.workflow ?? {
     schemaVersion: 1 as const,
     mode: "standard" as const,
@@ -551,7 +551,7 @@ export function normalizeReviewState(state: ReviewState): ReviewState {
     ...state,
     ...(state.annotationName === undefined ? {} : { annotationName: normalizeAnnotationName(state.annotationName) }),
     workflow,
-    items: state.items.map((item) => canonicalizeReviewItem(item, {
+    items: state.items.map((item) => canonicalizeAnnotation(item, {
       ownerViewId: item.reconciliation?.ownerViewId ?? "legacy-view",
       baseGeneration: item.reconciliation?.baseGeneration ?? workflow.documentGeneration,
     })),
@@ -560,18 +560,18 @@ export function normalizeReviewState(state: ReviewState): ReviewState {
   };
 }
 
-export function startReviewGeneration(
-  state: ReviewState,
+export function startDocumentGeneration(
+  state: DocumentState,
   input: {
     readonly documentGeneration: number;
-    readonly freshness?: ReviewDocumentFreshness;
+    readonly freshness?: DocumentFreshness;
   },
-): ReviewState {
+): DocumentState {
   if (!Number.isSafeInteger(input.documentGeneration) || input.documentGeneration <= state.workflow.documentGeneration) {
     throw new Error("Review document generation must advance monotonically");
   }
   const items = state.items.map((item) => {
-    const canonical = canonicalizeReviewItem(item, {
+    const canonical = canonicalizeAnnotation(item, {
       ownerViewId: "legacy-view",
       baseGeneration: state.workflow.documentGeneration,
     });
@@ -619,6 +619,6 @@ export function startReviewGeneration(
 
 /** Revision- and generation-fenced name intent accepted with a destination. */
 export interface SaveDestinationConfirmation {
-  readonly command: Extract<ReviewCommand, { readonly type: 'set-annotation-name' }>;
+  readonly command: Extract<DocumentCommand, { readonly type: 'set-annotation-name' }>;
   readonly expectedGeneration: number;
 }

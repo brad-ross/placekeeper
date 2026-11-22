@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
-import { reduceReview } from '../../../packages/core/src/review-reducer.js';
-import { createReviewState, type ReviewState } from '../../../packages/core/src/review-model.js';
+import { reduceDocument } from '../../../packages/core/src/review-reducer.js';
+import { createDocumentState, type DocumentState } from '../../../packages/core/src/review-model.js';
 import {
-  beginReviewInteraction,
+  beginDocumentInteraction,
   createAuthoringSession,
   pendingDraftForAuthoring,
-  type ReviewInteractionReceipt,
+  type DocumentInteractionReceipt,
 } from '../src/review/authoring-session.js';
 
 const selection = {
@@ -23,7 +23,7 @@ describe('automatic refresh interaction lifecycle', () => {
   it.each(['standard', 'generated-output'] as const)(
     'durably applies the latest %s draft before releasing its generation hold',
     async (workflowMode) => {
-      let state: ReviewState = createReviewState({
+      let state: DocumentState = createDocumentState({
         sessionId: `session-${workflowMode}`,
         source: { fileId: 'paper', digest: 'a'.repeat(64), byteLength: 10 },
         workflowMode,
@@ -31,14 +31,14 @@ describe('automatic refresh interaction lifecycle', () => {
       });
       let held = false;
       let acknowledged = false;
-      const interaction = await beginReviewInteraction({
+      const interaction = await beginDocumentInteraction({
         async beginInteraction() {
           held = true;
           return { status: 'accepted', generation: 4, ownerViewId: 'attachment-main' };
         },
         async finalizeInteraction(input) {
           expect(held).toBe(true);
-          state = reduceReview(state, {
+          state = reduceDocument(state, {
             type: 'apply-draft',
             expectedRevision: state.revision,
             id: input.draftId,
@@ -50,7 +50,7 @@ describe('automatic refresh interaction lifecycle', () => {
           return {
             status: 'finalized', interactionToken: input.interactionToken,
             generation: 4, outcome: input.outcome, reviewRevision: state.revision,
-          } satisfies ReviewInteractionReceipt;
+          } satisfies DocumentInteractionReceipt;
         },
         async releaseInteraction() { held = false; return { status: 'released' }; },
         async acknowledgeInteraction() { acknowledged = true; return { status: 'released' }; },
@@ -74,7 +74,7 @@ describe('automatic refresh interaction lifecycle', () => {
         createdAt: '2026-09-15T13:00:00.000Z',
         updatedAt: '2026-09-15T13:00:01.000Z',
       });
-      state = reduceReview(state, {
+      state = reduceDocument(state, {
         type: 'put-draft', expectedRevision: state.revision,
         expectedDraftRevision: -1, draft,
       });
@@ -94,10 +94,10 @@ describe('automatic refresh interaction lifecycle', () => {
       expect(state.historyCursor).toBe(1);
       await interaction.acknowledge(receipt);
       expect(acknowledged).toBe(true);
-      state = reduceReview(state, { type: 'undo', expectedRevision: state.revision });
+      state = reduceDocument(state, { type: 'undo', expectedRevision: state.revision });
       expect(state.items).toEqual([]);
       expect(state.pendingDrafts).toEqual([]);
-      state = reduceReview(state, { type: 'redo', expectedRevision: state.revision });
+      state = reduceDocument(state, { type: 'redo', expectedRevision: state.revision });
       expect(state.items[0]?.payload.comment).toBe('latest acknowledged comment');
       expect(state.pendingDrafts).toEqual([]);
     },

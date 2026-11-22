@@ -1,9 +1,9 @@
 import {
-  REVIEW_RUNTIME_VERSION,
-  isReviewRuntimeMethodForHost,
-  sanitizeChromeReviewRuntimeRequest,
-  sanitizeChromeReviewRuntimeResponse,
-  type ReviewRuntimeBrokerMethod,
+  DOCUMENT_RUNTIME_VERSION,
+  isDocumentRuntimeMethodForHost,
+  sanitizeChromeDocumentRuntimeRequest,
+  sanitizeChromeDocumentRuntimeResponse,
+  type DocumentRuntimeBrokerMethod,
 } from "./review-runtime-protocol.js";
 
 export const CHROME_RUNTIME_PROTOCOL = "placekeeper.chrome-runtime" as const;
@@ -26,7 +26,7 @@ interface RuntimeEnvelope {
 
 export interface ChromeRuntimeHello extends RuntimeEnvelope {
   readonly type: "hello";
-  readonly reviewRuntimeVersion: typeof REVIEW_RUNTIME_VERSION;
+  readonly reviewRuntimeVersion: typeof DOCUMENT_RUNTIME_VERSION;
   readonly protocol: typeof CHROME_RUNTIME_PROTOCOL;
 }
 
@@ -36,7 +36,7 @@ export type ChromeRuntimeExtensionMessage = ChromeRuntimeHello | (RuntimeEnvelop
   | { readonly lane: "acquisition"; readonly type: "chunk"; readonly requestId: string; readonly transferId: string; readonly sequence: number; readonly data: string }
   | { readonly lane: "acquisition"; readonly type: "finish"; readonly requestId: string; readonly transferId: string; readonly sequence: number }
   | { readonly lane: "acquisition"; readonly type: "cancel"; readonly requestId: string; readonly transferId: string; readonly reason: string }
-  | { readonly lane: "runtime"; readonly type: "invoke"; readonly requestId: string; readonly generation: number; readonly revision: number; readonly method: ReviewRuntimeBrokerMethod; readonly payload: unknown; readonly idempotencyKey?: string }
+  | { readonly lane: "runtime"; readonly type: "invoke"; readonly requestId: string; readonly generation: number; readonly revision: number; readonly method: DocumentRuntimeBrokerMethod; readonly payload: unknown; readonly idempotencyKey?: string }
   | { readonly lane: "resource"; readonly type: "read"; readonly requestId: string; readonly resource: "document"; readonly generation: number; readonly offset: number; readonly length: number }
   | { readonly lane: "resource"; readonly type: "ack"; readonly requestId: string; readonly sequence: number }
   | { readonly lane: "resource"; readonly type: "cancel"; readonly requestId: string }
@@ -49,12 +49,12 @@ export type ChromeRuntimeExtensionMessage = ChromeRuntimeHello | (RuntimeEnvelop
 ));
 
 export type ChromeRuntimeHostMessage = RuntimeEnvelope & (
-  | { readonly type: "hello-ack"; readonly reviewRuntimeVersion: typeof REVIEW_RUNTIME_VERSION; readonly protocol: typeof CHROME_RUNTIME_PROTOCOL; readonly leaseMs: number }
+  | { readonly type: "hello-ack"; readonly reviewRuntimeVersion: typeof DOCUMENT_RUNTIME_VERSION; readonly protocol: typeof CHROME_RUNTIME_PROTOCOL; readonly leaseMs: number }
   | { readonly lane: ChromeRuntimeLane; readonly type: "ack"; readonly requestId: string; readonly sequence?: number }
   | { readonly lane: "lifecycle"; readonly type: "projection"; readonly requestId: string; readonly payload: unknown }
   | { readonly lane: "lifecycle"; readonly type: "active"; readonly requestId: string; readonly payload: unknown }
   | { readonly lane: "lifecycle"; readonly type: "recovery-offered"; readonly requestId: string; readonly choices: readonly ["resume", "discard", "fork"]; readonly offer: { readonly id: string; readonly expiresAt: string } }
-  | { readonly lane: "runtime"; readonly type: "result"; readonly requestId: string; readonly method: ReviewRuntimeBrokerMethod; readonly payload: unknown }
+  | { readonly lane: "runtime"; readonly type: "result"; readonly requestId: string; readonly method: DocumentRuntimeBrokerMethod; readonly payload: unknown }
   | { readonly lane: "runtime"; readonly type: "invalidation"; readonly revision: number; readonly generation: number; readonly reason: ChromeRuntimeProjectionChangeReason }
   | { readonly lane: "resource"; readonly type: "resource-chunk"; readonly requestId: string; readonly sequence: number; readonly data: string; readonly done: boolean }
   | { readonly lane: ChromeRuntimeLane; readonly type: "failure"; readonly requestId?: string; readonly reason: string }
@@ -149,7 +149,7 @@ export function parseChromeRuntimeExtensionMessage(value: unknown): ChromeRuntim
   if (!record(value) || !validEnvelope(value) || typeof value.type !== "string") return undefined;
   if (value.type === "hello") {
     return exact(value, ["type", "protocol", "protocolVersion", "reviewRuntimeVersion", "connectionId"]) &&
-      value.reviewRuntimeVersion === REVIEW_RUNTIME_VERSION && value.protocol === CHROME_RUNTIME_PROTOCOL ? value as unknown as ChromeRuntimeHello : undefined;
+      value.reviewRuntimeVersion === DOCUMENT_RUNTIME_VERSION && value.protocol === CHROME_RUNTIME_PROTOCOL ? value as unknown as ChromeRuntimeHello : undefined;
   }
   if (typeof value.lane !== "string" || !safeId(value.requestId)) return undefined;
   const base = ["type", "lane", "protocolVersion", "connectionId", "requestId"];
@@ -185,11 +185,11 @@ export function parseChromeRuntimeExtensionMessage(value: unknown): ChromeRuntim
     const keys = value.idempotencyKey === undefined
       ? [...base, "generation", "revision", "method", "payload"]
       : [...base, "generation", "revision", "method", "payload", "idempotencyKey"];
-    if (!exact(value, keys) || !isReviewRuntimeMethodForHost("chrome", value.method) ||
+    if (!exact(value, keys) || !isDocumentRuntimeMethodForHost("chrome", value.method) ||
       value.method === "bootstrap" || value.method === "presence" || value.method === "detach" ||
       !safeInteger(value.generation) || !safeInteger(value.revision) ||
       (value.idempotencyKey !== undefined && (typeof value.idempotencyKey !== "string" || !OPERATION_KEY.test(value.idempotencyKey)))) return undefined;
-    const payload = sanitizeChromeReviewRuntimeRequest(value.method, value.payload);
+    const payload = sanitizeChromeDocumentRuntimeRequest(value.method, value.payload);
     return payload === undefined
       ? undefined
       : { ...value, payload } as unknown as ChromeRuntimeExtensionMessage;
@@ -252,7 +252,7 @@ export function sanitizeChromeRuntimeProjection(value: unknown): unknown | undef
     !SHA256.test(String(value.document.sha256)) || !safeInteger(value.document.byteLength) ||
     (value.document.byteLength as number) < 1 || !safeInteger(value.document.generation) ||
     value.document.generation !== value.generation) return undefined;
-  const projected = sanitizeChromeReviewRuntimeResponse("bootstrap", {
+  const projected = sanitizeChromeDocumentRuntimeResponse("bootstrap", {
     ...value,
     resources: { document: "blob:handler-issued", pdfiumWasm: "chrome-extension://packaged/pdfium.wasm", worker: "chrome-extension://packaged/pdfium-worker.js" },
   });
@@ -266,7 +266,7 @@ export function parseChromeRuntimeHostMessage(value: unknown): ChromeRuntimeHost
   if (!record(value) || !validEnvelope(value) || typeof value.type !== "string" || containsForbiddenKey(value)) return undefined;
   if (value.type === "hello-ack") {
     return exact(value, ["type", "protocol", "protocolVersion", "reviewRuntimeVersion", "connectionId", "leaseMs"]) &&
-      value.reviewRuntimeVersion === REVIEW_RUNTIME_VERSION && value.protocol === CHROME_RUNTIME_PROTOCOL && safeInteger(value.leaseMs) && (value.leaseMs as number) >= 1_000
+      value.reviewRuntimeVersion === DOCUMENT_RUNTIME_VERSION && value.protocol === CHROME_RUNTIME_PROTOCOL && safeInteger(value.leaseMs) && (value.leaseMs as number) >= 1_000
       ? value as unknown as ChromeRuntimeHostMessage : undefined;
   }
   if (typeof value.lane !== "string") return undefined;
@@ -316,8 +316,8 @@ export function parseChromeRuntimeHostMessage(value: unknown): ChromeRuntimeHost
   }
   if (value.type === "result") {
     if (value.lane !== "runtime" || !exact(value, ["type", "lane", "protocolVersion", "connectionId", "requestId", "method", "payload"]) ||
-      !safeId(value.requestId) || !isReviewRuntimeMethodForHost("chrome", value.method) || value.method === "bootstrap") return undefined;
-    const payload = sanitizeChromeReviewRuntimeResponse(value.method, value.payload);
+      !safeId(value.requestId) || !isDocumentRuntimeMethodForHost("chrome", value.method) || value.method === "bootstrap") return undefined;
+    const payload = sanitizeChromeDocumentRuntimeResponse(value.method, value.payload);
     return payload === undefined
       ? undefined : { ...value, payload } as unknown as ChromeRuntimeHostMessage;
   }

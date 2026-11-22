@@ -768,7 +768,7 @@ describe("loopback HTTP boundary", () => {
     const broker = new SessionBroker({ recoveryRoot: join(directory, "recovery") });
     const approvePdf = vi.spyOn(broker.capabilities, "approvePdf");
     const recoverDraft = vi.spyOn(DraftSnapshotStore.prototype, "recover");
-    const openReview = vi.spyOn(broker, "openReview");
+    const openDocument = vi.spyOn(broker, "openReview");
     const stageReconnect = vi.spyOn(broker, "stageRestartReconnect");
     const issueBootstrap = vi.spyOn(broker.credentials, "issueBootstrap");
     const server = await startHttpServer(broker, { webAssets: { root: assets } });
@@ -786,7 +786,7 @@ describe("loopback HTTP boundary", () => {
     expect(html).toContain("data-terminal-recovery");
     expect(approvePdf).not.toHaveBeenCalled();
     expect(recoverDraft).not.toHaveBeenCalled();
-    expect(openReview).not.toHaveBeenCalled();
+    expect(openDocument).not.toHaveBeenCalled();
     expect(stageReconnect).not.toHaveBeenCalled();
     expect(issueBootstrap).not.toHaveBeenCalled();
   });

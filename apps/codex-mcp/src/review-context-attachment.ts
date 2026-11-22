@@ -1,11 +1,11 @@
-import { MAX_REVIEW_CONTEXT_NOTE_LENGTH, type ReviewAgentContextInput } from '../../web/src/host/review-agent-bridge.js';
+import { MAX_DOCUMENT_CONTEXT_NOTE_LENGTH, type DocumentAgentContextInput } from '../../web/src/host/review-agent-bridge.js';
 import type { ExtensionContextAttachment } from '../../web/src/host/extension-context-coordinator.js';
 
 /** Capture values before hashing so a changing reader cannot retarget an attachment. */
-export async function prepareReviewContext(input: ReviewAgentContextInput): Promise<ExtensionContextAttachment> {
+export async function prepareDocumentContext(input: DocumentAgentContextInput): Promise<ExtensionContextAttachment> {
     const snapshot = structuredClone(input.snapshot);
     const note = input.note?.trim() ?? '';
-    if (note.length > MAX_REVIEW_CONTEXT_NOTE_LENGTH) throw Error('Keep your note under 2,000 characters.');
+    if (note.length > MAX_DOCUMENT_CONTEXT_NOTE_LENGTH) throw Error('Keep your note under 2,000 characters.');
 
     const selection = input.kind === 'selection' ? snapshot.selection : null;
     const requestedIds = input.kind === 'annotations' ? new Set(input.annotationIds) : null;

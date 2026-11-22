@@ -19,7 +19,7 @@ declare global {
       zoomLevel(): number;
       selectionAnchorStatus(): string;
       goToPage(pageNumber: number): void;
-      reviewItemCount(): number;
+      annotationCount(): number;
       interactionCount(type: ViewerInteractionEvent['type']): number;
     };
   }
@@ -242,7 +242,7 @@ test.describe('shared viewer foundation', () => {
     await expect
       .poll(() => page.evaluate(() => window.viewerAcceptance.selectionAnchorStatus()))
       .toBe('reliable');
-    expect(await page.evaluate(() => window.viewerAcceptance.reviewItemCount())).toBe(0);
+    expect(await page.evaluate(() => window.viewerAcceptance.annotationCount())).toBe(0);
 
     await pdfPage.click({ position: { x: box.width - 30, y: box.height - 30 } });
     await expect.poll(() => page.evaluate(() => window.viewerAcceptance.selectionRectCount())).toBe(0);
@@ -300,7 +300,7 @@ test.describe('shared viewer foundation', () => {
     await expect(renderedPageImage).toHaveCSS('pointer-events', 'none');
 
     await expect(page.getByRole('button', { name: 'Proofread mode' })).toHaveCount(0);
-    expect(await page.evaluate(() => window.viewerAcceptance.reviewItemCount())).toBe(0);
+    expect(await page.evaluate(() => window.viewerAcceptance.annotationCount())).toBe(0);
   });
 
   for (const direction of ['forward', 'reverse'] as const) {

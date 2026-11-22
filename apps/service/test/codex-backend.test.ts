@@ -1,4 +1,4 @@
-import { addPageNote, editReviewItem, setAnnotationName } from "../../../packages/core/src/review-commands.js";
+import { addPageNote, editAnnotation, setAnnotationName } from "../../../packages/core/src/review-commands.js";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createHash, randomUUID } from "node:crypto";
 import { canonicalJson } from "../src/runtime/canonical-json.js";
@@ -88,7 +88,7 @@ describe("active native service backend", () => {
     expect(f.broker.state(f.sessionId)).toMatchObject({ items, pendingDrafts: [] });
     expect(f.broker.saveStatus(f.sessionId)?.sync).toMatchObject({ phase: "clean", desiredRevision: 4, savedRevision: 4 });
     // A real accepted comment change still uses ordinary original autosave.
-    payload(await f.manager.handle(request(a, "command", editReviewItem(f.broker.state(f.sessionId)!, items[0]!.id, { comment: "Accepted imported edit" }), randomUUID())));
+    payload(await f.manager.handle(request(a, "command", editAnnotation(f.broker.state(f.sessionId)!, items[0]!.id, { comment: "Accepted imported edit" }), randomUUID())));
     await f.saving.drain();
     expect(writes).toHaveBeenCalledTimes(1);
     expect(await readFile(f.pdfPath)).not.toEqual(before);

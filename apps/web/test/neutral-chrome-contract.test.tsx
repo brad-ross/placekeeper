@@ -10,7 +10,7 @@ vi.mock('../src/review/TopBarMenu.js', () => ({
 import { documentIdentityLabel } from '../src/review/DocumentActionsMenu.js';
 import {
   pageInputWidth,
-  ReviewChrome,
+  ReaderChrome,
   zoomInputWidth,
   validPageNumber,
   validZoomPercent,
@@ -28,8 +28,8 @@ const readyViewer = {
 const neutralStyles = readCssSource(
   new URL('../src/app/neutral-chrome.css', import.meta.url));
 
-function chrome(overrides: Partial<Parameters<typeof ReviewChrome>[0]> = {}) {
-  return renderToStaticMarkup(<ReviewChrome
+function chrome(overrides: Partial<Parameters<typeof ReaderChrome>[0]> = {}) {
+  return renderToStaticMarkup(<ReaderChrome
     documentTitle="paper.pdf"
     viewerState={readyViewer}
     fitWidthReady

@@ -13,7 +13,7 @@ import {
 } from 'react';
 import { createPortal } from 'react-dom';
 
-export const REVIEW_TOOLTIP_HOVER_DELAY_MS = 600;
+export const READER_TOOLTIP_HOVER_DELAY_MS = 600;
 const TOOLTIP_MARGIN = 6;
 const MENU_SURFACE_SELECTOR = '.top-bar-menu__surface, .link-action-popover__surface';
 
@@ -52,7 +52,7 @@ function observeTooltipInputModality(owner: Document): () => void {
   };
 }
 
-export interface ReviewTooltipButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
+export interface ReaderTooltipButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   readonly label: string;
   readonly tooltip?: string | false;
   readonly tooltipOnFocus?: boolean;
@@ -63,17 +63,17 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), Math.max(min, max));
 }
 
-export function reviewTooltipFocusOpens(pointerActivation: boolean): boolean {
+export function readerTooltipFocusOpens(pointerActivation: boolean): boolean {
   return !pointerActivation;
 }
 
-export function reviewTooltipEscapeDismisses(key: string, isComposing: boolean): boolean {
+export function readerTooltipEscapeDismisses(key: string, isComposing: boolean): boolean {
   return key === 'Escape' && !isComposing;
 }
 
 /** A named icon button with a delayed pointer tooltip and immediate focus tooltip. */
-export const ReviewTooltipButton = forwardRef<HTMLButtonElement, ReviewTooltipButtonProps>(
-  function ReviewTooltipButton({
+export const ReaderTooltipButton = forwardRef<HTMLButtonElement, ReaderTooltipButtonProps>(
+  function ReaderTooltipButton({
     label,
     tooltip = label,
     tooltipOnFocus = true,
@@ -177,7 +177,7 @@ export const ReviewTooltipButton = forwardRef<HTMLButtonElement, ReviewTooltipBu
         onMouseEnter={(event: MouseEvent<HTMLButtonElement>) => {
           onMouseEnter?.(event);
           clearHoverTimer();
-          if (tooltip !== false) hoverTimer.current = setTimeout(() => setVisible(true), REVIEW_TOOLTIP_HOVER_DELAY_MS);
+          if (tooltip !== false) hoverTimer.current = setTimeout(() => setVisible(true), READER_TOOLTIP_HOVER_DELAY_MS);
         }}
         onMouseLeave={(event: MouseEvent<HTMLButtonElement>) => {
           onMouseLeave?.(event);
@@ -188,7 +188,7 @@ export const ReviewTooltipButton = forwardRef<HTMLButtonElement, ReviewTooltipBu
           clearHoverTimer();
           const pointerFocus = pointerActivation.current
             || inputModalities.get(event.currentTarget.ownerDocument)?.pointer === true;
-          if (tooltipOnFocus && tooltip !== false && reviewTooltipFocusOpens(pointerFocus)
+          if (tooltipOnFocus && tooltip !== false && readerTooltipFocusOpens(pointerFocus)
             && event.currentTarget.matches(':focus-visible')) setVisible(true);
         }}
         onBlur={(event: FocusEvent<HTMLButtonElement>) => {
@@ -216,7 +216,7 @@ export const ReviewTooltipButton = forwardRef<HTMLButtonElement, ReviewTooltipBu
           onPointerCancel?.(event);
         }}
         onKeyDown={(event) => {
-          if (reviewTooltipEscapeDismisses(event.key, event.nativeEvent.isComposing)) hide();
+          if (readerTooltipEscapeDismisses(event.key, event.nativeEvent.isComposing)) hide();
           onKeyDown?.(event);
         }}
       />

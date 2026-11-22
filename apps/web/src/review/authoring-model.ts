@@ -1,6 +1,6 @@
-import type { ReviewRect } from '../../../../packages/core/src/review-commands.js';
-import type { ReviewCommand, ReviewStateView } from '../../../../packages/core/src/review-model.js';
-import type { ReviewAnnotation } from '../../../../packages/core/src/pdf-writer.js';
+import type { DocumentRect } from '../../../../packages/core/src/review-commands.js';
+import type { DocumentCommand, DocumentStateView } from '../../../../packages/core/src/review-model.js';
+import type { PdfWriterAnnotation } from '../../../../packages/core/src/pdf-writer.js';
 import type { PdfTargetVisibility, PdfViewportQuery } from '../pdf/viewer-navigation.js';
 import type { ContextPlacement } from './ContextActionPalette.js';
 import type { PdfAnnotationSurface } from '../pdf/annotation-surface.js';
@@ -8,17 +8,17 @@ import type {
   AuthoringAuthority,
   AuthoringAnchorSnapshot,
   AuthoringReferenceRecovery,
-  ReviewInteractionTransport,
+  DocumentInteractionTransport,
 } from './authoring-session.js';
-import type { RejectedReviewCommand } from './review-command-result.js';
+import type { RejectedDocumentCommand } from './review-command-result.js';
 
-export interface ReviewShellAuthoringModel {
+export interface ReaderShellAuthoringModel {
   /** Current reliable gesture origin. A started session freezes this value. */
   surface?: PdfAnnotationSurface;
   /** Durable Reference passage metadata paired with the current gesture origin. */
   referenceRecovery?: AuthoringReferenceRecovery;
   /** Local-refresh hosts provide this before negotiation; begin waits for the authenticated attachment. */
-  interactionLifecycle?: ReviewInteractionTransport;
+  interactionLifecycle?: DocumentInteractionTransport;
   subscribeInteractionReconnect?(
     listener: (identity: { readonly generation: number; readonly revision: number }) => Promise<void>,
   ): () => void;
@@ -32,7 +32,7 @@ export interface ReviewShellAuthoringModel {
     readonly invocationId: string;
     readonly placement: ContextPlacement;
     readonly pageIndex: number;
-    readonly position: ReviewRect;
+    readonly position: DocumentRect;
     readonly nearbyText?: string;
     readonly surface?: PdfAnnotationSurface;
     readonly referenceRecovery?: AuthoringReferenceRecovery;
@@ -40,7 +40,7 @@ export interface ReviewShellAuthoringModel {
   placedPageNote?: {
     readonly token: number;
     readonly pageIndex: number;
-    readonly position: ReviewRect;
+    readonly position: DocumentRect;
     readonly nearbyText?: string;
     readonly surface?: PdfAnnotationSurface;
     readonly referenceRecovery?: AuthoringReferenceRecovery;
@@ -50,13 +50,13 @@ export interface ReviewShellAuthoringModel {
   onCancelKeyboardPageNote?(): void;
   onPageMenuDismiss?(invocationId: string): void;
   onPageMenuConsumed?(invocationId: string): void;
-  onGoToSource?(menu: NonNullable<ReviewShellAuthoringModel['pageMenu']>): void;
+  onGoToSource?(menu: NonNullable<ReaderShellAuthoringModel['pageMenu']>): void;
   onPlacedPageNoteConsumed?(token: number): void;
   onPageNoteComposerComplete?(): void;
   onCommand(
-    command: ReviewCommand,
+    command: DocumentCommand,
     authority?: AuthoringAuthority,
-  ): Promise<ReviewStateView | RejectedReviewCommand>;
+  ): Promise<DocumentStateView | RejectedDocumentCommand>;
   authoringSessionResolution?: {
     readonly token: number;
     readonly outcome: 'accepted' | 'source-replaced';
@@ -73,7 +73,7 @@ export interface ReviewShellAuthoringModel {
   };
   onAuthoringAnchorChange?(anchor: AuthoringAnchorSnapshot | null): void;
   onAuthoringActiveChange?(active: boolean): void;
-  onAuthoringPreviewChange?(preview: readonly ReviewAnnotation[] | null): void;
+  onAuthoringPreviewChange?(preview: readonly PdfWriterAnnotation[] | null): void;
   /** Publishes measured overlay geometry without changing viewer framing. */
   onAuthoringViewportChange?(viewport: PdfViewportQuery | null): void;
 }
