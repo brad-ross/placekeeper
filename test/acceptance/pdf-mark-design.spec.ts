@@ -199,7 +199,17 @@ test('the below-text insertion caret opens its detail without changing the PDF w
 test('text selection uses the shared blue wash and a plain I-beam', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 950 });
   const { pdfPage } = await fixture(page);
-  const box = (await pdfPage.boundingBox())!;
+  // Startup restoration can still scroll or refit the page after its image
+  // paints. Aim the drag only once the page holds still between reads.
+  await expect(page.locator('[data-production-review]')).toHaveAttribute('data-initial-view-ready', 'true');
+  let box = (await pdfPage.boundingBox())!;
+  await expect.poll(async () => {
+    const previous = box;
+    box = (await pdfPage.boundingBox())!;
+    return ['x', 'y', 'width', 'height'].every((key) => (
+      Math.abs(box[key as keyof typeof box] - previous[key as keyof typeof previous]) < 0.5
+    ));
+  }, { intervals: [100, 100, 250] }).toBe(true);
   const scale = box.width / 612;
   const start = { x: box.x + 74 * scale, y: box.y + 411 * scale };
   await page.mouse.move(start.x, start.y);

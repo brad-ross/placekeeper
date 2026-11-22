@@ -387,7 +387,10 @@ describe('viewer controls adapter', () => {
 
     expect(controls.usesAutomaticFitWidth()).toBe(true);
     expect(controls.freezeCurrentZoom()).toBe(true);
-    expect(zoom.requestZoom).toHaveBeenLastCalledWith(1.1);
+    // EmbedPDF floors requests to thousandths; freezing must not lose one.
+    const frozen = zoom.requestZoom.mock.lastCall?.[0] as number;
+    expect(frozen).toBeCloseTo(1.1, 6);
+    expect(Math.floor(frozen * 1e3) / 1e3).toBe(1.1);
 
     onZoom?.({ documentId: 'doc', oldZoom: 1.1, newZoom: 1.25 });
     expect(controls.snapshot()).toMatchObject({ zoomPercent: 125 });
@@ -425,6 +428,28 @@ describe('viewer controls adapter', () => {
       ready: false,
       reason: expect.stringContaining('PDF is ready'),
     }));
+  });
+
+  it('freezes an automatic fit at its exact thousandth despite floating-point flooring', () => {
+    // 2.034 * 1000 is 2033.9999…, which EmbedPDF's thousandth flooring turns into 2.033.
+    const zoom = {
+      getState: () => ({ zoomLevel: 'fit-width', currentZoomLevel: 2.034 }),
+      requestZoom: vi.fn(),
+    };
+    const registry = {
+      getStore: () => ({ getState: () => ({ core: { activeDocumentId: 'doc' } }) }),
+      getPlugin: (id: string) => id === ZoomPlugin.id
+        ? { provides: () => ({
+            forDocument: () => zoom,
+            onZoomChange: () => () => undefined,
+          }) }
+        : undefined,
+    } as unknown as PluginRegistry;
+
+    const controls = createViewerControls(registry);
+    expect(controls.freezeCurrentZoom()).toBe(true);
+    const frozen = zoom.requestZoom.mock.lastCall?.[0] as number;
+    expect(Math.floor(frozen * 1e3) / 1e3).toBe(2.034);
   });
 
   it('leaves an already numeric restored or user zoom untouched', () => {

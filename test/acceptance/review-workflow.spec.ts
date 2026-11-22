@@ -1659,6 +1659,35 @@ test.describe('canonical review workflow', () => {
     await expect(undo).toBeFocused();
   });
 
+  test('separates history again after widening before the combined bar is measured', async ({ page }) => {
+    const chrome = page.locator('[data-review-chrome]');
+    await page.setViewportSize({ width: 640, height: 720 });
+    await expect(chrome.getByRole('button', { name: 'Undo', exact: true })).toBeVisible();
+    // Hold animation frames from the moment history combines, so the bar's
+    // first measurement after combining happens only after it has widened.
+    await page.evaluate(() => {
+      const held: FrameRequestCallback[] = [];
+      const native = window.requestAnimationFrame.bind(window);
+      const globals = window as typeof window & { __releaseFrames?: () => void };
+      const observer = new MutationObserver(() => {
+        if (!document.querySelector('[data-review-chrome] .review-chrome__history-trigger')) return;
+        observer.disconnect();
+        window.requestAnimationFrame = (callback) => { held.push(callback); return held.length; };
+        globals.__releaseFrames = () => {
+          window.requestAnimationFrame = native;
+          for (const callback of held.splice(0)) native(callback);
+        };
+      });
+      observer.observe(document.body, { subtree: true, childList: true });
+    });
+    await page.setViewportSize({ width: 320, height: 720 });
+    await expect(chrome.getByRole('button', { name: 'Open edit history' })).toBeVisible();
+    await page.setViewportSize({ width: 640, height: 720 });
+    await page.evaluate(() => (window as typeof window & { __releaseFrames?: () => void }).__releaseFrames?.());
+    await expect(chrome.getByRole('button', { name: 'Undo', exact: true })).toBeVisible();
+    await expect(chrome.getByRole('button', { name: 'Open edit history' })).toHaveCount(0);
+  });
+
   test('keeps narrow touch history in stable menus within the viewport', async ({ browser }) => {
     const context = await browser.newContext({ hasTouch: true, viewport: { width: 320, height: 720 } });
     const page = await context.newPage();

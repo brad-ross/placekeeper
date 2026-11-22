@@ -981,8 +981,15 @@ test('keeps Reference card hover, selection, dismissal, and focus lifecycle moun
   const referencePage = page.locator(
     '[data-reference-pdf-viewport] .pdf-workspace__page[data-page-index="0"]',
   );
-  const referencePageBounds = await referencePage.boundingBox();
-  if (!referencePageBounds) throw new Error('Reference page has no pointer bounds.');
+  const referencePageBox = await referencePage.boundingBox();
+  const referenceViewportBox = await page.locator('[data-reference-pdf-viewport]').boundingBox();
+  if (!referencePageBox || !referenceViewportBox) throw new Error('Reference page has no pointer bounds.');
+  // The page top can be scrolled above the tray; point at its visible corner,
+  // never at the main PDF behind it.
+  const referencePageBounds = {
+    x: Math.max(referencePageBox.x, referenceViewportBox.x),
+    y: Math.max(referencePageBox.y, referenceViewportBox.y),
+  };
   await page.mouse.move(referencePageBounds.x + 8, referencePageBounds.y + 8);
   await expect(inspection).toHaveCount(0);
   await expect(page.locator('[data-reference-pdf-viewport]'))

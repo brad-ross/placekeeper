@@ -43,6 +43,7 @@ export const VIEWER_ZOOM_MAX_PERCENT = 6000;
 const UNAVAILABLE = 'Viewer controls become available when the PDF is ready.';
 const PAGE_UNAVAILABLE = 'Page controls become available when PDF navigation is ready.';
 const ZOOM_UNAVAILABLE = 'Zoom controls become available when PDF zoom is ready.';
+const FREEZE_ZOOM_EPSILON = 1e-9;
 
 export function unavailableViewerControls(): ViewerControlsSnapshot {
   return {
@@ -235,7 +236,9 @@ export function createViewerControls(
         if (typeof zoomState.zoomLevel === 'number') return true;
         const currentZoom = zoomState.currentZoomLevel;
         if (!Number.isFinite(currentZoom) || currentZoom <= 0) return false;
-        zoom.requestZoom(currentZoom);
+        // EmbedPDF floors requested zooms to thousandths, so 2.034 * 1000
+        // can floor to 2.033 and nudge the frozen view. Pin the exact level.
+        zoom.requestZoom(currentZoom + FREEZE_ZOOM_EPSILON);
         return true;
       } catch {
         return false;
