@@ -138,19 +138,19 @@ test('packaged review edits, undoes, redoes and saves a portable page note that 
     await saved(page);
     await expect.poll(() => persistedComments(candidate.source)).toContain(initial);
     await showAnnotations(page);
-    const row = page.locator('[data-review-item]').filter({ hasText: initial });
+    const row = page.locator('[data-annotation-item]').filter({ hasText: initial });
     await expect(row).toHaveCount(1);
     await row.hover();
     await row.getByRole('button', { name: 'Edit Page Note annotation on page 1' }).click();
     const editor = page.getByRole('region', { name: /^Edit Page Note/u });
     await editor.getByRole('textbox', { name: 'Comment', exact: true }).fill(edited);
     await editor.getByRole('button', { name: 'Apply', exact: true }).click();
-    await expect(page.locator('[data-review-item]')).toContainText(edited);
-    await page.locator('[data-review-chrome]').hover();
+    await expect(page.locator('[data-annotation-item]')).toContainText(edited);
+    await page.locator('[data-reader-chrome]').hover();
     await page.getByRole('button', { name: 'Undo', exact: true }).click();
-    await expect(page.locator('[data-review-item]')).toContainText(initial);
+    await expect(page.locator('[data-annotation-item]')).toContainText(initial);
     await page.getByRole('button', { name: 'Redo', exact: true }).click();
-    await expect(page.locator('[data-review-item]')).toContainText(edited);
+    await expect(page.locator('[data-annotation-item]')).toContainText(edited);
     await saved(page);
     await expect.poll(() => persistedComments(candidate.source)).toContain(edited);
     expect(await persistedComments(candidate.source)).not.toContain(initial);
@@ -163,8 +163,8 @@ test('packaged review edits, undoes, redoes and saves a portable page note that 
       const reopened = await portable.launch();
       await ready(reopened);
       await showAnnotations(reopened);
-      await expect(reopened.locator('[data-review-item]')).toHaveCount(1);
-      await expect(reopened.locator('[data-review-item]')).toContainText(edited);
+      await expect(reopened.locator('[data-annotation-item]')).toHaveCount(1);
+      await expect(reopened.locator('[data-annotation-item]')).toContainText(edited);
       expect(portable.errors).toEqual([]);
     } finally { await portable.dispose(); }
     expect(candidate.errors).toEqual([]);
@@ -235,7 +235,7 @@ test('packaged review observes an external PDF replacement and saves annotations
     expect(published.getPageCount()).toBe(2);
     expect(published.getSubject()).toBe('Packaged desktop source refresh acceptance');
     await showAnnotations(page);
-    await expect(page.locator('[data-review-item]')).toContainText(comment);
+    await expect(page.locator('[data-annotation-item]')).toContainText(comment);
     const currentRaster = page.locator('.pdf-workspace__page[data-page-index="0"] > img').first();
     await expect.poll(() => currentRaster.evaluate(async (image: HTMLImageElement) => {
       try { await image.decode(); return image.complete && image.naturalWidth > 0; }

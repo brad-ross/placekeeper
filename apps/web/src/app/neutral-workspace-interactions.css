@@ -5,8 +5,8 @@
   :is(li[data-annotation-origin], li[data-search-result])[data-active="true"]
     .row-action-group__direct,
   .reference-tab-segment :is(.reference-tab-segment__action, .reference-panel__return),
-  .review-workspace__header > .review-workspace__outline-toggle,
-  .review-shell .review-workspace__activity-strip--compound > .review-workspace__move--activity {
+  .reader-workspace__header > .reader-workspace__outline-toggle,
+  .reader-shell .reader-workspace__activity-strip--compound > .reader-workspace__move--activity {
     opacity: 0;
     pointer-events: none;
   }
@@ -24,12 +24,12 @@
   .reference-tab-segment:is(:hover, :has(:focus-visible))
     :is(.reference-tab-segment__action, .reference-panel__return),
   .reference-tab-segment[data-reference-tab-failed="true"] [data-reference-tab-action="close"],
-  .review-workspace__header:hover > .review-workspace__outline-toggle,
-  .review-workspace__header:has(:focus-visible) > .review-workspace__outline-toggle,
-  .review-shell .review-workspace__activity-strip--compound:hover
-    > .review-workspace__move--activity,
-  .review-shell .review-workspace__activity-strip--compound:has(:focus-visible)
-    > .review-workspace__move--activity {
+  .reader-workspace__header:hover > .reader-workspace__outline-toggle,
+  .reader-workspace__header:has(:focus-visible) > .reader-workspace__outline-toggle,
+  .reader-shell .reader-workspace__activity-strip--compound:hover
+    > .reader-workspace__move--activity,
+  .reader-shell .reader-workspace__activity-strip--compound:has(:focus-visible)
+    > .reader-workspace__move--activity {
     opacity: 1;
     pointer-events: auto;
   }
@@ -65,7 +65,7 @@
 
 /* All workspace entries use the outline's intent and selection behavior.
    The page and action endcaps occupy the same space without moving content. */
-.review-shell .review-layout :is(.review-workspace, .review-tools-workspace)
+.reader-shell .reader-layout :is(.reader-workspace, .reader-tools-workspace)
   :is(.outline-navigator__row, li[data-annotation-origin], li[data-search-result]) {
   --workspace-row-surface: transparent;
   background: var(--workspace-row-surface);
@@ -74,9 +74,9 @@
   transition: none;
 }
 
-.review-shell .review-layout :is(.review-workspace, .review-tools-workspace)
+.reader-shell .reader-layout :is(.reader-workspace, .reader-tools-workspace)
   :is(.outline-navigator__row, li[data-annotation-origin], li[data-search-result]):is(:hover, :active, [data-corresponding="true"]),
-.review-shell .review-layout :is(.review-workspace, .review-tools-workspace)
+.reader-shell .reader-layout :is(.reader-workspace, .reader-tools-workspace)
   :is(.outline-navigator__row, li[data-annotation-origin], li[data-search-result]):has(:focus-visible) {
   --workspace-row-surface: #e7e7e7;
   background: var(--workspace-row-surface);
@@ -84,21 +84,21 @@
   outline: 0;
 }
 
-.review-shell .review-layout :is(.review-workspace, .review-tools-workspace)
+.reader-shell .reader-layout :is(.reader-workspace, .reader-tools-workspace)
   :is(.outline-navigator__row, li[data-annotation-origin], li[data-search-result])
   :is(.annotation-item__navigation, .outline-navigator__destination):is(:hover, :active) {
   background: transparent;
   box-shadow: none;
 }
 
-.review-shell .review-layout :is(.review-workspace, .review-tools-workspace)
+.reader-shell .reader-layout :is(.reader-workspace, .reader-tools-workspace)
   :is(.outline-navigator__row, li[data-annotation-origin], li[data-search-result])
   :is(.annotation-item__navigation, .outline-navigator__destination, .row-action-group__action, .copy-link-control__trigger--row, .row-action-group__trigger):focus-visible {
   outline: 2px solid var(--pk-focus);
   outline-offset: 3px;
 }
 
-.review-shell .review-layout :is(.review-workspace, .review-tools-workspace)
+.reader-shell .reader-layout :is(.reader-workspace, .reader-tools-workspace)
   :is(.outline-navigator__row, li[data-annotation-origin], li[data-search-result]):is([data-current="true"], [data-active="true"]) {
   --workspace-row-surface: var(--pk-raised);
   background: var(--workspace-row-surface);
@@ -173,18 +173,18 @@ li[data-search-result] .pdf-search__result-heading > .pdf-search__result-page {
   :is(
     #root[data-production-root="true"] .comment-composer .comment-composer__actions,
     .reconciliation-workspace__editor-actions
-  ) .review-button {
+  ) .reader-button {
     min-height: 44px;
   }
 
-  .review-context-palette button,
-  .review-page-menu button,
+  .reader-context-palette button,
+  .reader-page-menu button,
   .link-action-popover__surface [role="menuitem"] {
     min-height: 44px;
   }
 
-  .review-context-palette .review-action-button--icon,
-  .review-page-menu .review-action-button--icon,
+  .reader-context-palette .reader-action-button--icon,
+  .reader-page-menu .reader-action-button--icon,
   .link-action-popover__surface [role="menuitem"] {
     width: 44px;
     min-width: 44px;
@@ -230,11 +230,11 @@ li[data-search-result] .pdf-search__result-heading > .pdf-search__result-page {
     flex-basis: 44px;
   }
 
-  .review-chrome button,
-  .review-chrome__icon-control,
-  .review-workspace__mode-tab,
-  .review-workspace__move,
-  .review-workspace__close,
+  .reader-chrome button,
+  .reader-chrome__icon-control,
+  .reader-workspace__mode-tab,
+  .reader-workspace__move,
+  .reader-workspace__close,
   .reference-tabs .reference-tab-segment__action,
   .reference-tabs .reference-panel__return,
   .row-action-group__action,
@@ -257,22 +257,22 @@ li[data-search-result] .pdf-search__result-heading > .pdf-search__result-page {
   }
 
   .row-action-group[data-row-action-count="2"] {
-    width: calc(88px + var(--review-control-group-gap));
-    min-width: calc(88px + var(--review-control-group-gap));
+    width: calc(88px + var(--reader-control-group-gap));
+    min-width: calc(88px + var(--reader-control-group-gap));
   }
 
   .row-action-group[data-row-action-count="3"] {
-    width: calc(132px + (2 * var(--review-control-group-gap)));
-    min-width: calc(132px + (2 * var(--review-control-group-gap)));
+    width: calc(132px + (2 * var(--reader-control-group-gap)));
+    min-width: calc(132px + (2 * var(--reader-control-group-gap)));
   }
 
   .row-action-group[data-row-action-count="4"] {
-    width: calc(176px + (3 * var(--review-control-group-gap)));
-    min-width: calc(176px + (3 * var(--review-control-group-gap)));
+    width: calc(176px + (3 * var(--reader-control-group-gap)));
+    min-width: calc(176px + (3 * var(--reader-control-group-gap)));
   }
 
-  .review-chrome__page-input,
-  .review-chrome__zoom-input,
+  .reader-chrome__page-input,
+  .reader-chrome__zoom-input,
   .pdf-search__query > .pdf-search__input { font-size: 16px; }
 
   .pdf-search__query { height: 52px; }
@@ -293,8 +293,8 @@ li[data-search-result] .pdf-search__result-heading > .pdf-search__result-page {
 
   li[data-search-result] .row-action-group__direct,
   .reference-tab-segment :is(.reference-tab-segment__action, .reference-panel__return),
-  .review-workspace__header > .review-workspace__outline-toggle,
-  .review-workspace__activity-strip--compound > .review-workspace__move--activity {
+  .reader-workspace__header > .reader-workspace__outline-toggle,
+  .reader-workspace__activity-strip--compound > .reader-workspace__move--activity {
     opacity: 1;
     pointer-events: auto;
   }
@@ -321,15 +321,15 @@ li[data-search-result] .pdf-search__result-heading > .pdf-search__result-page {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .review-chrome *,
-  .review-workspace *,
-  .review-tools-workspace * { transition-duration: .01ms !important; }
+  .reader-chrome *,
+  .reader-workspace *,
+  .reader-tools-workspace * { transition-duration: .01ms !important; }
 }
 
 /* Action glyphs inherit the approved control color, including hover/focus. */
-.review-context-palette button .review-icon,
-.review-page-menu button .review-icon,
-.link-action-popover [role="menuitem"] .review-icon { color: inherit; }
+.reader-context-palette button .reader-icon,
+.reader-page-menu button .reader-icon,
+.link-action-popover [role="menuitem"] .reader-icon { color: inherit; }
 
 /* PDF popups share the workspace card's hover/focus action endcap. */
 .annotation-peek .row-action-group__direct {
@@ -361,13 +361,13 @@ li[data-search-result] .pdf-search__result-heading > .pdf-search__result-page {
 }
 
 /* Keep annotation previews in the exposed PDF area beside open workspaces. */
-.review-layout:is([data-right-overlay="true"], [data-bottom-overlay="true"])
+.reader-layout:is([data-right-overlay="true"], [data-bottom-overlay="true"])
   .annotation-peek:not(.annotation-peek--reference-inspection) {
   top: auto;
-  right: max(12px, calc(100% - var(--review-overlay-right-start, 100%)));
-  bottom: max(12px, calc(100% - var(--review-overlay-bottom-start, 100%)));
-  width: min(340px, calc(var(--review-overlay-right-start, 100%) - 24px));
-  max-height: max(0px, calc(var(--review-overlay-bottom-start, 100%) - 24px));
+  right: max(12px, calc(100% - var(--reader-overlay-right-start, 100%)));
+  bottom: max(12px, calc(100% - var(--reader-overlay-bottom-start, 100%)));
+  width: min(340px, calc(var(--reader-overlay-right-start, 100%) - 24px));
+  max-height: max(0px, calc(var(--reader-overlay-bottom-start, 100%) - 24px));
   overflow: auto;
   transform: none;
 }

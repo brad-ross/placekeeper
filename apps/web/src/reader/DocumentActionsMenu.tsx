@@ -182,7 +182,7 @@ export function DocumentActionsMenu({
     const outside = (event: PointerEvent) => {
       if (event.target instanceof Node && rootRef.current?.contains(event.target)) return;
       const switchingTopBarMenu = event.target instanceof Element
-        && event.target.closest('[data-review-chrome-group]') !== null;
+        && event.target.closest('[data-reader-chrome-group]') !== null;
       closeAndRestore(!switchingTopBarMenu);
     };
     document.addEventListener('pointerdown', outside);
@@ -292,7 +292,7 @@ export function DocumentActionsMenu({
       tooltip={documentTitle}
       ref={triggerRef}
       type="button"
-      className="review-chrome__save-identity document-actions__trigger"
+      className="reader-chrome__save-identity document-actions__trigger"
       data-document-actions-trigger
       aria-label={enabled ? `${identityLabel}, ${savedLabel}. Open document actions` : identityLabel}
       aria-haspopup={enabled ? "menu" : undefined}
@@ -305,9 +305,9 @@ export function DocumentActionsMenu({
       }}
     >
       <ReaderIcon name="file" size={16} />
-      <span className="review-chrome__filename">{displayTitle}</span>
-      {!showSaveStatusDot || savePhase === 'clean' ? null : <span className="review-chrome__save-dot" data-save-phase={savePhase} aria-hidden="true" />}
-      <span className="sr-only" data-review-saved-status>{savedLabel}</span>
+      <span className="reader-chrome__filename">{displayTitle}</span>
+      {!showSaveStatusDot || savePhase === 'clean' ? null : <span className="reader-chrome__save-dot" data-save-phase={savePhase} aria-hidden="true" />}
+      <span className="sr-only" data-reader-saved-status>{savedLabel}</span>
     </ReaderTooltipButton>
     {open ? <div
       id={menuId}
@@ -370,7 +370,7 @@ export function DocumentActionsMenu({
           <ReaderIcon
             name={pending ? 'loading' : outcome === 'success' ? 'check' : 'download'}
 
-            className={pending ? 'review-icon document-actions__loading' : 'review-icon'}
+            className={pending ? 'reader-icon document-actions__loading' : 'reader-icon'}
           />
           <span>{exportLabel}</span>
         </button>
@@ -387,7 +387,7 @@ export function DocumentActionsMenu({
             type="button"
             role="menuitem"
             title="Open Annotations"
-            className="review-button review-button--secondary document-actions__annotations-link"
+            className="reader-button reader-button--secondary document-actions__annotations-link"
             onClick={() => {
               closeForAction();
               requestAnimationFrame(onOpenAnnotations);

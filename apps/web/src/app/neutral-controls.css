@@ -32,19 +32,19 @@
   --pk-shadow-raised: 0 3px 10px #00000008, 0 12px 30px #00000009;
 }
 
-.review-shell,
-.review-chrome,
-.review-workspace,
-.review-tools-workspace,
+.reader-shell,
+.reader-chrome,
+.reader-workspace,
+.reader-tools-workspace,
 .document-actions__menu,
 .top-bar-menu__surface,
 .link-action-popover,
 .link-action-popover__surface,
-.review-tooltip {
+.reader-tooltip {
   font-family: var(--pk-font-ui);
 }
 
-.review-save-notice {
+.reader-save-notice {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
@@ -52,8 +52,8 @@
   margin: 0;
   pointer-events: auto;
 }
-.review-save-notice__actions { display: flex; flex: none; gap: 2px; margin-left: auto; }
-.review-save-notice button {
+.reader-save-notice__actions { display: flex; flex: none; gap: 2px; margin-left: auto; }
+.reader-save-notice button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -66,39 +66,39 @@
   color: inherit;
   font: 400 12px/1.2 var(--pk-font-ui);
 }
-.review-save-notice button:hover:not(:disabled) { background: var(--pk-hover); }
+.reader-save-notice button:hover:not(:disabled) { background: var(--pk-hover); }
 @media (max-width: 620px) {
-  .review-save-notice { flex-wrap: wrap; }
-  .review-save-notice__actions { margin-left: auto; }
+  .reader-save-notice { flex-wrap: wrap; }
+  .reader-save-notice__actions { margin-left: auto; }
 }
 @media (pointer: coarse) {
-  .review-save-notice button { min-height: 44px; }
+  .reader-save-notice button { min-height: 44px; }
 }
 
-.review-chrome {
-  --review-chrome-height: 50px;
+.reader-chrome {
+  --reader-chrome-height: 50px;
   grid-template-columns: minmax(0, max-content) max-content minmax(max-content, 1fr);
   gap: var(--pk-toolbar-gap);
   /* The end controls sit as far from the sides as from the top: the 32px
      controls are centred vertically, so match that inset horizontally. */
-  padding-inline: calc((var(--review-chrome-height) - 32px) / 2);
+  padding-inline: calc((var(--reader-chrome-height) - 32px) / 2);
   border: 0;
   color: var(--pk-ink);
   background: var(--pk-canvas);
 }
 
-.review-chrome:has(> .review-chrome__tray-controls) {
+.reader-chrome:has(> .reader-chrome__tray-controls) {
   grid-template-columns: minmax(0, max-content) max-content minmax(max-content, 1fr) max-content;
 }
 
-.review-chrome__identity {
+.reader-chrome__identity {
   width: 100%;
   gap: var(--pk-toolbar-gap);
 }
 
 /* One cap for the identity and its trigger, so a long PDF title truncates
    without leaving a gap before the page controls. */
-.review-chrome__identity > .document-actions {
+.reader-chrome__identity > .document-actions {
   /* Flex, so the trigger inside shrinks with the identity column instead of
      overflowing onto the page and zoom controls. */
   display: flex;
@@ -108,17 +108,17 @@
 
 /* Too narrow for a readable title: show only the file icon. The full title
    stays in the trigger's tooltip and accessible name. */
-.review-chrome[data-review-chrome-title="icon"] > .review-chrome__identity .review-chrome__filename {
+.reader-chrome[data-reader-chrome-title="icon"] > .reader-chrome__identity .reader-chrome__filename {
   display: none;
 }
 
-.review-chrome[data-review-chrome-title="icon"] > .review-chrome__identity .review-chrome__save-identity {
+.reader-chrome[data-reader-chrome-title="icon"] > .reader-chrome__identity .reader-chrome__save-identity {
   justify-content: center;
   min-width: 32px;
 }
 
-.review-chrome .review-chrome__save-identity,
-.review-chrome__identity .document-actions__trigger {
+.reader-chrome .reader-chrome__save-identity,
+.reader-chrome__identity .document-actions__trigger {
   width: max-content;
   flex: 0 1 auto;
   /* A percentage cap is indefinite during grid intrinsic sizing, leaving
@@ -139,7 +139,7 @@
   line-height: 20px;
 }
 
-.review-chrome__filename {
+.reader-chrome__filename {
   width: auto;
   min-width: 0;
   max-width: none;
@@ -149,9 +149,9 @@
   white-space: nowrap;
 }
 
-.review-chrome__save-dot,
-.review-chrome__save-dot[data-save-phase="saving"],
-.review-chrome__save-dot[data-save-phase="not-saved"] {
+.reader-chrome__save-dot,
+.reader-chrome__save-dot[data-save-phase="saving"],
+.reader-chrome__save-dot[data-save-phase="not-saved"] {
   width: 5px;
   height: 5px;
   border: 0;
@@ -159,18 +159,18 @@
   box-shadow: none;
 }
 
-.review-chrome__save-identity:is(:hover, [aria-expanded="true"]),
-.review-chrome__identity .document-actions__trigger:is(:hover, [aria-expanded="true"]) {
+.reader-chrome__save-identity:is(:hover, [aria-expanded="true"]),
+.reader-chrome__identity .document-actions__trigger:is(:hover, [aria-expanded="true"]) {
   background: var(--pk-hover);
 }
 
-.review-chrome__viewer-controls {
+.reader-chrome__viewer-controls {
   gap: var(--pk-toolbar-gap);
   font-size: 13px;
   justify-self: end;
 }
 
-.review-chrome__left-controls {
+.reader-chrome__left-controls {
   display: flex;
   align-items: center;
   gap: var(--pk-toolbar-gap);
@@ -178,78 +178,78 @@
 }
 
 @media (hover: hover) and (pointer: fine) {
-  [data-review-chrome] > .review-chrome__tray-controls {
+  [data-reader-chrome] > .reader-chrome__tray-controls {
     opacity: 0;
   }
 
   /* Trays reveal with the rest of the bar, including while a top bar menu
      opened from it (such as zoom) is open, and also stay shown while a tray
      is open so it can be closed. */
-  [data-review-chrome]:is(:hover, :has(:focus-visible, [aria-expanded="true"]))
-    > .review-chrome__tray-controls,
-  .electron-review-shell[data-toolbar-hovered="true"] [data-review-chrome] > .review-chrome__tray-controls {
+  [data-reader-chrome]:is(:hover, :has(:focus-visible, [aria-expanded="true"]))
+    > .reader-chrome__tray-controls,
+  .electron-reader-shell[data-toolbar-hovered="true"] [data-reader-chrome] > .reader-chrome__tray-controls {
     opacity: 1;
   }
 
-  [data-review-chrome] > .review-chrome__viewer-controls,
-  [data-review-chrome] :is([data-review-copy-link], [data-main-history]) {
+  [data-reader-chrome] > .reader-chrome__viewer-controls,
+  [data-reader-chrome] :is([data-reader-copy-link], [data-main-history]) {
     opacity: 0;
     pointer-events: none;
   }
 
-  [data-review-chrome]:is(:hover, :has(:focus-visible, [aria-expanded="true"]:not([data-workspace-tray-toggle])))
-    > .review-chrome__viewer-controls,
-  [data-review-chrome]:is(:hover, :has(:focus-visible, [aria-expanded="true"]:not([data-workspace-tray-toggle])))
-    :is([data-review-copy-link], [data-main-history]),
-  .electron-review-shell[data-toolbar-hovered="true"] [data-review-chrome] > .review-chrome__viewer-controls,
-  .electron-review-shell[data-toolbar-hovered="true"] [data-review-chrome] :is([data-review-copy-link], [data-main-history]) {
+  [data-reader-chrome]:is(:hover, :has(:focus-visible, [aria-expanded="true"]:not([data-workspace-tray-toggle])))
+    > .reader-chrome__viewer-controls,
+  [data-reader-chrome]:is(:hover, :has(:focus-visible, [aria-expanded="true"]:not([data-workspace-tray-toggle])))
+    :is([data-reader-copy-link], [data-main-history]),
+  .electron-reader-shell[data-toolbar-hovered="true"] [data-reader-chrome] > .reader-chrome__viewer-controls,
+  .electron-reader-shell[data-toolbar-hovered="true"] [data-reader-chrome] :is([data-reader-copy-link], [data-main-history]) {
     opacity: 1;
     pointer-events: auto;
   }
 
   /* History keeps fixed slots: an unavailable Back or Forward hides with the
      bar at rest and shows at the shared disabled opacity when revealed. */
-  [data-review-chrome] [data-main-history]:disabled {
+  [data-reader-chrome] [data-main-history]:disabled {
     opacity: 0;
   }
 
-  [data-review-chrome]:is(:hover, :has(:focus-visible, [aria-expanded="true"]:not([data-workspace-tray-toggle]))) [data-main-history]:disabled,
-  .electron-review-shell[data-toolbar-hovered="true"] [data-review-chrome] [data-main-history]:disabled {
+  [data-reader-chrome]:is(:hover, :has(:focus-visible, [aria-expanded="true"]:not([data-workspace-tray-toggle]))) [data-main-history]:disabled,
+  .electron-reader-shell[data-toolbar-hovered="true"] [data-reader-chrome] [data-main-history]:disabled {
     opacity: .35;
   }
 
   /* Prevent hidden history controls from painting without removing them from
      keyboard navigation or the accessibility tree. */
-  [data-review-chrome] [data-main-history] {
+  [data-reader-chrome] [data-main-history] {
     clip-path: inset(50%);
   }
 
-  [data-review-chrome]:is(:hover, :has(:focus-visible, [aria-expanded="true"]:not([data-workspace-tray-toggle]))) [data-main-history],
-  .electron-review-shell[data-toolbar-hovered="true"] [data-review-chrome] [data-main-history] {
+  [data-reader-chrome]:is(:hover, :has(:focus-visible, [aria-expanded="true"]:not([data-workspace-tray-toggle]))) [data-main-history],
+  .electron-reader-shell[data-toolbar-hovered="true"] [data-reader-chrome] [data-main-history] {
     clip-path: none;
   }
 }
 
-.review-chrome__control-cluster {
+.reader-chrome__control-cluster {
   gap: 2px;
 }
 
-.review-chrome__navigation-cluster {
+.reader-chrome__navigation-cluster {
   gap: var(--pk-toolbar-gap);
 }
 
 /* Undo/Redo and Back/Forward are pairs: their buttons touch, so the icons sit
    close together while the groups keep the toolbar's spacing between them. */
-.review-chrome__edit-cluster {
+.reader-chrome__edit-cluster {
   gap: 0;
 }
 
-.review-chrome__navigation-cluster > [data-main-history] + [data-main-history] {
+.reader-chrome__navigation-cluster > [data-main-history] + [data-main-history] {
   margin-left: calc(0px - var(--pk-toolbar-gap));
 }
 
-.review-chrome button,
-.review-chrome__icon-control,
+.reader-chrome button,
+.reader-chrome__icon-control,
 .top-bar-menu__surface button {
   min-width: 32px;
   min-height: 32px;
@@ -261,28 +261,28 @@
   font: 400 13px/1.2 var(--pk-font-ui);
 }
 
-.review-chrome__tray-controls {
+.reader-chrome__tray-controls {
   gap: 2px;
 }
 
-.review-chrome .review-chrome__tray-toggle[aria-expanded="true"] {
+.reader-chrome .reader-chrome__tray-toggle[aria-expanded="true"] {
   background: transparent;
 }
 
 @media (pointer: coarse) {
-  .review-chrome .review-chrome__tray-toggle {
+  .reader-chrome .reader-chrome__tray-toggle {
     min-width: 44px;
     min-height: 44px;
   }
 }
 
-.review-chrome button[aria-expanded="true"] { font-weight: 400; }
-.review-chrome button:disabled { color: var(--pk-ink); }
-.review-chrome button:active:not(:disabled) { box-shadow: none; }
+.reader-chrome button[aria-expanded="true"] { font-weight: 400; }
+.reader-chrome button:disabled { color: var(--pk-ink); }
+.reader-chrome button:active:not(:disabled) { box-shadow: none; }
 
-.review-chrome button:hover:not(:disabled),
-.review-chrome__main-history-control[aria-busy="true"]:hover,
-.top-bar-menu__surface .review-chrome__fit-width[aria-expanded="true"]:not(:disabled),
+.reader-chrome button:hover:not(:disabled),
+.reader-chrome__main-history-control[aria-busy="true"]:hover,
+.top-bar-menu__surface .reader-chrome__fit-width[aria-expanded="true"]:not(:disabled),
 .top-bar-menu__surface button:hover:not(:disabled) {
   border-color: transparent;
   color: var(--pk-ink);
@@ -290,16 +290,16 @@
   box-shadow: none;
 }
 
-.review-chrome button:focus-visible,
+.reader-chrome button:focus-visible,
 .top-bar-menu__surface button:focus-visible,
-.review-workspace button:focus-visible,
-.review-tools-workspace button:focus-visible {
+.reader-workspace button:focus-visible,
+.reader-tools-workspace button:focus-visible {
   outline: 2px solid var(--pk-focus);
   outline-offset: 3px;
 }
 
-.review-chrome__page-position,
-.review-chrome__zoom-cluster {
+.reader-chrome__page-position,
+.reader-chrome__zoom-cluster {
   display: inline-flex;
   min-height: 32px;
   align-items: center;
@@ -309,31 +309,31 @@
   font-variant-numeric: tabular-nums;
 }
 
-.review-chrome__page-position,
-.review-chrome__zoom-cluster { gap: 0; }
+.reader-chrome__page-position,
+.reader-chrome__zoom-cluster { gap: 0; }
 
-.review-chrome__page-position:is(:hover, :has([aria-expanded="true"])),
-.review-chrome__zoom-cluster:is(:hover, :has([aria-expanded="true"])) {
+.reader-chrome__page-position:is(:hover, :has([aria-expanded="true"])),
+.reader-chrome__zoom-cluster:is(:hover, :has([aria-expanded="true"])) {
   background: var(--pk-hover);
 }
 
-.review-chrome__page-control,
-.review-chrome__zoom-control,
-.review-chrome__stat {
+.reader-chrome__page-control,
+.reader-chrome__zoom-control,
+.reader-chrome__stat {
   min-width: 0;
   color: inherit;
   font: inherit;
   font-variant-numeric: inherit;
 }
 
-.review-chrome__page-editor,
-.review-chrome__zoom-editor {
+.reader-chrome__page-editor,
+.reader-chrome__zoom-editor {
   width: auto;
   min-height: 32px;
 }
 
-.review-chrome__page-input,
-.review-chrome__zoom-input {
+.reader-chrome__page-input,
+.reader-chrome__zoom-input {
   height: 32px;
   padding: 0;
   border: 0;
@@ -349,15 +349,15 @@
 /* WebKit pageZoom scales ch widths twice; em tracks only the text size. The
    page input is sized to its digits (inline width) so "1 / 33" keeps even
    spacing, with left padding that mirrors the disclosure's right padding. */
-.review-chrome__page-editor > .review-chrome__page-input {
+.reader-chrome__page-editor > .reader-chrome__page-input {
   box-sizing: border-box;
   width: calc(2em + 6px);
   padding-left: 6px;
   text-align: right;
 }
-.review-chrome__zoom-input { width: 2em; text-align: right; }
+.reader-chrome__zoom-input { width: 2em; text-align: right; }
 
-.review-chrome__page-disclosure {
+.reader-chrome__page-disclosure {
   min-width: 0 !important;
   padding: 0 6px 0 .3em !important;
   justify-content: flex-start !important;
@@ -368,14 +368,14 @@
 }
 
 /* The same 6px lead as the page input, so every chrome gap reads alike. */
-.review-chrome__zoom-value {
+.reader-chrome__zoom-value {
   display: inline-flex;
   min-height: 32px;
   align-items: center;
   padding-left: 6px;
 }
 
-.review-chrome__zoom-suffix {
+.reader-chrome__zoom-suffix {
   display: flex;
   height: 32px;
   align-items: center;
@@ -386,7 +386,7 @@
 
 /* The "%" suffix is the menu button, mirroring the page group's "/ 33", with
    the same 6px trailing padding. */
-.review-chrome__zoom-disclosure {
+.reader-chrome__zoom-disclosure {
   width: auto !important;
   min-width: 0 !important;
   padding: 0 6px 0 0 !important;
@@ -396,14 +396,14 @@
   font: 400 13px/20px var(--pk-font-ui) !important;
 }
 
-.review-chrome .review-chrome__page-disclosure:hover:not(:disabled),
-.review-chrome .review-chrome__zoom-disclosure:hover:not(:disabled),
-.review-chrome .review-chrome__page-disclosure[aria-expanded="true"],
-.review-chrome .review-chrome__zoom-disclosure[aria-expanded="true"] {
+.reader-chrome .reader-chrome__page-disclosure:hover:not(:disabled),
+.reader-chrome .reader-chrome__zoom-disclosure:hover:not(:disabled),
+.reader-chrome .reader-chrome__page-disclosure[aria-expanded="true"],
+.reader-chrome .reader-chrome__zoom-disclosure[aria-expanded="true"] {
   background: transparent;
 }
 
-.review-chrome__page-menu {
+.reader-chrome__page-menu {
   min-width: 32px;
 }
 
@@ -426,11 +426,11 @@
   font: 400 13px/20px var(--pk-font-ui);
 }
 
-.top-bar-menu__surface .review-chrome__control-cluster { gap: 2px; }
+.top-bar-menu__surface .reader-chrome__control-cluster { gap: 2px; }
 
-.review-chrome__fit-width[data-fit-active="false"] { color: var(--pk-muted); }
+.reader-chrome__fit-width[data-fit-active="false"] { color: var(--pk-muted); }
 
-.review-chrome__fit-options {
+.reader-chrome__fit-options {
   display: flex;
   flex-direction: column;
   width: 0;
@@ -440,7 +440,7 @@
   border-top: 1px solid var(--pk-border);
 }
 
-.top-bar-menu__surface .review-chrome__fit-option {
+.top-bar-menu__surface .reader-chrome__fit-option {
   display: flex;
   align-items: center;
   justify-content: flex-start;
@@ -451,13 +451,13 @@
   white-space: nowrap;
 }
 
-.review-chrome__fit-option[aria-checked="true"] { background: var(--pk-selected); }
+.reader-chrome__fit-option[aria-checked="true"] { background: var(--pk-selected); }
 
-.top-bar-menu__surface [data-review-horizontal-lock][aria-checked="true"] {
+.top-bar-menu__surface [data-reader-horizontal-lock][aria-checked="true"] {
   background: var(--pk-selected);
 }
 
-.review-layout[data-horizontal-scroll-locked="true"] .review-document .pdf-workspace__viewport {
+.reader-layout[data-horizontal-scroll-locked="true"] .reader-document .pdf-workspace__viewport {
   overflow-x: hidden !important;
   touch-action: pan-y pinch-zoom;
 }
@@ -491,7 +491,7 @@
   background: var(--pk-hover);
 }
 
-.review-tooltip {
+.reader-tooltip {
   margin: 0;
   inset: auto;
   position: fixed;
@@ -510,22 +510,22 @@
   pointer-events: none;
 }
 
-.review-chrome[data-review-chrome-touch-compact="true"] .review-chrome__filename {
+.reader-chrome[data-reader-chrome-touch-compact="true"] .reader-chrome__filename {
   display: none;
 }
 
-.review-chrome[data-review-chrome-touch-compact="true"] > .review-chrome__identity .review-chrome__save-identity {
+.reader-chrome[data-reader-chrome-touch-compact="true"] > .reader-chrome__identity .reader-chrome__save-identity {
   min-width: 44px;
   justify-content: center;
 }
 
-.review-chrome__paired-icon {
+.reader-chrome__paired-icon {
   display: inline-flex;
   align-items: center;
   flex-shrink: 0;
   width: 24px;
 }
-.review-chrome__paired-icon .review-icon {
+.reader-chrome__paired-icon .reader-icon {
   width: 12px;
   height: 16px;
 }
@@ -549,7 +549,7 @@
 .external-link-recovery__heading,
 .external-link-recovery__destination { display: flex; align-items: center; gap: 8px; }
 .external-link-recovery__heading p { display: flex; align-items: center; gap: 6px; flex: 1; margin: 0; color: var(--pk-muted); }
-.external-link-recovery__heading p .review-icon { flex-shrink: 0; color: var(--pdf-correction-ink); }
+.external-link-recovery__heading p .reader-icon { flex-shrink: 0; color: var(--pdf-correction-ink); }
 .external-link-recovery__url { flex: 1; min-width: 0; overflow-wrap: anywhere; user-select: text; cursor: text; }
 .external-link-recovery__button {
   display: inline-flex;

@@ -26,7 +26,7 @@ function ContextActionButton({ kind, iconOnly = false, onAction }: ContextAction
   return (
     <ReaderTooltipButton
       type="button"
-      className={`review-action-button${iconOnly ? ' review-action-button--icon' : ''}`}
+      className={`reader-action-button${iconOnly ? ' reader-action-button--icon' : ''}`}
       label={action.label}
       aria-keyshortcuts={action.shortcut}
       onClick={(event) => {
@@ -119,8 +119,8 @@ export function ContextActionPalette(props: ContextActionPaletteProps) {
   const [boundedStyle, setBoundedStyle] = useState<CSSProperties>();
   useLayoutEffect(() => {
     const element = elementRef.current;
-    const host = element?.closest<HTMLElement>('.review-contextual-host');
-    const stage = element?.closest<HTMLElement>('[data-review-stage]');
+    const host = element?.closest<HTMLElement>('.reader-contextual-host');
+    const stage = element?.closest<HTMLElement>('[data-reader-stage]');
     if (!element || !host) return;
     const referenceViewportElement = props.placement.surface === 'reference'
       ? stage?.querySelector<HTMLElement>(
@@ -139,8 +139,8 @@ export function ContextActionPalette(props: ContextActionPaletteProps) {
       const height = element.getBoundingClientRect().height;
       const hostRight = Math.min(bounds.width, viewportRight - bounds.left) - 12;
       const hostBottom = Math.min(bounds.height, viewportBottom - bounds.top) - 12;
-      const trayRight = stage?.dataset.rightOverlay === 'true' ? parseFloat(stageStyle!.getPropertyValue('--review-overlay-right-start')) - 12 : hostRight;
-      const trayBottom = stage?.dataset.bottomOverlay === 'true' ? parseFloat(stageStyle!.getPropertyValue('--review-overlay-bottom-start')) - 12 : hostBottom;
+      const trayRight = stage?.dataset.rightOverlay === 'true' ? parseFloat(stageStyle!.getPropertyValue('--reader-overlay-right-start')) - 12 : hostRight;
+      const trayBottom = stage?.dataset.bottomOverlay === 'true' ? parseFloat(stageStyle!.getPropertyValue('--reader-overlay-bottom-start')) - 12 : hostBottom;
       // The actual visible window is the hard boundary, even when a host or
       // layout viewport extends beyond it during browser zoom or scrolling.
       const referenceViewport = referenceViewportElement?.getBoundingClientRect();
@@ -239,15 +239,15 @@ export function ContextActionPalette(props: ContextActionPaletteProps) {
       ref={elementRef}
       role="toolbar"
       aria-label="Selection actions"
-      className="review-context-palette"
-      data-review-contextual-ui
+      className="reader-context-palette"
+      data-reader-contextual-ui
       hidden={props.hidden}
       inert={props.hidden}
       style={boundedStyle ?? style}
     >
       {props.onAddContext ? <ReaderTooltipButton
         type="button"
-        className="review-action-button review-action-button--icon"
+        className="reader-action-button reader-action-button--icon"
         label="Add selection to chat"
         aria-haspopup="dialog"
         onMouseDown={(event) => event.preventDefault()}
@@ -280,8 +280,8 @@ export function InsertionCaret({ placement, hidden }: InsertionCaretProps) {
   return (
     <span
       aria-hidden="true"
-      className="review-insertion-caret"
-      data-review-insertion-caret
+      className="reader-insertion-caret"
+      data-reader-insertion-caret
       hidden={hidden}
       style={style}
     />

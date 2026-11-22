@@ -69,7 +69,7 @@ function AnchorReturn({ navigation, onActivate }: {
   const label = state === 'pending' ? 'Returning to passage' : 'Back to passage';
   return (
     <ReaderTooltipButton
-      className="comment-composer__anchor review-button review-button--secondary"
+      className="comment-composer__anchor reader-button reader-button--secondary"
       type="button"
       label={label}
       data-return-state={state}
@@ -282,7 +282,7 @@ export function CommentComposer({
         {passageExposed ? (
           <button
             type="button"
-            className="comment-composer__resume review-button review-button--secondary"
+            className="comment-composer__resume reader-button reader-button--secondary"
             aria-label="Resume editing"
             title="Resume editing"
             onClick={resumeEditing}
@@ -345,7 +345,7 @@ export function CommentComposer({
         )}
         <div className="comment-composer__actions">
           <button
-            className="review-button review-button--secondary"
+            className="reader-button reader-button--secondary"
             type="button"
             title="Cancel"
             disabled={terminalPending}
@@ -354,7 +354,7 @@ export function CommentComposer({
             <span>Cancel</span>
           </button>
           <button
-            className="review-button review-button--primary"
+            className="reader-button reader-button--primary"
             type="submit"
             title={saveLabel}
             disabled={!canSave || busy}

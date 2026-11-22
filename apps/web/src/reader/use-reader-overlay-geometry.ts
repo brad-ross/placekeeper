@@ -240,16 +240,16 @@ export function useReaderOverlayGeometry(input: {
     ...zoomActions,
     geometry,
     style: {
-      '--review-overlay-inset': `${geometry.outsideInset}px`,
-      '--review-main-scrollbar-width': `${geometry.scrollbarWidth}px`,
-      '--review-main-scrollbar-height': `${geometry.scrollbarHeight}px`,
-      '--review-overlay-fade-size': `${READER_OVERLAY_FADE_SIZE}px`,
+      '--reader-overlay-inset': `${geometry.outsideInset}px`,
+      '--reader-main-scrollbar-width': `${geometry.scrollbarWidth}px`,
+      '--reader-main-scrollbar-height': `${geometry.scrollbarHeight}px`,
+      '--reader-overlay-fade-size': `${READER_OVERLAY_FADE_SIZE}px`,
       ...(geometry.rightStart === null
         ? {}
-        : { '--review-overlay-right-start': `${geometry.rightStart}px` }),
+        : { '--reader-overlay-right-start': `${geometry.rightStart}px` }),
       ...(geometry.bottomStart === null
         ? {}
-        : { '--review-overlay-bottom-start': `${geometry.bottomStart}px` }),
+        : { '--reader-overlay-bottom-start': `${geometry.bottomStart}px` }),
     } as CSSProperties,
   };
 }

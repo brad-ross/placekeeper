@@ -1114,7 +1114,7 @@ export function ProductionReaderApp(props: ProductionReaderAppProps) {
           await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
           const animations = [
             ...productionRootRef.current?.querySelectorAll<HTMLElement>(
-              '[data-review-workspace], [data-tools-workspace]',
+              '[data-reader-workspace], [data-tools-workspace]',
             ) ?? [],
           ].flatMap((surface) => surface.getAnimations())
             .filter((animation) => animation.playState === 'running');

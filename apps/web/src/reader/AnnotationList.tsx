@@ -335,7 +335,7 @@ export function AnnotationList({
     const row = rowRefs.current.get(activationRequest.id);
     const entry = entryRefs.current.get(`owned:${activationRequest.id}`);
     if (row && entry) {
-      const viewport = listRef.current?.closest<HTMLElement>('[data-annotation-scroll-viewport], .review-workspace');
+      const viewport = listRef.current?.closest<HTMLElement>('[data-annotation-scroll-viewport], .reader-workspace');
       if (viewport) {
         const rowBounds = row.getBoundingClientRect();
         const viewportBounds = viewport.getBoundingClientRect();
@@ -456,7 +456,7 @@ export function AnnotationList({
                 if (node) rowRefs.current.set(item.id, node);
                 else rowRefs.current.delete(item.id);
               }}
-              data-review-item={item.id}
+              data-annotation-item={item.id}
               data-annotation-origin="owned"
               data-annotation-kind={item.kind}
               data-annotation-state={annotationState(active, corresponding)}
@@ -506,13 +506,13 @@ export function AnnotationList({
       {attention?.message}
       {existingAnnotations.status === 'loading' ? (
         <p className="annotation-status" data-annotation-status="loading" role="status">
-          <ReaderIcon name="loading" className="review-icon annotation-status__icon" />
+          <ReaderIcon name="loading" className="reader-icon annotation-status__icon" />
           <span>Existing annotations are loading…</span>
         </p>
       ) : null}
       {existingAnnotations.status === 'error' ? (
         <div className="workspace-error" data-annotation-status="error" role="alert">
-          <ReaderIcon name="alert" className="review-icon annotation-status__icon" />
+          <ReaderIcon name="alert" className="reader-icon annotation-status__icon" />
           <p><strong>Existing annotations unavailable.</strong><span>{existingAnnotations.message}</span></p>
           <button type="button" title="Retry loading existing annotations" onClick={onRetryExistingAnnotations}>Retry</button>
         </div>

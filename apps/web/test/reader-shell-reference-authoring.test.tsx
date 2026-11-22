@@ -79,8 +79,8 @@ describe('Reference authoring continuity', () => {
         ? {} : null,
     }) as unknown as Pick<Element, 'closest'>;
 
-    expect(activeAnnotationShouldDismissForClick(target('.review-workspace__close'))).toBe(false);
-    expect(activeAnnotationShouldDismissForClick(target('[data-review-item]'))).toBe(false);
+    expect(activeAnnotationShouldDismissForClick(target('.reader-workspace__close'))).toBe(false);
+    expect(activeAnnotationShouldDismissForClick(target('[data-annotation-item]'))).toBe(false);
     expect(activeAnnotationShouldDismissForClick(target(null))).toBe(true);
   });
 
@@ -219,10 +219,10 @@ describe('Reference authoring continuity', () => {
 
   it('scopes duplicate mark and scrollport lookup to the originating Reference tab', () => {
     expect(ownedAnnotationFragmentSelector('note-1')).toBe(
-      ':is([data-owned-mark], [data-source-reader-mark], [data-owned-native-geometry])[data-review-id="note-1"]',
+      ':is([data-owned-mark], [data-source-reader-mark], [data-owned-native-geometry])[data-annotation-id="note-1"]',
     );
     expect(referenceAnnotationTargetSelector('tab-1', 'note-1')).toBe(
-      '[data-annotation-surface="reference"][data-reference-tab-identity="tab-1"] :is([data-owned-mark], [data-source-reader-mark], [data-owned-native-geometry])[data-review-id="note-1"]',
+      '[data-annotation-surface="reference"][data-reference-tab-identity="tab-1"] :is([data-owned-mark], [data-source-reader-mark], [data-owned-native-geometry])[data-annotation-id="note-1"]',
     );
     expect(referenceAnnotationScrollportSelector('tab-1')).toBe(
       '[data-reference-pdf-viewport][data-reference-tab-identity="tab-1"] [data-viewer-framing-viewport]',

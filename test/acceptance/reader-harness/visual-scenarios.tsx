@@ -371,10 +371,10 @@ const pageStyle: CSSProperties = {
   width: 'min(660px, 100%)',
   minHeight: 780,
   padding: '72px 78px',
-  background: 'var(--review-surface-panel)',
-  border: '1px solid var(--review-border-subtle)',
-  boxShadow: 'var(--review-shadow-page)',
-  color: 'var(--review-ink-primary)',
+  background: 'var(--reader-surface-panel)',
+  border: '1px solid var(--reader-border-subtle)',
+  boxShadow: 'var(--reader-shadow-page)',
+  color: 'var(--reader-ink-primary)',
   fontFamily: 'Georgia, Times New Roman, serif',
 };
 
@@ -395,13 +395,13 @@ export function VisualDocument({
       data-annotation-surface="main"
     >
       <article style={pageStyle} aria-label="Rendered PDF page">
-        <p style={{ margin: 0, font: '600 11px/1.4 ui-sans-serif, system-ui', letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--review-ink-muted)' }}>Working paper · August 2026</p>
+        <p style={{ margin: 0, font: '600 11px/1.4 ui-sans-serif, system-ui', letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--reader-ink-muted)' }}>Working paper · August 2026</p>
         <h1 style={{ margin: '18px 0 10px', fontSize: 27, lineHeight: 1.18, letterSpacing: '-0.02em' }}>Identification with Local Equilibria</h1>
-        <p style={{ margin: '0 0 34px', color: 'var(--review-ink-muted)', fontSize: 14 }}>A. Researcher · B. Collaborator</p>
+        <p style={{ margin: '0 0 34px', color: 'var(--reader-ink-muted)', fontSize: 14 }}>A. Researcher · B. Collaborator</p>
         <h2 style={{ margin: '0 0 14px', fontSize: 17 }}>3. Identification strategy</h2>
         <p style={{ fontSize: 15, lineHeight: 1.72 }}>Our design compares outcomes within narrowly defined markets. The identifying variation is local to the comparison group, so aggregate shocks are absorbed before the coefficient is estimated.</p>
         <p style={{ fontSize: 15, lineHeight: 1.72 }}>Under the maintained assumptions, the model admits a unique equilibrium. The appendix gives the regularity conditions and reports a set of leave-one-market-out checks.</p>
-        <blockquote style={{ margin: '28px 0', padding: '15px 18px', borderLeft: '3px solid var(--review-selection-ink)', background: 'var(--review-surface-subtle)', fontSize: 14, lineHeight: 1.6 }}>Proposition 2. The local comparison identifies the response parameter when exposure is conditionally independent of the market-level innovation.</blockquote>
+        <blockquote style={{ margin: '28px 0', padding: '15px 18px', borderLeft: '3px solid var(--reader-selection-ink)', background: 'var(--reader-surface-subtle)', fontSize: 14, lineHeight: 1.6 }}>Proposition 2. The local comparison identifies the response parameter when exposure is conditionally independent of the market-level innovation.</blockquote>
         <p style={{ fontSize: 15, lineHeight: 1.72 }}>Taken together, these estimates establish a stable mechanism across the preferred specifications and the principal robustness samples.</p>
         <div aria-label="Owned annotation overlays" data-owned-annotation-layer>
           {items.map((annotation, index) => (

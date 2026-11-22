@@ -108,7 +108,7 @@ export function OutlineAnnotationsWorkspace({
       const width = Math.max(0, scroller.offsetWidth - scroller.clientWidth);
       if (width !== measuredWidth) {
         measuredWidth = width;
-        panel.style.setProperty('--review-workspace-scrollbar-width', `${width}px`);
+        panel.style.setProperty('--reader-workspace-scrollbar-width', `${width}px`);
       }
     };
     const scheduler = new LatestFrameRequest<number>({
@@ -126,7 +126,7 @@ export function OutlineAnnotationsWorkspace({
       scheduler.cancel();
       resizeObserver?.disconnect();
       mutationObserver?.disconnect();
-      panel.style.removeProperty('--review-workspace-scrollbar-width');
+      panel.style.removeProperty('--reader-workspace-scrollbar-width');
     };
   }, [effectiveToolMode, open, outlineAvailable, annotationsAvailable]);
 
@@ -184,8 +184,8 @@ export function OutlineAnnotationsWorkspace({
   return (
     <aside
       ref={workspaceRef}
-      id="review-tools-workspace"
-      className="review-tools-workspace"
+      id="reader-tools-workspace"
+      className="reader-tools-workspace"
       data-tools-workspace-open={open ? 'true' : 'false'}
       data-authoring-takeover={authoringTakeover ? 'true' : undefined}
       data-tools-workspace-shared={headerVariant === 'shared' ? 'true' : 'false'}
@@ -198,13 +198,13 @@ export function OutlineAnnotationsWorkspace({
       inert={!open || authoringTakeover}
     >
       {headerVariant === 'tools' ? (
-        <header className="review-workspace__header">
+        <header className="reader-workspace__header">
           {onHide ? <ReaderTooltipButton
             label={hideLabel}
             type="button"
-            className="review-workspace__close"
+            className="reader-workspace__close"
             aria-expanded="true"
-            aria-controls="review-tools-workspace"
+            aria-controls="reader-tools-workspace"
             onClick={onHide}
           ><ReaderIcon name={presentation === 'bottom' ? 'chevron-down' : 'chevron-right'} /></ReaderTooltipButton> : null}
           <WorkspaceModeStrip
@@ -227,7 +227,7 @@ export function OutlineAnnotationsWorkspace({
           else panelRefs.current.delete('search');
         }}
         id="workspace-panel-search"
-        className="review-workspace__panel review-workspace__panel--search"
+        className="reader-workspace__panel reader-workspace__panel--search"
         role="tabpanel"
         aria-labelledby="workspace-mode-search"
         tabIndex={-1}
@@ -246,7 +246,7 @@ export function OutlineAnnotationsWorkspace({
           else panelRefs.current.delete('outline');
         }}
         id="workspace-panel-outline"
-        className="review-workspace__panel"
+        className="reader-workspace__panel"
         role="tabpanel"
         aria-labelledby="workspace-mode-outline"
         tabIndex={-1}
@@ -272,7 +272,7 @@ export function OutlineAnnotationsWorkspace({
           else panelRefs.current.delete('annotations');
         }}
         id="workspace-panel-annotations"
-        className="review-workspace__panel"
+        className="reader-workspace__panel"
         data-annotation-scroll-viewport
         role="tabpanel"
         aria-labelledby="workspace-mode-annotations"

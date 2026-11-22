@@ -128,7 +128,7 @@ export function OwnedNativeAnnotationGeometryTargets({
       return <span
         key={`${annotation.id}:${index}`}
         data-owned-native-geometry="true"
-        data-review-id={annotationIdForPdfAnnotation(annotation)}
+        data-annotation-id={annotationIdForPdfAnnotation(annotation)}
         data-page-index={layout.pageIndex}
         style={{
           position: 'absolute',
@@ -191,7 +191,7 @@ export function PdfAnnotationLayers({
             data-pdf-mark-style={annotation.kind}
             data-page-index={layout.pageIndex}
             data-has-attached-text={annotation.contents.trim().length > 0 ? 'true' : 'false'}
-            data-review-id={annotationIdForPdfAnnotation(annotation)}
+            data-annotation-id={annotationIdForPdfAnnotation(annotation)}
             data-authoring-preview={authoringPreviewIds.has(annotation.id) ? 'true' : undefined}
             data-corresponding={correspondingOwnedAnnotationId === annotationIdForPdfAnnotation(annotation) ? 'true' : 'false'}
             data-active={activeOwnedAnnotationId === annotationIdForPdfAnnotation(annotation) ? 'true' : 'false'}
@@ -254,7 +254,7 @@ export function PdfAnnotationLayers({
             className="owned-mark-focus-proxy"
             data-source-focus-id={annotationKey}
             data-page-index={layout.pageIndex}
-            data-review-contextual-ui
+            data-reader-contextual-ui
             aria-label={`Source annotation on page ${layout.pageNumber}`}
             title={mark.contents.trim().length > 0
               ? `Open source annotation on page ${layout.pageNumber}`
@@ -317,7 +317,7 @@ export function PdfAnnotationLayers({
         type="button"
         autoFocus
         className="page-note-placement-cursor"
-        data-review-contextual-ui
+        data-reader-contextual-ui
         data-page-index={layout.pageIndex}
         aria-label="Page Note placement cursor. Use arrow keys to move, Enter to place, or Escape to cancel."
         title="Place Page Note"

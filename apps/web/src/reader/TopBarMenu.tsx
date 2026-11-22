@@ -175,7 +175,7 @@ export function TopBarMenu({
       if (event.target instanceof Node && openerRef.current?.contains(event.target)) return;
       if (event.target instanceof Node && hoverRegionRef?.current?.contains(event.target)) return;
       const switchingTopBarMenu = event.target instanceof Element
-        && event.target.closest('[data-review-chrome-group], [data-document-actions-trigger]') !== null;
+        && event.target.closest('[data-reader-chrome-group], [data-document-actions-trigger]') !== null;
       dismiss('outside', !hoverOpen && !switchingTopBarMenu);
     };
     const openerKeyDown = (event: globalThis.KeyboardEvent) => {
@@ -209,7 +209,7 @@ export function TopBarMenu({
     const boundsObserver = typeof ResizeObserver === 'undefined'
       ? null
       : new ResizeObserver(scheduleUpdate);
-    const chrome = opener.closest('[data-review-chrome]');
+    const chrome = opener.closest('[data-reader-chrome]');
     if (chrome) connectionObserver.observe(chrome, {
       attributes: true,
       childList: true,

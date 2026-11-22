@@ -160,7 +160,7 @@ export function PdfSearchWorkspace({
         data-has-query={hasEffectiveQuery}
         onBlur={closeSuggestionsOnBlur}
       >
-        <ReaderIcon name="search" className="review-icon pdf-search__search-icon" />
+        <ReaderIcon name="search" className="reader-icon pdf-search__search-icon" />
         <input
           ref={queryInputRef}
           className="pdf-search__input"
@@ -198,7 +198,7 @@ export function PdfSearchWorkspace({
             <ReaderIcon name="close" />
           </ReaderTooltipButton>
         </span>
-        {indexing ? <ReaderIcon name="loading" className="review-icon pdf-search__spinner" /> : null}
+        {indexing ? <ReaderIcon name="loading" className="reader-icon pdf-search__spinner" /> : null}
         {showSymbolSuggestions ? (
           <div
             id="pdf-search-symbol-suggestions"

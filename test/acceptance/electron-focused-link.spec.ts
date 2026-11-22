@@ -39,7 +39,7 @@ test('focused native links settle in the existing reader before task activation 
             const result = await requestControl(socket, { kind: 'refresh-context', taskSessionId });
             return result.kind === 'context' ? result.result.status : 'unexpected';
         }).toBe('current');
-        await page.locator('[data-review-chrome]').hover();
+        await page.locator('[data-reader-chrome]').hover();
         await expect(page.getByRole('button', { name: 'Copy link to current PDF location', exact: true })).toHaveCount(0);
         const copied = await page.evaluate(async () => {
             const shell = window.placekeeper;

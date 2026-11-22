@@ -49,6 +49,6 @@ describe('document context button', () => {
     />);
 
     expect(markup.match(/data-document-context="idle"/gu)).toHaveLength(1);
-    expect(markup.match(/review-chrome__context--document/gu)).toHaveLength(1 + READER_CHROME_PRESENTATIONS.length);
+    expect(markup.match(/reader-chrome__context--document/gu)).toHaveLength(1 + READER_CHROME_PRESENTATIONS.length);
   });
 });

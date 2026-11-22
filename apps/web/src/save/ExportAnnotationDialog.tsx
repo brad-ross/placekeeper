@@ -23,7 +23,7 @@ export function ExportAnnotationDialog(props: {
     };
   }, []);
   return <div className="save-destination-backdrop" data-export-annotation-backdrop>
-    <section className="save-destination-dialog review-choice-dialog compact-editorial-modal"
+    <section className="save-destination-dialog reader-choice-dialog compact-editorial-modal"
       role="dialog" aria-modal="true" aria-labelledby={titleId}
       onKeyDown={(event) => {
         if (event.key === 'Escape') {
@@ -40,8 +40,8 @@ export function ExportAnnotationDialog(props: {
           error={props.error} errorId={errorId} inputRef={firstRef} />
       </div>
       <footer className="compact-editorial-modal__footer">
-        <button className="review-button" type="button" title="Cancel export" disabled={props.pending} onClick={props.onCancel}><span>Cancel</span></button>
-        <button className="review-button review-button--primary" type="button" title="Export annotated PDF" disabled={props.pending}
+        <button className="reader-button" type="button" title="Cancel export" disabled={props.pending} onClick={props.onCancel}><span>Cancel</span></button>
+        <button className="reader-button reader-button--primary" type="button" title="Export annotated PDF" disabled={props.pending}
           onClick={() => props.onConfirm(name)}>
           {props.pending ? <ReaderIcon name="loading" /> : null}<span>Export</span>
         </button>

@@ -70,7 +70,7 @@ export function SaveDestinationDialog(props: SaveDestinationDialogProps) {
     <div className="save-destination-backdrop" data-save-destination-backdrop>
       <section
         ref={dialogRef}
-        className="save-destination-dialog review-choice-dialog compact-editorial-modal"
+        className="save-destination-dialog reader-choice-dialog compact-editorial-modal"
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
@@ -102,7 +102,7 @@ export function SaveDestinationDialog(props: SaveDestinationDialogProps) {
               </div>
               <div className="save-destination-recovery__actions">
                 <button
-                  className="review-button review-button--primary"
+                  className="reader-button reader-button--primary"
                   type="button"
                   title="Return to annotations"
                   onClick={props.onCancel}
@@ -120,7 +120,7 @@ export function SaveDestinationDialog(props: SaveDestinationDialogProps) {
               </div>
               <div className="save-destination-recovery__actions">
                 <button
-                  className="review-button review-button--primary"
+                  className="reader-button reader-button--primary"
                   type="button"
                   title="Retry saving"
                   disabled={props.establishing}
@@ -130,7 +130,7 @@ export function SaveDestinationDialog(props: SaveDestinationDialogProps) {
                   <span>Retry</span>
                 </button>
                 <button
-                  className="review-button"
+                  className="reader-button"
                   type="button"
                   title="Locate the PDF"
                   disabled={props.establishing}
@@ -215,7 +215,7 @@ export function SaveDestinationDialog(props: SaveDestinationDialogProps) {
         </div>
         <footer className="compact-editorial-modal__footer">
           <button
-            className="review-button"
+            className="reader-button"
             type="button"
             title="Cancel save setup"
             disabled={props.establishing}
@@ -225,7 +225,7 @@ export function SaveDestinationDialog(props: SaveDestinationDialogProps) {
           </button>
           <button
             type="button"
-            className="review-button review-button--primary"
+            className="reader-button reader-button--primary"
             title="Save annotations"
             disabled={
               restricted ||

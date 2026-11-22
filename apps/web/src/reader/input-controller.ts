@@ -60,7 +60,7 @@ const EDITABLE_HOST_SELECTOR = [
   '[role="combobox"]',
   '[role="spinbutton"]',
   '[role="dialog"]',
-  '[data-review-editor]',
+  '[data-reader-editor]',
 ].join(',');
 
 const SPACE_ACTIVATION_SELECTOR = [

@@ -36,7 +36,7 @@ async function canonical(browser: Browser, baseURL: string | undefined, scene: s
 async function product(page: Page, scene: string) {
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.goto(`/test/acceptance/reader-harness/index.html?visual=${scene}`);
-  await expect(page.locator('[data-review-chrome]').first()).toBeVisible();
+  await expect(page.locator('[data-reader-chrome]').first()).toBeVisible();
   await page.mouse.move(0, 0);
 }
 function visible(root: Page | Frame, selector: string) { return root.locator(selector).filter({ visible: true }).first(); }
@@ -56,7 +56,7 @@ test('toolbar controls match canonical rest, hover, keyboard, and open-menu stat
   const mock = await canonical(browser, baseURL, 'Reading');
   try {
     await product(page, 'reading');
-    const copy = visible(page, '.review-chrome__link button');
+    const copy = visible(page, '.reader-chrome__link button');
     const copyMock = mock.frame.locator('.pk-toolbar [data-action="copy"]');
     await match(copy, copyMock, [...control, 'width', 'height']);
     await match(copy.locator('svg'), copyMock.locator('svg'), icon);
@@ -69,7 +69,7 @@ test('toolbar controls match canonical rest, hover, keyboard, and open-menu stat
       else await owner.mouse.move(0, 0);
     }
     await match(copy, copyMock, [...control, 'outlineWidth', 'outlineColor', 'outlineOffset']);
-    const zoom = visible(page, '.review-chrome__zoom-disclosure');
+    const zoom = visible(page, '.reader-chrome__zoom-disclosure');
     const zoomMock = mock.frame.locator('.pk-zoom-trigger');
     await zoom.click(); await zoomMock.click();
     await zoom.focus(); await zoomMock.focus();
@@ -126,8 +126,8 @@ test('save setup and save-failure surfaces match the approved scenes', async ({ 
     await mock.frame.locator('#pk-review-scene').selectOption({ label: 'Save failure' });
     await product(page, 'save-failure');
     // Follow-up: preserve the new palette and type in an upper-left floating toast.
-    await match(page.locator('.review-save-notice'), mock.frame.locator('.pk-notice'), ['padding', 'borderTopWidth', 'backgroundColor', ...typography]);
-    expect(await styles(page.locator('.review-save-notice'), ['borderRadius', 'borderBottomWidth']))
+    await match(page.locator('.reader-save-notice'), mock.frame.locator('.pk-notice'), ['padding', 'borderTopWidth', 'backgroundColor', ...typography]);
+    expect(await styles(page.locator('.reader-save-notice'), ['borderRadius', 'borderBottomWidth']))
       .toEqual({ borderRadius: '10px', borderBottomWidth: '0px' });
     await match(page.getByRole('button', { name: 'Retry', exact: true }), mock.frame.locator('[data-action="retry"]'), control);
     await page.getByRole('button', { name: 'Save a copy…', exact: true }).click();
@@ -183,7 +183,7 @@ test('annotation rows and full reader retain canonical surface and text hierarch
   const mock = await canonical(browser, baseURL, 'Annotations');
   try {
     await product(page, 'tray');
-    const row = page.locator('[data-review-item="owned-highlight"]');
+    const row = page.locator('[data-annotation-item="owned-highlight"]');
     const mockRow = mock.frame.locator('.pk-row.pk-current');
     await match(row.locator('.annotation-item__content'), mockRow, ['padding', 'borderRadius']);
     await match(row.locator('.annotation-item__title-row'), mockRow.locator('.pk-row-head'), ['gap', 'minHeight', 'marginBottom']);
@@ -207,11 +207,11 @@ test('selection and page-action palettes use canonical controls', async ({ page,
   const mock = await canonical(browser, baseURL, 'Text selection');
   try {
     await product(page, 'contextual');
-    await match(visible(page, '.review-context-palette'), mock.frame.locator('.pk-palette'), [...surface, 'gap']);
+    await match(visible(page, '.reader-context-palette'), mock.frame.locator('.pk-palette'), [...surface, 'gap']);
     await match(page.getByRole('button', { name: 'Highlight', exact: true }), mock.frame.locator('[data-action="highlight"]'), control);
     await match(page.getByRole('button', { name: 'Highlight', exact: true }).locator('svg'), mock.frame.locator('[data-action="highlight"] svg'), icon);
     await product(page, 'page-note');
-    await match(visible(page, '.review-page-menu'), mock.frame.locator('.pk-palette'), [...surface, 'gap']);
+    await match(visible(page, '.reader-page-menu'), mock.frame.locator('.pk-palette'), [...surface, 'gap']);
   } finally { await mock.page.close(); }
 });
 
@@ -220,7 +220,7 @@ test('Outline and Search share the approved tray and field treatment', async ({ 
   try {
     await product(page, 'outline&search=canonical');
     await page.getByRole('tab', { name: 'Outline', exact: true }).click();
-    await match(visible(page, '.review-tools-workspace'), mock.frame.locator('.pk-aside'), ['backgroundColor', 'borderRadius', 'borderTopWidth']);
+    await match(visible(page, '.reader-tools-workspace'), mock.frame.locator('.pk-aside'), ['backgroundColor', 'borderRadius', 'borderTopWidth']);
     const target = visible(page, '.outline-navigator__destination:not(:disabled)');
     await match(target, mock.frame.locator('.pk-outline').first(), ['padding', ...typography]);
     await match(page.locator('.outline-navigator__disclosure').first(), mock.frame.locator('.pk-outline-disclosure').first(), ['width', 'height', 'padding', 'color']);
@@ -255,7 +255,7 @@ test('split References uses the canonical tab surfaces and controls', async ({ p
     await expect(tabs).toHaveAttribute('data-reference-tabs-orientation', 'vertical');
     const current = tabs.locator('.reference-tab-segment').filter({ has: page.locator('[aria-selected="true"]') });
     await expect(current.locator('.reference-tab-segment__selector')).toBeFocused();
-    await visible(page, '.review-chrome__page-input').focus();
+    await visible(page, '.reader-chrome__page-input').focus();
     await page.mouse.move(0, 0);
     await match(current, mock.frame.locator('.pk-ref-tab.pk-current'), ['borderRadius', 'backgroundColor', 'boxShadow']);
     await match(current.locator('.reference-tab-segment__selector'), mock.frame.locator('.pk-ref-title[aria-selected="true"]'), control);

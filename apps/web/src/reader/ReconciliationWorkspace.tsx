@@ -945,9 +945,9 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
           {reattachmentInstruction(targetAnchor(activeRecord.value).kind, candidate)}
         </p>
         <div className="comment-composer__actions reconciliation-workspace__editor-actions">
-          <button className="review-button review-button--secondary" type="button" title="Cancel" disabled={pending} onClick={closeDetail}><span>Cancel</span></button>
+          <button className="reader-button reader-button--secondary" type="button" title="Cancel" disabled={pending} onClick={closeDetail}><span>Cancel</span></button>
           <button
-            className="review-button review-button--primary"
+            className="reader-button reader-button--primary"
             type="button"
             title="Attach this annotation to the selected text"
             disabled={pending || candidate.anchor === null}
@@ -964,8 +964,8 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
       </section> : null}
       {detail.mode === "apply" && canApplyDraft ? <section className="reconciliation-workspace__resolution" data-apply-confirmation>
         <div className="comment-composer__actions reconciliation-workspace__editor-actions">
-          <button className="review-button review-button--secondary" type="button" title="Cancel" disabled={pending} onClick={closeDetail}><span>Cancel</span></button>
-          <button className="review-button review-button--primary" type="button" title="Add this draft to the current PDF" disabled={pending} onClick={() => void submit({
+          <button className="reader-button reader-button--secondary" type="button" title="Cancel" disabled={pending} onClick={closeDetail}><span>Cancel</span></button>
+          <button className="reader-button reader-button--primary" type="button" title="Add this draft to the current PDF" disabled={pending} onClick={() => void submit({
             type: "apply-draft",
             expectedRevision: props.state.revision,
             id: draft.id,
@@ -978,8 +978,8 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
       {detail.mode === "discard" ? <section className="reconciliation-workspace__resolution" data-discard-confirmation>
         <p className="reconciliation-workspace__instruction">Discard this annotation from the Annotated Document?</p>
         <div className="comment-composer__actions reconciliation-workspace__editor-actions">
-          <button className="review-button review-button--secondary" type="button" title="Cancel" disabled={pending} onClick={closeDetail}><span>Cancel</span></button>
-          <button className="review-button review-button--secondary reconciliation-workspace__destructive" type="button" title="Discard this annotation" disabled={pending} onClick={() => void submit(discardCommand(activeRecord.target))}><span>Discard</span></button>
+          <button className="reader-button reader-button--secondary" type="button" title="Cancel" disabled={pending} onClick={closeDetail}><span>Cancel</span></button>
+          <button className="reader-button reader-button--secondary reconciliation-workspace__destructive" type="button" title="Discard this annotation" disabled={pending} onClick={() => void submit(discardCommand(activeRecord.target))}><span>Discard</span></button>
         </div>
       </section> : null}
     </section>;

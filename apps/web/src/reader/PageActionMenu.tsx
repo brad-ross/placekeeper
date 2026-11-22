@@ -64,7 +64,7 @@ export function PageActionMenu(props: PageActionMenuProps) {
     return () => document.removeEventListener('pointerup', dismissOutside);
   }, [props.onDismiss]);
   return (
-    <div ref={menuRef} role="menu" aria-label="Page actions" className="review-page-menu" data-review-contextual-ui style={style}>
+    <div ref={menuRef} role="menu" aria-label="Page actions" className="reader-page-menu" data-reader-contextual-ui style={style}>
       {props.onGoToSource ? (
         <button
           type="button"
@@ -80,7 +80,7 @@ export function PageActionMenu(props: PageActionMenuProps) {
         ref={props.triggerRef}
         type="button"
         role="menuitem"
-        className="review-action-button review-action-button--icon"
+        className="reader-action-button reader-action-button--icon"
         label="Add Page Note"
         tooltip="Page Note"
         autoFocus={props.onGoToSource === undefined}

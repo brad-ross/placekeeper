@@ -68,7 +68,7 @@ for (const source of ['main', 'reference']) {
     const back = page.getByRole('button', { name: 'Back in document history' });
     await expect(back).toBeVisible();
     await expect(back).toBeEnabled();
-    await page.locator('[data-review-chrome]').hover({ position: { x: 2, y: 2 } });
+    await page.locator('[data-reader-chrome]').hover({ position: { x: 2, y: 2 } });
     await back.click();
     await expect(pageInput).toHaveValue('1');
     await page.getByRole('button', { name: 'Forward in document history' }).click();
@@ -318,7 +318,7 @@ test('normal-motion workspace opening and closing refit after the tray settles',
   await openAnimatedHostDocument(page, 960);
   const samples = await page.evaluate(() => new Promise<{ width: number; trayX: number }[]>((resolve) => {
     const pdf = document.querySelector<HTMLElement>('[data-page-index="0"]')!;
-    const tray = document.querySelector<HTMLElement>('#review-tools-workspace')!;
+    const tray = document.querySelector<HTMLElement>('#reader-tools-workspace')!;
     const samples: { width: number; trayX: number }[] = [];
     const start = performance.now();
     const sample = () => {
@@ -363,11 +363,11 @@ for (const width of [1280, 640]) {
     await openAnimatedHostDocument(page, width);
     await page.getByRole('button', { name: 'Open PDF link to Primary result, Page 2', exact: true }).click();
     await page.getByRole('menuitem', { name: 'Open in References', exact: true }).click();
-    const references = page.locator('.review-workspace');
+    const references = page.locator('.reader-workspace');
     await expect(references).toHaveAttribute('data-workspace-open', 'true');
     await page.waitForTimeout(300);
     const samples = await page.evaluate(() => new Promise<{ height: number; y: number }[]>((resolve) => {
-      const tray = document.querySelector<HTMLElement>('.review-workspace')!;
+      const tray = document.querySelector<HTMLElement>('.reader-workspace')!;
       const samples: { height: number; y: number }[] = [];
       const start = performance.now();
       const sample = () => {
@@ -411,7 +411,7 @@ for (const { referencesOpen, tall, zoomPercent } of [
     if (referencesOpen) {
       await page.getByRole('button', { name: 'Open PDF link to Primary result, Page 2', exact: true }).click();
       await page.getByRole('menuitem', { name: 'Open in References', exact: true }).click();
-      await expect(page.locator('.review-workspace')).toHaveAttribute('data-workspace-open', 'true');
+      await expect(page.locator('.reader-workspace')).toHaveAttribute('data-workspace-open', 'true');
     }
     const zoom = page.getByRole('textbox', { name: /Current zoom/ });
     await zoom.fill(String(zoomPercent));
@@ -419,7 +419,7 @@ for (const { referencesOpen, tall, zoomPercent } of [
     await page.waitForTimeout(400);
     const samples = await page.evaluate(() => new Promise<{ width: number; y: number; trayHeight: number; trayX: number }[]>((resolve) => {
       const pdf = document.querySelector<HTMLElement>('[data-page-index="0"]')!;
-      const tray = document.querySelector<HTMLElement>('#review-tools-workspace')!;
+      const tray = document.querySelector<HTMLElement>('#reader-tools-workspace')!;
       const samples: { width: number; y: number; trayHeight: number; trayX: number }[] = [];
       const start = performance.now();
       const sample = () => {

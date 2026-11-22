@@ -1641,7 +1641,7 @@ describe("one production review tree", () => {
     expect(html).toContain("Not saved");
     expect(html).not.toContain("Codex");
     expect(html).not.toContain('data-codex-context');
-    expect(html).toContain('data-review-item="00000000-0000-4000-8000-000000000004"');
+    expect(html).toContain('data-annotation-item="00000000-0000-4000-8000-000000000004"');
     expect(html).not.toContain("Finish review");
     expect(html).not.toContain("Discard review");
     expect(html).not.toContain("Human delivery");
@@ -1682,7 +1682,7 @@ describe("one production review tree", () => {
 
     for (const surface of ["browser", "chrome", "codex", "electron", "vscode", "finder", "macos", "static"] as const) {
       const html = renderSurface(surface);
-      expect(html).not.toContain('data-review-copy-link');
+      expect(html).not.toContain('data-reader-copy-link');
       expect(html).not.toContain('copy-link-control');
     }
   });
@@ -1722,7 +1722,7 @@ describe("one production review tree", () => {
       expect(html).toContain('aria-haspopup="menu"');
     }
     const status = phase === 'not-saved' ? 'Not saved' : phase === 'saving' ? 'Saving changes' : 'Saved';
-    expect(html).toContain(`data-review-saved-status="true">${status}</span>`);
+    expect(html).toContain(`data-reader-saved-status="true">${status}</span>`);
   });
 
   it('shows actionable save failure only for an established local save destination', () => {
@@ -1747,14 +1747,14 @@ describe("one production review tree", () => {
         viewer={<div>Viewer</div>}
       />);
     const failed = renderFailure('not-saved');
-    expect(failed).toContain('class="review-toast review-toast--error review-save-notice" role="alert"');
+    expect(failed).toContain('class="reader-toast reader-toast--error reader-save-notice" role="alert"');
     expect(failed).toContain('Couldn’t save your latest annotations.');
     expect(failed).toContain('>Retry</button>');
     expect(failed).toContain('>Save a copy…</button>');
-    expect(renderFailure('clean')).not.toContain('review-save-notice');
-    expect(renderFailure('saving')).not.toContain('review-save-notice');
-    expect(renderFailure('not-saved', false)).not.toContain('review-save-notice');
-    expect(renderFailure('not-saved', true, true)).not.toContain('review-save-notice');
+    expect(renderFailure('clean')).not.toContain('reader-save-notice');
+    expect(renderFailure('saving')).not.toContain('reader-save-notice');
+    expect(renderFailure('not-saved', false)).not.toContain('reader-save-notice');
+    expect(renderFailure('not-saved', true, true)).not.toContain('reader-save-notice');
   });
 
   it("shows passive status only for a trusted Codex launch scope", () => {
@@ -1862,14 +1862,14 @@ describe("one production review tree", () => {
     />);
 
     expect(html).toContain("Choose where to save annotations");
-    expect(html).toContain('class="save-destination-dialog review-choice-dialog compact-editorial-modal"');
+    expect(html).toContain('class="save-destination-dialog reader-choice-dialog compact-editorial-modal"');
     expect(html).toContain('compact-editorial-modal__header');
     expect(html).toContain('compact-editorial-modal__body');
     expect(html).toContain('compact-editorial-modal__footer');
     expect(html.indexOf("Modify the original PDF")).toBeLessThan(html.indexOf("Save to a new copy"));
     expect(html).toContain("Save");
-    expect(html).not.toContain('class="lucide lucide-x review-icon"');
-    expect(html).not.toContain('class="lucide lucide-check review-icon"');
+    expect(html).not.toContain('class="lucide lucide-x reader-icon"');
+    expect(html).not.toContain('class="lucide lucide-check reader-icon"');
     expect(html).toContain("You can change this later by clicking the filename.");
     expect(html).not.toContain("Keep annotations in the file you opened.");
     expect(html).not.toContain("Keep the original unchanged.");
@@ -1944,7 +1944,7 @@ describe("one production review tree", () => {
     expect(html).toContain("Protected Recovery");
     expect(html).toContain("Private paper.pdf, protected recovery, choose where to save");
     expect(html).toContain('aria-haspopup="dialog"');
-    expect(html).toContain('data-review-item="00000000-0000-4000-8000-000000000043"');
+    expect(html).toContain('data-annotation-item="00000000-0000-4000-8000-000000000043"');
     expect(html).not.toContain("Codex");
   });
 
@@ -1963,8 +1963,8 @@ describe("one production review tree", () => {
     expect(html).toContain("Your latest annotations are protected.");
     expect(html).toContain(">Retry</span>");
     expect(html).toContain("Locate PDF…");
-    expect(html).toContain('class="lucide lucide-redo2 lucide-redo-2 review-icon"');
-    expect(html).toContain('class="lucide lucide-locate-fixed review-icon"');
+    expect(html).toContain('class="lucide lucide-redo2 lucide-redo-2 reader-icon"');
+    expect(html).toContain('class="lucide lucide-locate-fixed reader-icon"');
   });
 
   it("routes invalid geometry back to annotation correction instead of generic retry", () => {
@@ -1981,7 +1981,7 @@ describe("one production review tree", () => {
 
     expect(html).toContain("An annotation is outside the page");
     expect(html).toContain("Return to annotations");
-    expect(html).toContain('class="lucide lucide-arrow-left review-icon"');
+    expect(html).toContain('class="lucide lucide-arrow-left reader-icon"');
     expect(html).not.toContain(">Retry</button>");
   });
 });

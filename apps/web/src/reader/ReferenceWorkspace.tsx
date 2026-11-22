@@ -398,9 +398,9 @@ export function ReferenceWorkspace({
     <>
     <aside
       ref={workspaceRef}
-      id="review-workspace"
-      className="review-workspace"
-      data-review-workspace
+      id="reader-workspace"
+      className="reader-workspace"
+      data-reader-workspace
       data-annotation-drawer
       data-workspace-presentation={presentation}
       data-workspace-header-variant={headerVariant}
@@ -412,13 +412,13 @@ export function ReferenceWorkspace({
       aria-hidden={!open}
       inert={!open}
     >
-      {modes.length > 0 ? <header className="review-workspace__header">
+      {modes.length > 0 ? <header className="reader-workspace__header">
         {onHide ? <ReaderTooltipButton
           label={hideLabel}
           type="button"
-          className="review-workspace__close"
+          className="reader-workspace__close"
           aria-expanded="true"
-          aria-controls="review-workspace"
+          aria-controls="reader-workspace"
           onClick={onHide}
         ><ReaderIcon name={presentation === 'bottom' ? 'chevron-down' : 'chevron-right'} /></ReaderTooltipButton> : null}
         <WorkspaceModeStrip
@@ -448,7 +448,7 @@ export function ReferenceWorkspace({
           else panelRefs.current.delete('references');
         }}
         id="workspace-panel-references"
-        className="review-workspace__panel review-workspace__panel--references"
+        className="reader-workspace__panel reader-workspace__panel--references"
         data-reference-tabs-orientation={referenceTabOrientation}
         data-reference-panel-layout={showReferenceTabs || reserveReferenceTabRail ? 'split' : 'full'}
         role="tabpanel"
@@ -647,7 +647,7 @@ export function ReferenceWorkspace({
       </section> : null}
 
     </aside>
-    <p className="sr-only review-workspace__status" role="status" aria-live="polite" aria-atomic="true">
+    <p className="sr-only reader-workspace__status" role="status" aria-live="polite" aria-atomic="true">
       {announcement}
     </p>
     </>

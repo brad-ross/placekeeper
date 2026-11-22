@@ -206,7 +206,7 @@ export function mainAnnotationPeekCanOpen(input: {
 
 export function activeAnnotationShouldDismissForClick(target: Pick<Element, 'closest'>): boolean {
   return target.closest(
-    '[data-review-item], [data-existing-annotation], [data-owned-focus-id], [data-page-index], .annotation-peek, .review-workspace__close',
+    '[data-annotation-item], [data-existing-annotation], [data-owned-focus-id], [data-page-index], .annotation-peek, .reader-workspace__close',
   ) === null;
 }
 
@@ -590,7 +590,7 @@ export function ReaderShell(props: ReaderShellProps) {
     if (!horizontalScrollLocked || !shell) return;
     const lockHorizontalWheel = (event: WheelEvent) => {
       if (event.ctrlKey || event.metaKey || (event.deltaX === 0 && !event.shiftKey)) return;
-      const viewport = shell.querySelector<HTMLElement>('.review-document .pdf-workspace__viewport');
+      const viewport = shell.querySelector<HTMLElement>('.reader-document .pdf-workspace__viewport');
       if (!viewport || !(event.target instanceof Node) || !viewport.contains(event.target)) return;
       // WebKit can scroll the hidden horizontal axis during diagonal gestures.
       // Consume that gesture and apply only its vertical component.
@@ -916,7 +916,7 @@ export function ReaderShell(props: ReaderShellProps) {
               authoringSession.origin.surface.tabIdentity,
               documentId,
             )
-          : `[data-annotation-surface="main"] [data-owned-mark][data-review-id="${cssAttributeValue(documentId)}"]`;
+          : `[data-annotation-surface="main"] [data-owned-mark][data-annotation-id="${cssAttributeValue(documentId)}"]`;
       })();
   const authoringFallbackTarget = authoringSession === null
     ? null
@@ -1391,7 +1391,7 @@ export function ReaderShell(props: ReaderShellProps) {
       if (
         event.target instanceof Element
         && event.target.closest(
-          '[data-review-page-editor], [data-review-zoom-editor], [data-reconciliation-detail]',
+          '[data-reader-page-editor], [data-reader-zoom-editor], [data-reconciliation-detail]',
         ) !== null
       ) {
         return;
@@ -1728,7 +1728,7 @@ export function ReaderShell(props: ReaderShellProps) {
       if (shell === null) return;
       const active = shell.ownerDocument.activeElement instanceof HTMLElement
         ? shell.ownerDocument.activeElement : null;
-      if (active !== null && active.closest('.review-chrome') !== null && isVisibleFocusTarget(active)) return;
+      if (active !== null && active.closest('.reader-chrome') !== null && isVisibleFocusTarget(active)) return;
       const target = transition.focus === 'first-recovery-action-if-needed'
         ? shell.querySelector<HTMLElement>(
           '[data-recovery-primary]:not(:disabled), [data-recovery-action]:not(:disabled)',
@@ -1824,7 +1824,7 @@ export function ReaderShell(props: ReaderShellProps) {
       surface: 'bottom',
       target: narrowWorkspace ? workspaceTrayTarget : 'References',
       open,
-      controls: narrowWorkspace ? 'review-workspace review-tools-workspace' : 'review-workspace',
+      controls: narrowWorkspace ? 'reader-workspace reader-tools-workspace' : 'reader-workspace',
       buttonRef: bottomWorkspaceToggleRef,
       onToggle: open
         ? () => hideWorkspaceTray('bottom')
@@ -1846,8 +1846,8 @@ export function ReaderShell(props: ReaderShellProps) {
       target: workspaceTrayTarget,
       open,
       controls: effectiveReferenceLayout.referenceDock === 'right' && referencesAvailable
-        ? 'review-workspace review-tools-workspace'
-        : 'review-tools-workspace',
+        ? 'reader-workspace reader-tools-workspace'
+        : 'reader-tools-workspace',
       buttonRef: rightWorkspaceToggleRef,
       onToggle: open
         ? () => hideWorkspaceTray('right')
@@ -1889,7 +1889,7 @@ export function ReaderShell(props: ReaderShellProps) {
       || workspaceFraming.toolsSurfaceRef.current?.contains(target) === true
     ))
     || (target instanceof Element && target.closest(
-      '[data-review-chrome], [data-review-nested-host], [data-comment-composer], [data-link-action-popover]',
+      '[data-reader-chrome], [data-reader-nested-host], [data-comment-composer], [data-link-action-popover]',
     ) !== null)
   );
   const copyLinkForItem = (item: Annotation): CopyLinkControlProps | undefined => {
@@ -2004,7 +2004,7 @@ export function ReaderShell(props: ReaderShellProps) {
   })();
   return (
     <section
-      className="review-shell"
+      className="reader-shell"
       onBeforeInputCapture={beforeInput}
       onKeyDownCapture={keyDown}
       onFocusCapture={(event) => {
@@ -2089,13 +2089,13 @@ export function ReaderShell(props: ReaderShellProps) {
         if (
           workspaceOpen
           && event.target instanceof Element
-          && event.target.closest('.review-chrome__viewer-controls, .review-chrome__left-controls') !== null
+          && event.target.closest('.reader-chrome__viewer-controls, .reader-chrome__left-controls') !== null
         ) {
           markFramingUserIntent();
         }
       }}
     >
-      <p className="review-transition-announcement" aria-live="polite" aria-atomic="true">
+      <p className="reader-transition-announcement" aria-live="polite" aria-atomic="true">
         {transitionAnnouncement}
       </p>
       <ReaderChrome
@@ -2156,8 +2156,8 @@ export function ReaderShell(props: ReaderShellProps) {
       />
       <div
         ref={workspaceFraming.stageRef}
-        className="review-layout"
-        data-review-stage
+        className="reader-layout"
+        data-reader-stage
         data-horizontal-scroll-locked={horizontalScrollLocked ? 'true' : undefined}
         data-reference-layout={effectiveReferenceLayout.kind}
         data-references-available={referencesAvailable ? 'true' : 'false'}
@@ -2186,13 +2186,13 @@ export function ReaderShell(props: ReaderShellProps) {
         } as CSSProperties}
       >
         {props.save.saveRecovery || props.toolError || props.commandNotice || generatedStatusMessages.length > 0 ? <div
-          className="review-toast-stack"
-          data-review-toast-stack
+          className="reader-toast-stack"
+          data-reader-toast-stack
         >
-          {props.save.saveRecovery ? <aside className="review-toast review-toast--error review-save-notice" role="alert">
+          {props.save.saveRecovery ? <aside className="reader-toast reader-toast--error reader-save-notice" role="alert">
             <ReaderIcon name="alert" />
             <span>{props.save.saveRecovery.error ?? 'Couldn’t save your latest annotations.'}</span>
-            <div className="review-save-notice__actions">
+            <div className="reader-save-notice__actions">
               <button type="button" title="Retry saving" disabled={props.save.saveRecovery.pending}
                 onClick={() => void props.save.saveRecovery?.onRetry()}>Retry</button>
               <button type="button" title="Save a copy" disabled={props.save.saveRecovery.pending}
@@ -2200,15 +2200,15 @@ export function ReaderShell(props: ReaderShellProps) {
             </div>
           </aside> : null}
           {props.toolError ? <p
-            className="review-toast review-toast--error"
+            className="reader-toast reader-toast--error"
             role="alert"
             data-viewer-status
           ><ReaderIcon name="alert" />{props.toolError}</p> : null}
-          {props.commandNotice ? <p className="review-toast review-toast--status"
+          {props.commandNotice ? <p className="reader-toast reader-toast--status"
             role="status" aria-live="polite" data-host-command-status
           ><ReaderIcon name="check" />{props.commandNotice}</p> : null}
           {generatedStatusMessages.length > 0 ? <p
-            className="review-toast review-toast--status"
+            className="reader-toast reader-toast--status"
             data-generation-status={props.generationRefreshStatus ?? 'idle'}
             data-generation-busy={generatedStatusBusy}
             role={props.generationRefreshStatus === 'failed' ? 'alert' : 'status'}
@@ -2223,19 +2223,19 @@ export function ReaderShell(props: ReaderShellProps) {
           aria-live="polite"
           data-pdf-copy-owner={props.selection.pdfCopyOwner ?? 'none'}
         >Copy source: {pdfCopyOwnerLabel}</p> : null}
-        <div className="review-document">{props.children}</div>
-        <div className="review-overlay-frame" aria-hidden="true">
-          <span className="review-overlay-frame__right-backing" />
-          <span className="review-overlay-frame__right-fade" />
-          <span className="review-overlay-frame__bottom-backing" />
-          <span className="review-overlay-frame__bottom-fade" />
-          <span className="review-overlay-frame__top-fade" />
-          <span className="review-overlay-frame__outer-right-fade" />
-          <span className="review-overlay-frame__outer-bottom-fade" />
+        <div className="reader-document">{props.children}</div>
+        <div className="reader-overlay-frame" aria-hidden="true">
+          <span className="reader-overlay-frame__right-backing" />
+          <span className="reader-overlay-frame__right-fade" />
+          <span className="reader-overlay-frame__bottom-backing" />
+          <span className="reader-overlay-frame__bottom-fade" />
+          <span className="reader-overlay-frame__top-fade" />
+          <span className="reader-overlay-frame__outer-right-fade" />
+          <span className="reader-overlay-frame__outer-bottom-fade" />
         </div>
         <div
-          className="review-contextual-host"
-          data-review-contextual-host
+          className="reader-contextual-host"
+          data-reader-contextual-host
           data-selection-status={props.selection.selectionUpdate.kind}
         >
           {authoringSession === null
@@ -2451,8 +2451,8 @@ export function ReaderShell(props: ReaderShellProps) {
           })() : null}
         </div>
         <div
-          className="review-drawer-host"
-          data-review-drawer-host
+          className="reader-drawer-host"
+          data-reader-drawer-host
           inert={props.save.saveOptionsOpen ?? false}
           aria-hidden={props.save.saveOptionsOpen === true ? 'true' : undefined}
         >
@@ -2593,7 +2593,7 @@ export function ReaderShell(props: ReaderShellProps) {
                   },
                 })}
               />
-            ) : <div id="review-annotation-list" aria-label="All annotations">
+            ) : <div id="reader-annotation-list" aria-label="All annotations">
             <ReconciliationWorkspace
               state={props.state}
               {...(props.activeAuthoringDraftIds === undefined ? {} : {
@@ -2742,8 +2742,8 @@ export function ReaderShell(props: ReaderShellProps) {
         {props.selection.pdfCopyAnnouncement ?? ''}
       </p>
       <div
-        className="review-nested-host"
-        data-review-nested-host
+        className="reader-nested-host"
+        data-reader-nested-host
         hidden={props.save.saveOptionsOpen ?? false}
         inert={props.save.saveOptionsOpen ?? false}
       />

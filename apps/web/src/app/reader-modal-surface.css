@@ -1,4 +1,4 @@
-:is(:is(#root[data-production-root="true"], .handler) .review-button, .terminal-recovery button) {
+:is(:is(#root[data-production-root="true"], .handler) .reader-button, .terminal-recovery button) {
   display: inline-flex;
   min-height: 32px;
   align-items: center;
@@ -8,42 +8,42 @@
   padding: 6px 8px;
   border: 0;
   border-radius: 10px;
-  color: var(--review-ink-primary);
+  color: var(--reader-ink-primary);
   background: transparent;
   font-family: inherit;
   font-size: 13px;
   font-weight: 400;
   line-height: 1.2;
   text-align: center;
-  transition: color var(--review-motion-fast) ease, border-color var(--review-motion-fast) ease, background-color var(--review-motion-fast) ease, box-shadow var(--review-motion-fast) ease;
+  transition: color var(--reader-motion-fast) ease, border-color var(--reader-motion-fast) ease, background-color var(--reader-motion-fast) ease, box-shadow var(--reader-motion-fast) ease;
 }
 
-:is(:is(#root[data-production-root="true"], .handler) .review-button, .terminal-recovery button):hover:not(:disabled) {
-  border-color: var(--review-border-strong);
-  background: var(--review-surface-interactive);
+:is(:is(#root[data-production-root="true"], .handler) .reader-button, .terminal-recovery button):hover:not(:disabled) {
+  border-color: var(--reader-border-strong);
+  background: var(--reader-surface-interactive);
 }
 
-:is(:is(#root[data-production-root="true"], .handler) .review-button, .terminal-recovery button):active:not(:disabled) {
+:is(:is(#root[data-production-root="true"], .handler) .reader-button, .terminal-recovery button):active:not(:disabled) {
   box-shadow: none;
 }
 
 :is(
-  :is(#root[data-production-root="true"], .handler) .review-button--primary,
-  :is(#root[data-production-root="true"], .handler) .review-button[data-primary-action="true"],
+  :is(#root[data-production-root="true"], .handler) .reader-button--primary,
+  :is(#root[data-production-root="true"], .handler) .reader-button[data-primary-action="true"],
   .terminal-recovery .terminal-recovery__primary
 ) {
-  border-color: var(--review-ink-primary);
-  color: var(--review-surface-panel);
-  background: var(--review-ink-primary);
+  border-color: var(--reader-ink-primary);
+  color: var(--reader-surface-panel);
+  background: var(--reader-ink-primary);
 }
 
 :is(
-  :is(#root[data-production-root="true"], .handler) .review-button--primary,
-  :is(#root[data-production-root="true"], .handler) .review-button[data-primary-action="true"],
+  :is(#root[data-production-root="true"], .handler) .reader-button--primary,
+  :is(#root[data-production-root="true"], .handler) .reader-button[data-primary-action="true"],
   .terminal-recovery .terminal-recovery__primary
 ):hover:not(:disabled) {
-  border-color: var(--review-ink-primary);
-  color: var(--review-surface-panel);
+  border-color: var(--reader-ink-primary);
+  color: var(--reader-surface-panel);
   background: #222;
 }
 
@@ -55,8 +55,8 @@
   overflow: hidden;
   border: 0;
   border-radius: 17px;
-  color: var(--review-ink-primary);
-  background: var(--review-surface-panel);
+  color: var(--reader-ink-primary);
+  background: var(--reader-surface-panel);
   box-shadow: 0 12px 48px #00000018;
 }
 
@@ -75,7 +75,7 @@
 
 .compact-editorial-modal__description {
   margin: 5px 0 0;
-  color: var(--review-ink-muted);
+  color: var(--reader-ink-muted);
   font-size: 13px;
   line-height: 1.5;
 }
@@ -90,66 +90,66 @@
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
-  gap: var(--review-action-group-gap);
+  gap: var(--reader-action-group-gap);
   padding: 12px 18px 14px;
-  border-top: 1px solid var(--review-border-subtle);
-  background: color-mix(in srgb, var(--review-surface-subtle) 42%, var(--review-surface-panel));
+  border-top: 1px solid var(--reader-border-subtle);
+  background: color-mix(in srgb, var(--reader-surface-subtle) 42%, var(--reader-surface-panel));
 }
 
-.compact-editorial-modal .review-button .review-icon {
+.compact-editorial-modal .reader-button .reader-icon {
   width: 16px;
   height: 16px;
 }
 
 .compact-editorial-modal .lucide-loader-circle {
-  animation: review-loader-spin .8s linear infinite;
+  animation: reader-loader-spin .8s linear infinite;
 }
 
-.review-choice-dialog {
-  --review-choice-padding: 23px;
+.reader-choice-dialog {
+  --reader-choice-padding: 23px;
   display: block;
   width: min(414px, 100%);
   max-height: calc(100dvh - 185px);
-  padding: var(--review-choice-padding);
+  padding: var(--reader-choice-padding);
   overflow: auto;
   border: 0;
   border-radius: 17px;
-  background: var(--review-surface-panel);
+  background: var(--reader-surface-panel);
   box-shadow: 0 12px 48px #00000018;
 }
 
-.review-choice-dialog .compact-editorial-modal__header,
-.review-choice-dialog .compact-editorial-modal__body,
-.review-choice-dialog .compact-editorial-modal__footer {
+.reader-choice-dialog .compact-editorial-modal__header,
+.reader-choice-dialog .compact-editorial-modal__body,
+.reader-choice-dialog .compact-editorial-modal__footer {
   padding: 0;
   border: 0;
   background: transparent;
 }
 
-.review-choice-dialog .compact-editorial-modal__header h2 {
+.reader-choice-dialog .compact-editorial-modal__header h2 {
   margin: 0 0 11px;
-  color: var(--review-ink-primary);
+  color: var(--reader-ink-primary);
   font-size: 15px;
   line-height: 1.4;
   letter-spacing: 0;
 }
 
-.review-choice-dialog .compact-editorial-modal__description {
+.reader-choice-dialog .compact-editorial-modal__description {
   margin: 0 0 14px;
   font-size: 13px;
   line-height: 1.5;
 }
 
-.review-choice-dialog .compact-editorial-modal__footer {
+.reader-choice-dialog .compact-editorial-modal__footer {
   margin-top: 12px;
   gap: 6px;
 }
 
 .save-destination-dialog .compact-editorial-modal__footer {
-  margin-top: var(--review-choice-padding);
+  margin-top: var(--reader-choice-padding);
 }
 
-:is(#root[data-production-root="true"], .handler) .review-choice-dialog .compact-editorial-modal__footer .review-button {
+:is(#root[data-production-root="true"], .handler) .reader-choice-dialog .compact-editorial-modal__footer .reader-button {
   min-height: 32px;
   padding: 6px 8px;
   border: 0;
@@ -159,39 +159,39 @@
   line-height: 1.2;
 }
 
-:is(#root[data-production-root="true"], .handler) .review-choice-dialog .compact-editorial-modal__footer .review-button--primary {
+:is(#root[data-production-root="true"], .handler) .reader-choice-dialog .compact-editorial-modal__footer .reader-button--primary {
   color: #fff;
   background: #3c3c3c;
 }
 
-:is(#root[data-production-root="true"], .handler) .review-choice-dialog .compact-editorial-modal__footer .review-button:not(.review-button--primary) {
-  color: var(--review-ink-primary);
+:is(#root[data-production-root="true"], .handler) .reader-choice-dialog .compact-editorial-modal__footer .reader-button:not(.reader-button--primary) {
+  color: var(--reader-ink-primary);
   background: transparent;
 }
 
-:is(#root[data-production-root="true"], .handler) .review-choice-dialog .compact-editorial-modal__footer .review-button:not(.review-button--primary):hover:not(:disabled),
-:is(#root[data-production-root="true"], .handler) .compact-editorial-modal .review-button:focus-visible {
-  background: var(--review-surface-interactive);
+:is(#root[data-production-root="true"], .handler) .reader-choice-dialog .compact-editorial-modal__footer .reader-button:not(.reader-button--primary):hover:not(:disabled),
+:is(#root[data-production-root="true"], .handler) .compact-editorial-modal .reader-button:focus-visible {
+  background: var(--reader-surface-interactive);
 }
 
-:is(#root[data-production-root="true"], .handler) .review-choice-dialog .compact-editorial-modal__footer .review-button--primary:hover:not(:disabled),
-:is(#root[data-production-root="true"], .handler) .compact-editorial-modal .review-button--primary:focus-visible {
+:is(#root[data-production-root="true"], .handler) .reader-choice-dialog .compact-editorial-modal__footer .reader-button--primary:hover:not(:disabled),
+:is(#root[data-production-root="true"], .handler) .compact-editorial-modal .reader-button--primary:focus-visible {
   background: #252525;
 }
 
 @media (max-width: 620px) {
-  .review-choice-dialog {
+  .reader-choice-dialog {
     max-height: calc(100dvh - 115px);
-    --review-choice-padding: 18px;
+    --reader-choice-padding: 18px;
   }
 }
 
-:is(#root[data-production-root="true"], .handler) .compact-editorial-modal .review-button:focus-visible {
+:is(#root[data-production-root="true"], .handler) .compact-editorial-modal .reader-button:focus-visible {
   outline: none;
   box-shadow: none;
 }
 
-.handler .compact-editorial-modal .review-button:disabled {
+.handler .compact-editorial-modal .reader-button:disabled {
   cursor: default;
   opacity: .35;
 }

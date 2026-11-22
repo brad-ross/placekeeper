@@ -114,7 +114,7 @@ export function ReaderIcon({
   name,
   size = 16,
   strokeWidth = 2,
-  className = 'review-icon',
+  className = 'reader-icon',
   children,
 }: ReaderIconProps) {
   const Icon = readerIcons[name];

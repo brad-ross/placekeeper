@@ -79,7 +79,7 @@ async function openReferenceEditor(page: Page, itemId: string): Promise<{
   if (await workspace.getAttribute('aria-expanded') !== 'true') await workspace.click();
   const annotations = page.getByRole('tab', { name: 'Annotations', exact: true });
   if (await annotations.getAttribute('aria-selected') !== 'true') await annotations.click();
-  const row = page.locator(`[data-review-item="${itemId}"]`);
+  const row = page.locator(`[data-annotation-item="${itemId}"]`);
   await row.hover();
   await row.getByRole('button', { name: 'Open in References' }).click();
   await expect(page.locator('[data-reference-pdf-viewport]')).toBeVisible({

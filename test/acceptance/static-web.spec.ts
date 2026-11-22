@@ -103,11 +103,11 @@ async function focusByTab(page: Page, target: Locator): Promise<void> {
 
 async function openAnnotationsWorkspace(page: Page): Promise<void> {
   const presentation = (page.viewportSize()?.width ?? 1280) < 900 ? "bottom" : "right";
-  await expect(page.locator("[data-review-stage]")).toHaveAttribute(
+  await expect(page.locator("[data-reader-stage]")).toHaveAttribute(
     "data-workspace-presentation",
     presentation,
   );
-  const workspace = page.locator(presentation === "bottom" ? "#review-workspace" : "#review-tools-workspace");
+  const workspace = page.locator(presentation === "bottom" ? "#reader-workspace" : "#reader-tools-workspace");
   const openAttribute = presentation === "bottom" ? "data-workspace-open" : "data-tools-workspace-open";
   if (await workspace.getAttribute(openAttribute) !== "true") {
     await page.getByRole("button", { name: "Show Workspace", exact: true }).click();
@@ -250,9 +250,9 @@ test("@critical @representative keeps the local keyboard journey private and rou
   await reopened.locator("input[type=file]").setInputFiles(firstDownload);
   await waitForStaticPdf(reopened);
   await expect(reopened.locator("[data-owned-mark='pageNote']")).toHaveCount(1);
-  await expect(reopened.locator("[data-review-item]", { hasText: "Existing supported highlight" })).toHaveCount(1);
-  await expect(reopened.locator("[data-review-item]", { hasText: "Existing unsupported stamp" })).toHaveCount(1);
-  await expect(reopened.locator("[data-review-item]", { hasText: "Static export proof." })).toHaveCount(1);
+  await expect(reopened.locator("[data-annotation-item]", { hasText: "Existing supported highlight" })).toHaveCount(1);
+  await expect(reopened.locator("[data-annotation-item]", { hasText: "Existing unsupported stamp" })).toHaveCount(1);
+  await expect(reopened.locator("[data-annotation-item]", { hasText: "Static export proof." })).toHaveCount(1);
   await expect(reopened.getByRole("button", { name: /Open document actions$/u })).toBeVisible();
   const secondDownload = await exportAnnotatedPdf(reopened, { expectedName: 'Brad Ross' });
   const secondCatalog = await inspectPdfAnnotationCatalogWithEmbedPdf(new Uint8Array(await readFile(secondDownload)));
@@ -317,7 +317,7 @@ test("@representative creates a selection-derived highlight on a cropped PDF wit
   await waitForStaticPdf(reopened);
   await expect(reopened.locator("[data-owned-mark='highlight']").first()).toBeVisible();
   await openAnnotationsWorkspace(reopened);
-  const highlightRow = reopened.locator(`[data-review-item="${item.id}"]`);
+  const highlightRow = reopened.locator(`[data-annotation-item="${item.id}"]`);
   await highlightRow.hover();
   const editHighlight = highlightRow.getByRole("button", { name: "Edit Highlight annotation on page 1", exact: true });
   await expect(editHighlight).toBeVisible();
@@ -325,9 +325,9 @@ test("@representative creates a selection-derived highlight on a cropped PDF wit
   const editor = reopened.getByRole("region", { name: "Edit Highlight" });
   await expect(editor).toBeVisible();
   await editor.getByRole("button", { name: "Cancel" }).click();
-  await expect(reopened.locator("[data-review-item]", { hasText: "Representative multi-segment highlight." })).toHaveCount(1);
-  await expect(reopened.locator("[data-review-item]", { hasText: "Existing supported highlight" })).toHaveCount(1);
-  await expect(reopened.locator("[data-review-item]", { hasText: "Existing unsupported stamp" })).toHaveCount(1);
+  await expect(reopened.locator("[data-annotation-item]", { hasText: "Representative multi-segment highlight." })).toHaveCount(1);
+  await expect(reopened.locator("[data-annotation-item]", { hasText: "Existing supported highlight" })).toHaveCount(1);
+  await expect(reopened.locator("[data-annotation-item]", { hasText: "Existing unsupported stamp" })).toHaveCount(1);
   await reopenedContext.close();
 });
 
@@ -371,7 +371,7 @@ test("exhaustive profile exports and reopens all five editable annotation kinds"
   await page.goto("./");
   await page.locator("input[type=file]").setInputFiles(annotatedPdf);
   await waitForStaticPdf(page);
-  await expect(page.locator("[data-review-item]")).toHaveCount(2);
+  await expect(page.locator("[data-annotation-item]")).toHaveCount(2);
   const pdfPage = page.locator("[data-page-index='0']").first();
   const actions = page.getByRole("toolbar", { name: "Selection actions" });
 
@@ -395,7 +395,7 @@ test("exhaustive profile exports and reopens all five editable annotation kinds"
 
   // Use unmarked text: clicking the imported highlight selects that annotation.
   await placePdfInsertionCaret(page, pdfPage, { x: 235, y: 99 });
-  await expect(page.locator("[data-review-insertion-caret]")).toBeVisible();
+  await expect(page.locator("[data-reader-insertion-caret]")).toBeVisible();
   await page.keyboard.type("I");
   const insertion = page.getByRole("region", { name: "Insertion" });
   await insertion.getByRole("textbox", { name: "Insertion" }).fill("inserted text");
@@ -409,7 +409,7 @@ test("exhaustive profile exports and reopens all five editable annotation kinds"
   const pageNote = page.getByRole("region", { name: "Page Note" });
   await pageNote.getByRole("textbox", { name: "Comment" }).fill("All-kinds page note.");
   await pageNote.getByRole("button", { name: "Save", exact: true }).click();
-  await expect(page.locator("[data-review-item]")).toHaveCount(7);
+  await expect(page.locator("[data-annotation-item]")).toHaveCount(7);
 
   const path = await exportAnnotatedPdf(page);
   const catalog = await inspectPdfAnnotationCatalogWithEmbedPdf(new Uint8Array(await readFile(path)));
@@ -431,12 +431,12 @@ test("exhaustive profile exports and reopens all five editable annotation kinds"
   await reopened.goto(page.url());
   await reopened.locator("input[type=file]").setInputFiles(path);
   await waitForStaticPdf(reopened);
-  await expect(reopened.locator("[data-review-item]")).toHaveCount(7);
+  await expect(reopened.locator("[data-annotation-item]")).toHaveCount(7);
   for (const kind of ["replace", "delete", "insert", "highlight", "pageNote"] as const) {
     await expect(reopened.locator(`[data-owned-mark='${kind}']`).first()).toBeVisible();
   }
-  await expect(reopened.locator("[data-review-item]").filter({ hasText: "Existing supported highlight" })).toHaveCount(1);
-  await expect(reopened.locator("[data-review-item]").filter({ hasText: "Existing unsupported stamp" })).toHaveCount(1);
+  await expect(reopened.locator("[data-annotation-item]").filter({ hasText: "Existing supported highlight" })).toHaveCount(1);
+  await expect(reopened.locator("[data-annotation-item]").filter({ hasText: "Existing unsupported stamp" })).toHaveCount(1);
   await reopenedContext.close();
 });
 
@@ -456,7 +456,7 @@ test('export menu fits its action and export-only chrome omits a save-status dot
   await page.goto('./');
   await page.locator('input[type=file]').setInputFiles(annotatedPdf);
   await waitForStaticPdf(page);
-  await expect(page.locator('.review-chrome__save-dot')).toHaveCount(0);
+  await expect(page.locator('.reader-chrome__save-dot')).toHaveCount(0);
   await page.getByRole('button', { name: /Open document actions$/u }).click();
   const menu = page.locator('.document-actions__menu');
   await expect(menu).toBeVisible();
@@ -516,7 +516,7 @@ for (const rotation of [0, 90]) test(`imported annotations use reader defaults a
   await page.goto('./');
   await page.locator('input[type=file]').setInputFiles({ name: 'source-styles.pdf', mimeType: 'application/pdf', buffer: Buffer.from(await pdf.save()) });
   await waitForStaticPdf(page);
-  await expect(page.locator('[data-review-item]')).toHaveCount(8);
+  await expect(page.locator('[data-annotation-item]')).toHaveCount(8);
   await expect(page.locator('[data-source-reader-mark]')).toHaveCount(7);
   for (const kind of ['highlight', 'delete', 'underline', 'squiggly', 'insert', 'pageNote']) {
     await expect(page.locator(`[data-source-reader-mark="${kind}"]`).first()).toBeVisible();
@@ -799,7 +799,7 @@ test('@critical visitors can insert text in the comments demo', async ({ page })
   const box = await stableBoundingBox(pdf);
   const scale = box.width / 612;
   await page.mouse.click(box.x + 160 * scale, box.y + 375 * scale);
-  const caret = demo.locator('[data-review-insertion-caret]');
+  const caret = demo.locator('[data-reader-insertion-caret]');
   await expect(caret).toBeVisible();
   await page.getByRole('tab', { name: 'Read with focus', exact: true }).click();
   await expect(caret).toBeHidden();
@@ -831,7 +831,7 @@ test('@critical real-paper demo keeps its metadata while bounding the main previ
   await demo.locator('[data-initial-view-ready="true"]').waitFor({ state: 'attached' });
   const currentPage = demo.getByRole('textbox', { name: /^Current page/ });
   await expect(currentPage).toBeVisible();
-  await expect(demo.locator('header.review-chrome')).toContainText('/ 100');
+  await expect(demo.locator('header.reader-chrome')).toContainText('/ 100');
   const viewport = demo.locator('.pdf-workspace:not(.pdf-workspace--reference) [data-viewer-framing-viewport]').first();
   for (const zoomPercent of ['100', '150']) {
     const zoom = demo.getByRole('textbox', { name: /^Current zoom/ });
@@ -944,7 +944,7 @@ test('@critical demo starts fitted and Fit Width keeps the requested scale', asy
     // Upward scrolling must stop, never overshoot and then jump down to page 14.
     for (let i = 1; i < offsets.length; i++) expect(offsets[i]).toBeLessThanOrEqual(offsets[i - 1]! + 1);
     await demo.getByRole('button', { name: 'Open zoom controls', exact: true }).click();
-    await demo.locator('[data-review-zoom-action="fit-width"]').hover();
+    await demo.locator('[data-reader-zoom-action="fit-width"]').hover();
     await demo.getByRole('menuitemradio', { name: 'Fit width', exact: true }).click();
     await expect(zoom).toHaveValue(fitted);
     // Catch a transient successful fit followed by rollback during anchor settlement.

@@ -82,7 +82,7 @@ describe('PDF search workspace', () => {
     expect(html).toContain('aria-haspopup="menu"');
     expect(html).toContain('aria-expanded="false"');
     expect(html).toContain('class="pdf-search__input"');
-    expect(html).not.toContain('review-chrome__page-input');
+    expect(html).not.toContain('reader-chrome__page-input');
     expect(html).toContain('pdf-search__search-icon');
     expect(html).toContain('aria-label="Clear search"');
     expect(html).toContain('class="annotation-item__content pdf-search__result"');
