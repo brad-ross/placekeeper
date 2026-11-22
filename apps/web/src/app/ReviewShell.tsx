@@ -2671,8 +2671,23 @@ export function ReviewShell(props: ReviewShellProps) {
                   setActiveExistingAnnotationKey(existingAnnotationKey(annotation));
                   props.onNavigateExisting?.(annotation);
                 }}
-                onReadFull={openOwnedAnnotationReader}
-                onReadFullExisting={openExistingAnnotationReader}
+                onReadFull={(record, trigger) => {
+                  if (authoringSessionRef.current !== null || record.identity.origin !== 'owned') return;
+                  const { itemId } = record.identity;
+                  const item = props.state.items.find(({ id }) => id === itemId);
+                  openOwnedAnnotationReader(record, trigger);
+                  // Opening the full text is still a click on the annotation's
+                  // row, so the document follows it as it does for short rows.
+                  if (item === undefined) return;
+                  markFramingUserIntent();
+                  props.onNavigate?.(item);
+                }}
+                onReadFullExisting={(annotation, record, trigger) => {
+                  if (authoringSessionRef.current !== null) return;
+                  openExistingAnnotationReader(annotation, record, trigger);
+                  markFramingUserIntent();
+                  props.onNavigateExisting?.(annotation);
+                }}
                 onReaderOverflowChange={settleOwnedReaderOverflow}
                 onReaderOverflowChangeExisting={settlePendingReaderResume}
                 {...(props.onRetryExistingAnnotations === undefined

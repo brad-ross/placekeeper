@@ -444,3 +444,24 @@
 .full-annotation-reader__body p:last-child {
   margin-bottom: 0;
 }
+
+/* Opened in full, an annotation reads like its card: the annotated text, set
+   off as a quotation in its page context, then the whole comment. Only the
+   clamp is lifted. */
+.full-annotation-reader__body[data-reader-layout="card"] > :is(.annotation-item__source, .annotation-item__quote) {
+  display: block;
+  margin: 0 0 14px;
+  overflow: visible;
+  -webkit-line-clamp: unset;
+}
+
+.full-annotation-reader__body[data-reader-layout="card"] > :is(.annotation-item__source, .annotation-item__quote):last-child {
+  margin-bottom: 0;
+}
+
+.full-annotation-reader__body[data-reader-layout="card"] > :is(.annotation-item__source, .annotation-item__quote) p {
+  margin: 0;
+  color: inherit;
+  font: inherit;
+  white-space: pre-line;
+}

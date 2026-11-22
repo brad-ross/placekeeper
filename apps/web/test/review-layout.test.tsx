@@ -485,7 +485,7 @@ describe('review shell layout and accessibility contract', () => {
     expect(replacementHtml.indexOf('imprecise source')).toBeLessThan(replacementHtml.indexOf('precise replacement'));
     expect(replacementHtml).toContain('data-source-treatment="struck"');
 
-    const highlightHtml = renderToStaticMarkup(<FullAnnotationReaderBody record={{
+    const highlightHtml = renderToStaticMarkup(<FullAnnotationReaderBody layout="prior-source" record={{
       kind: 'highlight',
       contentLabel: 'Comment',
       content: 'Authored comment',
@@ -498,6 +498,32 @@ describe('review shell layout and accessibility contract', () => {
     );
     expect(annotationStyles).not.toContain('.reconciliation-workspace__prior-context');
     expect(annotationStyles).not.toContain('.reconciliation-workspace__detail-header');
+  });
+
+  it('opens a long annotation the way its card reads: quote in context first, then the comment', () => {
+    const html = renderToStaticMarkup(<FullAnnotationReaderBody record={{
+      kind: 'highlight',
+      contentLabel: 'Comment',
+      content: 'Authored comment',
+      quoteText: 'highlighted words',
+      quoteContext: { before: '...text before the ', after: ' and after...' },
+    }} />);
+    expect(html).toContain('data-reader-layout="card"');
+    expect(html).toContain('class="full-annotation-reader__quote annotation-item__quote"');
+    expect(html).toContain('<mark class="annotation-item__quote-mark" data-quote-mark="highlight">highlighted words</mark>');
+    expect(html.indexOf('text before the')).toBeLessThan(html.indexOf('highlighted words'));
+    expect(html.indexOf('highlighted words')).toBeLessThan(html.indexOf('Authored comment'));
+
+    const replacementHtml = renderToStaticMarkup(<FullAnnotationReaderBody record={{
+      kind: 'replace',
+      contentLabel: 'Replacement text',
+      content: 'precise replacement',
+      sourceText: 'imprecise source',
+      sourceTreatment: 'struck',
+      quoteContext: { before: 'Before ', after: ' after.' },
+    }} />);
+    expect(replacementHtml).toContain('data-quote-mark="struck"');
+    expect(replacementHtml.indexOf('imprecise source')).toBeLessThan(replacementHtml.indexOf('precise replacement'));
   });
 
   it('projects quote-only frozen drafts through canonical reader semantics', () => {

@@ -2,6 +2,7 @@ import { useLayoutEffect, useRef, type ReactNode, type Ref } from 'react';
 
 import type { PdfTargetVisibility } from '../pdf/viewer-navigation.js';
 import type { AnnotationReaderRecord } from './annotation-reader.js';
+import { AnnotationQuoteInContext } from './AnnotationExcerpt.js';
 import { annotationKindIcon } from './AnnotationMetadata.js';
 import { ReviewIcon } from './ReviewIcon.js';
 import { ReviewTooltipButton } from './ReviewTooltipButton.js';
@@ -34,7 +35,14 @@ export interface FullAnnotationReaderActionsProps {
 
 export interface FullAnnotationReaderBodyProps {
   readonly record: Pick<AnnotationReaderRecord,
-    'kind' | 'contentLabel' | 'content' | 'sourceText' | 'sourceTreatment' | 'quoteText'>;
+    'kind' | 'contentLabel' | 'content' | 'sourceText' | 'sourceTreatment' | 'quoteText' | 'quoteContext'>;
+  /**
+   * `card` reads like an annotation card: the annotated text, set in its page
+   * context, comes first and the full comment follows. `prior-source` keeps the
+   * authored text first, for reconciliation details that show where an
+   * annotation used to be.
+   */
+  readonly layout?: 'card' | 'prior-source';
   readonly before?: ReactNode;
   readonly after?: ReactNode;
 }
@@ -69,24 +77,62 @@ export function FullAnnotationReaderMetadata({
   </div>;
 }
 
-export function FullAnnotationReaderBody({ record, before, after }: FullAnnotationReaderBodyProps) {
+export function FullAnnotationReaderBody({ record, layout = 'card', before, after }: FullAnnotationReaderBodyProps) {
   const paragraphs = (text: string) => text.split(/\n\s*\n/u).map(
     (paragraph, index) => <p key={index}>{paragraph}</p>,
   );
-  return <div className="full-annotation-reader__body">
+  const content = record.content ? <>
+    <h3 className="sr-only">{record.contentLabel}</h3>
+    {paragraphs(record.content)}
+  </> : null;
+
+  if (layout === 'prior-source') {
+    return <div className="full-annotation-reader__body" data-reader-layout={layout}>
+      {before}
+      {record.sourceText ? <div className="full-annotation-reader__source" data-source-treatment={record.sourceTreatment}>
+        <h3 className="sr-only">{record.kind === 'delete' ? 'Deleted text' : 'Original text'}</h3>
+        {paragraphs(record.sourceText)}
+      </div> : null}
+      {content}
+      {record.quoteText ? <div className="full-annotation-reader__quote">
+        <h3 className="sr-only">Highlighted text</h3>
+        {paragraphs(record.quoteText)}
+      </div> : null}
+      {after}
+    </div>;
+  }
+
+  const quoteOnly = record.content ? 'false' : 'true';
+  const hasQuoteContext = record.quoteContext === undefined ? undefined : 'true';
+  const sourceTreatment = record.sourceTreatment ?? 'plain';
+  return <div className="full-annotation-reader__body" data-reader-layout={layout}>
     {before}
-    {record.sourceText ? <div className="full-annotation-reader__source" data-source-treatment={record.sourceTreatment}>
+    {record.sourceText ? <div
+      className="full-annotation-reader__source annotation-item__source"
+      data-source-treatment={sourceTreatment}
+      data-quote-only={quoteOnly}
+      data-has-quote-context={hasQuoteContext}
+    >
       <h3 className="sr-only">{record.kind === 'delete' ? 'Deleted text' : 'Original text'}</h3>
-      {paragraphs(record.sourceText)}
+      <p><AnnotationQuoteInContext
+        text={record.sourceText}
+        kind={sourceTreatment === 'struck' ? 'struck' : 'plain'}
+        {...(record.quoteContext ? { context: record.quoteContext } : {})}
+      /></p>
     </div> : null}
-    {record.content ? <>
-      <h3 className="sr-only">{record.contentLabel}</h3>
-      {paragraphs(record.content)}
-    </> : null}
-    {record.quoteText ? <div className="full-annotation-reader__quote">
+    {record.quoteText ? <div
+      className="full-annotation-reader__quote annotation-item__quote"
+      data-quote-only={quoteOnly}
+      data-has-quote-context={hasQuoteContext}
+    >
       <h3 className="sr-only">Highlighted text</h3>
-      {paragraphs(record.quoteText)}
+      <p><AnnotationQuoteInContext
+        text={record.quoteText}
+        kind="highlight"
+        {...(record.quoteContext ? { context: record.quoteContext } : {})}
+      /></p>
     </div> : null}
+    {content}
     {after}
   </div>;
 }

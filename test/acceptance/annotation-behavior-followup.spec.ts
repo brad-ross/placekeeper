@@ -1864,3 +1864,34 @@ test('keeps the initial Mac workspace toggle above the PDF viewport', async ({ p
   await expect(toggle).toBeVisible();
   expect(await ownsHitTarget()).toBe(true);
 });
+
+for (const kind of ['highlight', 'pageNote'] as const) {
+  test(`opening a long ${kind} from the tray also scrolls the PDF to it`, async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    const { itemId } = await openLongAnnotationFixture(page, kind);
+    const showWorkspace = page.getByRole('button', { name: 'Show Workspace' });
+    if (await showWorkspace.count()) await showWorkspace.click();
+    await page.getByRole('tab', { name: 'Annotations', exact: true }).click();
+    const viewport = page.locator('[data-viewer-framing-viewport]').first();
+    await viewport.evaluate((element) => { element.scrollTop = element.scrollHeight; });
+    await expect.poll(() => viewport.evaluate((element) => element.scrollTop)).toBeGreaterThan(1000);
+
+    await page.locator(`[data-review-item="${itemId}"] [data-read-full-annotation="true"]`).click();
+    const reader = page.locator('[data-full-annotation-reader="true"]:visible');
+    await expect(reader).toBeVisible();
+    await expect(reader.locator('.full-annotation-reader__body')).toContainText('identification concern');
+    await expect.poll(async () => {
+      const mark = await page.locator(`[data-owned-mark][data-review-id="${itemId}"]`).first().boundingBox();
+      return mark !== null && mark.y > 0 && mark.y < 900;
+    }).toBe(true);
+    if (kind === 'highlight') {
+      const body = reader.locator('.full-annotation-reader__body');
+      expect(await body.evaluate((element) => {
+        const quote = element.querySelector('.full-annotation-reader__quote');
+        const comment = element.querySelector(':scope > p');
+        return quote !== null && comment !== null
+          && (quote.compareDocumentPosition(comment) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+      })).toBe(true);
+    }
+  });
+}
