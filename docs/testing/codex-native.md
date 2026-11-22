@@ -544,7 +544,9 @@ observed refresh endpoint and cannot establish a cold-open endpoint. If the
 recording or reliable endpoint observation is unavailable, leave that measurement
 unproved. Do not add production listeners solely to fill the report.
 
-Use **Close review** in every retained presentation to release its authenticated
-association before opening another document in that chat. Closing one panel keeps
+There is no manual close control. Close each retained presentation normally
+before opening another document in that chat; Placekeeper releases its
+authenticated association when the host delivers its teardown or page-exit
+signal, and an association whose cleanup never arrives expires. Closing one panel keeps
 its peers connected and accepted work recoverable. Closing a host side-panel tab
 alone may leave the inline card alive; it is not proof of service detach.
