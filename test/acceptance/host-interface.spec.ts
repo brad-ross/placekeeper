@@ -170,7 +170,7 @@ test('Chrome disconnect dims the review and Reopen reloads the owning tab with r
       export const createNativeEmbeddedDocument = () => async () => ({
         displayName: 'paper.pdf', protected: true,
         runtimePort: { runtimeId: 'fixture', postMessage() {}, subscribe() { return () => {}; } },
-        subscribeLifecycle(listener) { window.disconnectReview = () => listener({type: 'disconnected', protected: true}); return () => {}; },
+        subscribeLifecycle(listener) { window.disconnectDocument = () => listener({type: 'disconnected', protected: true}); return () => {}; },
         async activate() {}, async release() {}, dispose() {}
       });`,
   }));

@@ -70,7 +70,7 @@ export async function nativeBridge(fixture: string, options: { workflowMode?: "g
       await page.evaluate(async runtimeId => {
         const { NativeOperationError, parseCodexAppResponse } = await import(/* @vite-ignore */ ('/packages/core/src/codex-mcp-protocol.ts' as string));
         const { createCodexHostRuntime } = await import(/* @vite-ignore */ ('/apps/web/src/host/codex-runtime.ts' as string));
-        const { mountCodexProductionReview: mountCodexProductionDocument } = await import(/* @vite-ignore */ ('/apps/web/src/codex-entry.tsx' as string));
+        const { mountCodexProductionDocument } = await import(/* @vite-ignore */ ('/apps/web/src/codex-entry.tsx' as string));
         const bridge = window as unknown as { nativeAcceptanceCall: (method: string, payload?: unknown) => Promise<any>; nativeAcceptanceDispose: () => void; nativeAcceptanceErrors: string[] };
         document.body.innerHTML = '<div id="root"></div>';
         const listeners = new Set<(event: any) => void>();
