@@ -933,6 +933,7 @@ export function ReconciliationWorkspace(props: ReconciliationWorkspaceProps) {
       </header>
       <FullAnnotationReaderBody
         record={projectedRecord}
+        layout="prior-source"
         before={message ? <p className="reconciliation-workspace__message" role="status">{message}</p> : null}
         after={detail.mode === "reattach" && priorContext !== null ? <div className="reconciliation-workspace__prior-context" data-reattachment-prior-context>
           <h3>{priorContext.label}</h3>

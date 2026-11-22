@@ -75,6 +75,32 @@ function useAnnotationExcerptOverflow(
   return { excerptRef, overflowing };
 }
 
+export type AnnotationQuoteMarkKind = 'highlight' | 'struck' | 'plain';
+
+/**
+ * Annotated PDF text, set in a little of the page text around it when that is
+ * known. The annotated words carry the mark's color, as on the PDF. Cards and
+ * the full annotation reader share this so a long annotation reads the same
+ * way once it is opened.
+ */
+export function AnnotationQuoteInContext({
+  text,
+  kind,
+  context,
+}: {
+  readonly text: string;
+  readonly kind: AnnotationQuoteMarkKind;
+  readonly context?: QuoteContext;
+}) {
+  return context === undefined
+    ? <>{text}</>
+    : <>
+      <span className="annotation-item__quote-context">{context.before}</span>
+      <mark className="annotation-item__quote-mark" data-quote-mark={kind}>{text}</mark>
+      <span className="annotation-item__quote-context">{context.after}</span>
+    </>;
+}
+
 export interface AnnotationExcerptProps {
   readonly content: string;
   readonly sourceText?: string;
@@ -97,13 +123,9 @@ export function AnnotationExcerpt({
   onReadFull,
   onOverflowChange,
 }: AnnotationExcerptProps) {
-  const inContext = (text: string, kind: 'highlight' | 'struck' | 'plain') => quoteContext === undefined
-    ? text
-    : <>
-      <span className="annotation-item__quote-context">{quoteContext.before}</span>
-      <mark className="annotation-item__quote-mark" data-quote-mark={kind}>{text}</mark>
-      <span className="annotation-item__quote-context">{quoteContext.after}</span>
-    </>;
+  const inContext = (text: string, kind: AnnotationQuoteMarkKind) => (
+    <AnnotationQuoteInContext text={text} kind={kind} {...(quoteContext ? { context: quoteContext } : {})} />
+  );
   const readerPageDescription = readerRecord === null
     ? ''
     : readerRecord.lastPageNumber === undefined

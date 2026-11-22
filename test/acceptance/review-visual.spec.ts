@@ -680,7 +680,13 @@ test('wide Annotation Tray', async ({ page }) => {
   await expect(page.locator('[data-full-annotation-action="edit"]')).toBeVisible();
   await expect(reader).toContainText('complete reviewer-authored argument');
   await expect(reader.locator('.full-annotation-reader__body > p')).toContainText('complete reviewer-authored argument');
-  await expect(reader.locator('.full-annotation-reader__quote')).toHaveText('Highlighted textidentifying variation is local to the comparison group');
+  await expect(reader.locator('.full-annotation-reader__quote .annotation-item__quote-mark')).toHaveText('identifying variation is local to the comparison group');
+  expect(await reader.locator('.full-annotation-reader__body').evaluate((body) => {
+    const quote = body.querySelector('.full-annotation-reader__quote');
+    const comment = body.querySelector(':scope > p');
+    return quote !== null && comment !== null
+      && (quote.compareDocumentPosition(comment) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+  })).toBe(true);
   await expectScene(product, 'wide-full-annotation-reader-owned.png');
 });
 
