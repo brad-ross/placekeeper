@@ -948,7 +948,9 @@ test('keeps Reference card hover, selection, dismissal, and focus lifecycle moun
   await expect(mainFocus).toBeFocused();
   await expect(inspection).toHaveAttribute('data-peek-selected', 'false');
   await expect(directActions).toHaveCSS('opacity', '0');
-  await expect(directActions).toHaveCSS('pointer-events', 'none');
+  // Hidden actions stay hit-testable for fine pointers, so a click under a
+  // stale hover still reaches the action rather than its parent group.
+  await expect(directActions).toHaveCSS('pointer-events', 'auto');
   await inspection.hover();
   await expect(page.locator('[data-reference-pdf-viewport]'))
     .toHaveAttribute('data-owned-mark-hovered', 'false');
@@ -1178,13 +1180,17 @@ test('keeps long Reference card text and actions reachable in a compact viewport
   await expect(editAction).toBeVisible();
   await expect(deleteAction).toBeVisible();
   const composer = page.getByRole('region', { name: 'Edit Page Note' });
-  // Responsive placement can move the card after hover. Re-enter its action
-  // endcap if hit testing loses that hover before the click is delivered.
-  await expect(async () => {
-    if (await composer.isVisible()) return;
-    await inspection.locator('.row-action-group').hover();
-    await editAction.click({ timeout: 1_000 });
-  }).toPass({ timeout: READY_TIMEOUT });
+  // Responsive placement can move the card out from under the pointer that
+  // hovered it. Leave the pointer outside the settled card, as a repositioned
+  // popup does, so the next click is the pointer's first entry: the hidden
+  // action endcap must take it instead of its parent group.
+  await inspection.hover();
+  const restoredCardBounds = await inspection.boundingBox();
+  if (!restoredCardBounds) throw new Error('Restored Reference card has no bounds.');
+  await page.mouse.move(restoredCardBounds.x - 8, restoredCardBounds.y + restoredCardBounds.height + 8);
+  await expect.poll(() => inspection.evaluate((element) => element.matches(':hover')))
+    .toBe(false);
+  await editAction.click();
   await expect(composer.getByRole('textbox', { name: 'Comment' }))
     .toHaveValue(LONG_REFERENCE_COMMENT);
   await expect(composer.getByRole('button', { name: 'Apply', exact: true })).toBeVisible();

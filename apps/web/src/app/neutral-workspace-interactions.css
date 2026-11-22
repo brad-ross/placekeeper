@@ -337,6 +337,15 @@ li[data-search-result] .pdf-search__result-heading > .pdf-search__result-page {
   pointer-events: none;
   transition: none;
 }
+/* Fine pointers keep the hidden endcap hit-testable, like the Reference tab
+   endcap. A popup that repositions after a resize can settle under a pointer
+   whose hover state is stale; the click must reach the action under it, not
+   the parent group. Touch keeps hidden actions inert. */
+@media (hover: hover) and (pointer: fine) {
+  .annotation-peek .row-action-group__direct {
+    pointer-events: auto;
+  }
+}
 .annotation-peek[data-source-return="true"] .row-action-group__direct,
 .annotation-peek:is(:hover, :has(:focus-visible)) .row-action-group__direct {
   opacity: 1;
