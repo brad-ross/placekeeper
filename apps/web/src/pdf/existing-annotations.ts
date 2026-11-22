@@ -2,12 +2,14 @@ import type { SourceAnnotationStyle, SourceAnnotationStyles } from './source-ann
 import { nativeAnnotationsFromPages } from '../../../../packages/pdf-backends/src/native-annotations.js';
 import { portableItemsFromAnnotationPages } from '../../../../packages/pdf-backends/src/embedpdf-annotation.js';
 import type { PdfSpaceRect } from './selection-anchor.js';
+import { isTextMarkupSubtype, markedTextFromGlyphs, type MarkedText } from './markup-text.js';
 import { isNavigationalPdfAnnotationSubtype } from '../../../../packages/core/src/pdf-annotation-classification.js';
 import {
   PdfAnnotationSubtype,
   PdfAnnotationSubtypeName,
   type PdfDocumentObject,
   type PdfEngine,
+  type Rect,
 } from '@embedpdf/models';
 
 /** Display-only data copied from the immutable source PDF. */
@@ -25,6 +27,8 @@ export interface ExistingAnnotation {
   readonly flags: readonly string[];
   readonly appearanceModes: readonly string[];
   readonly supportedAppearance: boolean;
+  /** Page text under a highlight, underline, squiggly or strikeout, when it could be read. */
+  readonly markedText?: MarkedText;
 }
 
 export type SourceNativeAnnotation = Pick<ExistingAnnotation, 'id' | 'pageIndex' | 'readerStyle'> & {
@@ -45,12 +49,30 @@ export interface ExistingAnnotationSource {
   flags?: readonly string[];
   appearanceModes?: readonly string[];
   supportedAppearance?: boolean;
+  markedText?: MarkedText;
 }
+
+/**
+ * Text under markup that Placekeeper imported as editable annotations, keyed
+ * by `sourceObjectPageIndex:sourceObjectAnnotationIndex`. Those annotations
+ * leave the read-only inventory, so their marked words travel here instead.
+ */
+export type ImportedMarkedText = ReadonlyMap<string, MarkedText>;
 
 export type ExistingAnnotationsDiscovery =
   | { readonly status: 'loading'; readonly generation: number }
-  | { readonly status: 'ready'; readonly generation: number; readonly items: readonly ExistingAnnotation[] }
-  | { readonly status: 'empty'; readonly generation: number; readonly items: readonly [] }
+  | {
+      readonly status: 'ready';
+      readonly generation: number;
+      readonly items: readonly ExistingAnnotation[];
+      readonly importedMarkedText?: ImportedMarkedText;
+    }
+  | {
+      readonly status: 'empty';
+      readonly generation: number;
+      readonly items: readonly [];
+      readonly importedMarkedText?: ImportedMarkedText;
+    }
   | { readonly status: 'error'; readonly generation: number; readonly message: string };
 
 export interface ExistingAnnotationDiscoveryToken {
@@ -77,6 +99,7 @@ export function inventoryExistingAnnotations(
       flags: [...(annotation.flags ?? [])],
       appearanceModes: [...(annotation.appearanceModes ?? [])],
       supportedAppearance: annotation.supportedAppearance ?? false,
+      ...(annotation.markedText === undefined ? {} : { markedText: { ...annotation.markedText } }),
     }));
 }
 
@@ -116,6 +139,19 @@ export function mergeExistingAnnotations(
   return [...merged.values()];
 }
 
+export function importedMarkedTextBySourceObject(
+  discovered: readonly ExistingAnnotation[],
+): ImportedMarkedText {
+  const imported = new Map<string, MarkedText>();
+  for (const annotation of discovered) {
+    if (annotation.markedText === undefined
+      || annotation.sourceObjectPageIndex === undefined
+      || annotation.sourceObjectAnnotationIndex === undefined) continue;
+    imported.set(`${annotation.sourceObjectPageIndex}:${annotation.sourceObjectAnnotationIndex}`, annotation.markedText);
+  }
+  return imported;
+}
+
 /** Generation authority keeps late inventory reads from replacing current document state. */
 export class ExistingAnnotationDiscoveryAuthority {
   #generation = 0;
@@ -143,9 +179,11 @@ export class ExistingAnnotationDiscoveryAuthority {
   ): ExistingAnnotationsDiscovery | null {
     if (!this.isCurrent(token)) return null;
     const items = mergeExistingAnnotations(discovered, explicit, owned);
+    const imported = importedMarkedTextBySourceObject(discovered);
+    const withImported = imported.size === 0 ? {} : { importedMarkedText: imported };
     return items.length === 0
-      ? { status: 'empty', generation: token.generation, items: [] }
-      : { status: 'ready', generation: token.generation, items };
+      ? { status: 'empty', generation: token.generation, items: [], ...withImported }
+      : { status: 'ready', generation: token.generation, items, ...withImported };
   }
 
   error(token: ExistingAnnotationDiscoveryToken, error: unknown): ExistingAnnotationsDiscovery | null {
@@ -187,6 +225,7 @@ export async function inventoryDocumentAnnotations(
   styles?: SourceAnnotationStyles | Promise<SourceAnnotationStyles>,
 ): Promise<readonly ExistingAnnotation[]> {
   const [byPage, sourceStyles] = await Promise.all([engine.getAllAnnotations(document).toPromise(), styles]);
+  const markedTexts = await readMarkedTexts(engine, document, byPage);
   const pages = document.pages.map((_, pageIndex) => byPage[pageIndex] ?? []);
   const portable = portableItemsFromAnnotationPages(pages, { invalidMetadata: 'foreign' });
   const nativeIds = new Map(nativeAnnotationsFromPages(pages, portable.owned)
@@ -215,7 +254,55 @@ export async function inventoryDocumentAnnotations(
         ...(annotation.flags === undefined ? {} : { flags: annotation.flags }),
         appearanceModes: appearanceModeNames(annotation.appearanceModes),
         supportedAppearance: annotation.type !== PdfAnnotationSubtype.UNKNOWN,
+        ...(markedTexts.has(`${page}:${annotationIndex}`)
+          ? { markedText: markedTexts.get(`${page}:${annotationIndex}`)! } : {}),
       })),
   );
   return inventoryExistingAnnotations(sources);
+}
+
+type EngineAnnotationPages = Awaited<ReturnType<ReturnType<PdfEngine['getAllAnnotations']>['toPromise']>>;
+
+function markupSegments(annotation: EngineAnnotationPages[number][number]): readonly Rect[] {
+  const subtype = PdfAnnotationSubtypeName[annotation.type] ?? '';
+  if (!isTextMarkupSubtype(subtype)) return [];
+  const segments = 'segmentRects' in annotation && Array.isArray(annotation.segmentRects)
+    ? annotation.segmentRects as Rect[]
+    : [];
+  return segments.length > 0 ? segments : [annotation.rect];
+}
+
+/**
+ * Reads the page text under each highlight, underline, squiggly and strikeout
+ * that another app wrote into the PDF. Only pages that carry such markup are
+ * read. This is best effort: a page whose text cannot be read leaves its
+ * annotations without marked text rather than failing the inventory.
+ */
+async function readMarkedTexts(
+  engine: PdfEngine,
+  document: PdfDocumentObject,
+  byPage: EngineAnnotationPages,
+): Promise<ReadonlyMap<string, MarkedText>> {
+  const markedTexts = new Map<string, MarkedText>();
+  await Promise.all(Object.entries(byPage).map(async ([page, annotations]) => {
+    const pageIndex = Number(page);
+    const markup = annotations
+      .map((annotation, annotationIndex) => ({ annotationIndex, segments: markupSegments(annotation) }))
+      .filter(({ segments }) => segments.length > 0);
+    const pageObject = document.pages[pageIndex];
+    if (markup.length === 0 || pageObject === undefined) return;
+    try {
+      const [text, glyphs] = await Promise.all([
+        engine.extractText(document, [pageIndex]).toPromise(),
+        engine.getPageGlyphs(document, pageObject).toPromise(),
+      ]);
+      for (const { annotationIndex, segments } of markup) {
+        const marked = markedTextFromGlyphs(text, glyphs, segments);
+        if (marked !== undefined) markedTexts.set(`${pageIndex}:${annotationIndex}`, marked);
+      }
+    } catch {
+      // The annotation still shows its comment without the marked words.
+    }
+  }));
+  return markedTexts;
 }

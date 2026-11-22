@@ -6,7 +6,7 @@ import {
   type ExistingAnnotationsDiscovery,
 } from '../pdf/existing-annotations.js';
 import { annotationKindLabel } from './AnnotationMetadata.js';
-import { annotationContent, type AnnotationContent } from './annotation-content.js';
+import { annotationContent, existingAnnotationContent, type AnnotationContent } from './annotation-content.js';
 import { reviewItemPageRange } from './annotation-projection.js';
 
 export type AnnotationReaderIdentity =
@@ -106,7 +106,9 @@ export function projectExistingAnnotationReader(
   options: ExistingAnnotationReaderProjectionOptions,
 ): ExistingAnnotationReaderRecord | null {
   const content = nonBlankString(annotation.contents);
-  if (content === null && options.includeMetadataOnly !== true) return null;
+  const presentation = existingAnnotationContent(annotation);
+  const marked = nonBlankString(presentation.quoteText) ?? nonBlankString(presentation.sourceText);
+  if (content === null && marked === null && options.includeMetadataOnly !== true) return null;
 
   const sectionLabel = nonBlankString(options.sectionLabel);
   const author = nonBlankString(annotation.author);
@@ -124,6 +126,7 @@ export function projectExistingAnnotationReader(
     ...(sectionLabel === null ? {} : { sectionLabel }),
     ...(author === null ? {} : { author }),
     contentLabel: 'Annotation contents',
+    ...presentation,
     content: content ?? '',
     mutable: false,
   };

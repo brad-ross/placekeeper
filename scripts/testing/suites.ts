@@ -310,7 +310,8 @@ export const suites: Record<string, TestStage[]> = {
         "apps/web/test/pdf-link-control.test.tsx",
         "apps/web/test/external-url-runtime.test.ts",
         "apps/web/test/app-interactions.test.ts",
-        "apps/web/test/existing-annotations.test.ts"
+        "apps/web/test/existing-annotations.test.ts",
+        "apps/web/test/existing-markup-text.test.ts"
       ]
     },
     {
@@ -349,6 +350,7 @@ export const suites: Record<string, TestStage[]> = {
         "apps/web/test/use-pdf-search.test.ts",
         "apps/web/test/codex-host-actions.test.tsx",
         "apps/web/test/existing-annotations.test.ts",
+        "apps/web/test/existing-markup-text.test.ts",
         "apps/web/test/main-location-refresh.test.ts",
         "apps/web/test/navigation-coordinator.test.ts",
         "apps/web/test/review-location-history.test.ts",
