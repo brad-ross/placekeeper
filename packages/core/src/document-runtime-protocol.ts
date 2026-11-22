@@ -195,6 +195,37 @@ export const ANNOTATED_COPY_EXPORT_KIND = "annotated-copy" as const;
 export function isAnnotatedCopyExportKind(value: unknown): value is typeof LEGACY_ANNOTATED_COPY_EXPORT_KIND | typeof ANNOTATED_COPY_EXPORT_KIND {
   return value === LEGACY_ANNOTATED_COPY_EXPORT_KIND || value === ANNOTATED_COPY_EXPORT_KIND;
 }
+
+/**
+ * Wire spelling of an annotation revision in messages that cross to a peer
+ * from another build: interaction receipts, control-socket session events,
+ * Codex watermarks and generation conflicts. The service, Chrome and VS Code
+ * extensions, Codex shell and readers upgrade independently, so receivers read
+ * either spelling through `wireAnnotationRevision` and senders keep the legacy
+ * key through `withLegacyAnnotationRevision`.
+ *
+ * Not used for `LiveObservationIdentity.reviewRevision`: that is the frozen
+ * agent-facing live-context contract.
+ *
+ * TODO(0.4.0): send `annotationRevision` once the oldest supported Chrome
+ * extension, VS Code extension, Codex plugin and service are 0.3.3 or later,
+ * the first release that accepts it.
+ */
+export const LEGACY_ANNOTATION_REVISION_KEY = "reviewRevision" as const;
+
+/** Reads a safe-integer annotation revision sent with either spelling. */
+export function wireAnnotationRevision(value: Readonly<Record<string, unknown>>): number | undefined {
+  const revision = value.annotationRevision ?? value[LEGACY_ANNOTATION_REVISION_KEY];
+  return Number.isSafeInteger(revision) ? revision as number : undefined;
+}
+
+/** Replaces `annotationRevision` with its legacy wire key, keeping key order otherwise. */
+export function withLegacyAnnotationRevision<T extends { readonly annotationRevision: number }>(
+  value: T,
+): Omit<T, "annotationRevision"> & { readonly [LEGACY_ANNOTATION_REVISION_KEY]: number } {
+  const { annotationRevision, ...rest } = value;
+  return { ...rest, [LEGACY_ANNOTATION_REVISION_KEY]: annotationRevision };
+}
 /** Matched exactly across processes (see LEGACY_ANNOTATED_COPY_EXPORT_KIND), so its text is frozen. */
 const COMMITTED_ANNOTATED_COPY_WARNING =
   "The reviewed copy was created, but final durability bookkeeping was interrupted. Verify the saved artifact before closing the review.";

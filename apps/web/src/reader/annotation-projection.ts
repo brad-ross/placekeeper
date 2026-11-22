@@ -9,7 +9,7 @@ export {
 } from "../../../../packages/core/src/annotation-projection.js";
 
 export function annotationIdForPdfAnnotation(annotation: PdfWriterAnnotation): string {
-  return annotation.reviewItemId ?? annotation.id;
+  return annotation.annotationItemId ?? annotation.id;
 }
 
 /** Replaces every visible projection for the one logical item being edited. */

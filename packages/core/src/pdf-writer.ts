@@ -28,8 +28,8 @@ interface PdfWriterAnnotationBase {
   kind: PdfWriterAnnotationKind;
   /** Deterministic identity of this page-local physical projection. */
   id: string;
-  /** Canonical Review Item identity shared by every page-local projection. */
-  reviewItemId?: string;
+  /** Canonical annotation identity shared by every page-local projection. */
+  annotationItemId?: string;
   projectionIndex?: number;
   projectionCount?: number;
   pageIndex: number;

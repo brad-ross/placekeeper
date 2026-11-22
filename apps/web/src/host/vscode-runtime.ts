@@ -14,6 +14,7 @@ import {
   sanitizeNativeDocumentRuntimeRequest,
   sanitizeNativeDocumentRuntimeResponse,
   sanitizeCodexDocumentRuntimeResponse,
+  wireAnnotationRevision,
   type DocumentRuntimeHost,
   type DocumentRuntimeMethod,
 } from "../../../../packages/core/src/document-runtime-protocol.js";
@@ -477,10 +478,11 @@ export function createRpcHostRuntime(
   };
 
   const adoptFinalizedReceipt = <T>(value: T): T => {
+    const annotationRevision = isObject(value) ? wireAnnotationRevision(value) : undefined;
     if (identity !== undefined && isObject(value) && value.status === "finalized" &&
-      value.generation === identity.generation && Number.isSafeInteger(value.reviewRevision) &&
-      (value.reviewRevision as number) >= identity.revision) {
-      identity = { ...identity, revision: value.reviewRevision as number };
+      value.generation === identity.generation && annotationRevision !== undefined &&
+      annotationRevision >= identity.revision) {
+      identity = { ...identity, revision: annotationRevision };
     }
     return value;
   };

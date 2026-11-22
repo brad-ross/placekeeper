@@ -168,28 +168,28 @@ describe("authenticated review presence", () => {
     const disconnectFirst = controls.registerSocket("review-a", new PassThrough());
     const disconnectSecond = controls.registerSocket("review-a", new PassThrough());
 
-    expect(controls.activity()).toEqual({ reviewPresence: 2, transientWork: 0 });
+    expect(controls.activity()).toEqual({ documentPresence: 2, transientWork: 0 });
     disconnectFirst();
-    expect(controls.activity()).toEqual({ reviewPresence: 1, transientWork: 0 });
+    expect(controls.activity()).toEqual({ documentPresence: 1, transientWork: 0 });
     disconnectSecond();
-    expect(controls.activity()).toEqual({ reviewPresence: 1, transientWork: 0 });
+    expect(controls.activity()).toEqual({ documentPresence: 1, transientWork: 0 });
 
     now += 250;
     const reconnect = controls.registerSocket("review-a", new PassThrough());
-    expect(controls.activity()).toEqual({ reviewPresence: 1, transientWork: 0 });
+    expect(controls.activity()).toEqual({ documentPresence: 1, transientWork: 0 });
     reconnect();
     now += 499;
-    expect(controls.activity()).toEqual({ reviewPresence: 1, transientWork: 0 });
+    expect(controls.activity()).toEqual({ documentPresence: 1, transientWork: 0 });
     now += 1;
-    expect(controls.activity()).toEqual({ reviewPresence: 0, transientWork: 0 });
+    expect(controls.activity()).toEqual({ documentPresence: 0, transientWork: 0 });
   });
 
   it("counts accepted durable work separately from review presence", () => {
     const controls = new SessionControlRegistry({ heartbeat: false });
     const write = controls.beginWrite("review-a");
-    expect(controls.activity()).toEqual({ reviewPresence: 0, transientWork: 1 });
+    expect(controls.activity()).toEqual({ documentPresence: 0, transientWork: 1 });
     write.complete();
-    expect(controls.activity()).toEqual({ reviewPresence: 0, transientWork: 0 });
+    expect(controls.activity()).toEqual({ documentPresence: 0, transientWork: 0 });
   });
 
   it.each([

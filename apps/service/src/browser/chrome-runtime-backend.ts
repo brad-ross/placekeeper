@@ -108,11 +108,11 @@ export class ChromeServiceRuntimeBackend implements ChromeRuntimeBackend {
 
   retentionStatus(): {
     readonly records: number; readonly activated: number; readonly presentations: number;
-    readonly provisionals: number; readonly cachedOperations: number; readonly indexedReviews: number;
+    readonly provisionals: number; readonly cachedOperations: number; readonly indexedDocuments: number;
   } {
     return {
       records: this.#records.size, activated: this.#activated.size,
-      indexedReviews: this.#index.size,
+      indexedDocuments: this.#index.size,
       presentations: this.#presentations.size, provisionals: this.#provisionals.size,
       cachedOperations: this.#journal.retentionStatus().cachedOperations,
     };
@@ -201,7 +201,7 @@ export class ChromeServiceRuntimeBackend implements ChromeRuntimeBackend {
       const state = this.#broker.state(record.sessionId);
       if (state === undefined || (operation.expectedDocumentGeneration !== undefined
         && state.workflow.documentGeneration !== operation.expectedDocumentGeneration)
-        || (operation.expectedReviewRevision !== undefined && state.revision !== operation.expectedReviewRevision)) {
+        || (operation.expectedAnnotationRevision !== undefined && state.revision !== operation.expectedAnnotationRevision)) {
         throw new Error("stale-native-selection");
       }
     };

@@ -71,10 +71,10 @@ describe('canonical annotation projection', () => {
       }),
     ]);
 
-    expect(projected.map(({ id, pageIndex, reviewItemId: annotationId, projectionIndex, projectionCount, rect }) => ({
+    expect(projected.map(({ id, pageIndex, annotationItemId: annotationId, projectionIndex, projectionCount, rect }) => ({
       id,
       pageIndex,
-      reviewItemId: annotationId,
+      annotationItemId: annotationId,
       projectionIndex,
       projectionCount,
       y: rect.y,
@@ -82,7 +82,7 @@ describe('canonical annotation projection', () => {
       {
         id: 'cross-page:projection:1',
         pageIndex: 1,
-        reviewItemId: 'cross-page',
+        annotationItemId: 'cross-page',
         projectionIndex: 0,
         projectionCount: 3,
         y: 80,
@@ -90,7 +90,7 @@ describe('canonical annotation projection', () => {
       {
         id: 'cross-page:projection:2',
         pageIndex: 2,
-        reviewItemId: 'cross-page',
+        annotationItemId: 'cross-page',
         projectionIndex: 1,
         projectionCount: 3,
         y: 18,
@@ -98,7 +98,7 @@ describe('canonical annotation projection', () => {
       {
         id: 'cross-page:projection:3',
         pageIndex: 3,
-        reviewItemId: 'cross-page',
+        annotationItemId: 'cross-page',
         projectionIndex: 2,
         projectionCount: 3,
         y: 14,

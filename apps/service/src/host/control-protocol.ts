@@ -1,5 +1,5 @@
 import { parseExtensionRequest, type ExtensionRequest, type ExtensionResult } from "../../../../packages/core/src/extension-protocol.js";
-import { isUpgradePreparationRequest, type UpgradePreparationRequest, type UpgradePreparationResult, type UpgradeAttemptCredentials } from "./upgrade-preparation.js";
+import { isUpgradePreparationRequest, normalizeUpgradePreparationRequest, toWireUpgradePreparationRequest, type UpgradePreparationRequest, type UpgradePreparationResult, type UpgradeAttemptCredentials } from "./upgrade-preparation.js";
 import { isEditorPath, parseEditorControlRequest, type EditorControlRequest, type EditorControlResponse } from "../../../../packages/core/src/editor-navigation-protocol.js";
 import {
   parseCodexAppRequest,
@@ -32,9 +32,39 @@ export const MANAGEMENT_PROTOCOL_VERSION = 1;
 export type DaemonLifecycleState = "accepting" | "draining" | "shutdown-committed";
 
 export interface DaemonAggregateActivity {
-  readonly reviewPresence: number;
+  readonly documentPresence: number;
   readonly codexTasks: number;
   readonly transientWork: number;
+}
+
+/**
+ * Wire spelling of `DaemonAggregateActivity.documentPresence`. Installers and
+ * CLIs inspect a daemon that may be older or newer than they are, so readers
+ * accept both spellings and the daemon keeps sending the legacy one.
+ *
+ * TODO(0.4.0): send `documentPresence` once no supported installer or CLI
+ * older than 0.3.3 (the first release that accepts it) can inspect a daemon.
+ */
+export const LEGACY_DOCUMENT_PRESENCE_KEY = "reviewPresence" as const;
+
+export function toWireAggregateActivity(activity: DaemonAggregateActivity): Readonly<Record<string, number>> {
+  return {
+    [LEGACY_DOCUMENT_PRESENCE_KEY]: activity.documentPresence,
+    codexTasks: activity.codexTasks,
+    transientWork: activity.transientWork,
+  };
+}
+
+export function parseAggregateActivity(value: unknown): DaemonAggregateActivity | undefined {
+  if (!isObject(value)) return undefined;
+  const documentPresence = value.documentPresence ?? value[LEGACY_DOCUMENT_PRESENCE_KEY];
+  const counts = [documentPresence, value.codexTasks, value.transientWork];
+  if (!counts.every((count) => Number.isSafeInteger(count) && (count as number) >= 0)) return undefined;
+  return {
+    documentPresence: documentPresence as number,
+    codexTasks: value.codexTasks as number,
+    transientWork: value.transientWork as number,
+  };
 }
 
 export interface DaemonManagementStatus {
@@ -102,7 +132,7 @@ export type PlacekeeperControlRequest =
       readonly kind: "claim-binding";
       readonly native?: true;
       readonly taskSessionId: string;
-      readonly reviewSessionId: string;
+      readonly documentSessionId: string;
       readonly documentGeneration: number;
       readonly bindProof: string;
     }
@@ -288,7 +318,83 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-export function isControlRequest(value: unknown): value is PlacekeeperControlRequest {
+/**
+ * Wire spelling of the claim-binding document session field. The hook CLI and
+ * a long-lived daemon upgrade independently, so the daemon accepts both
+ * spellings and senders keep the legacy one through `toWireControlRequest`.
+ *
+ * TODO(0.4.0): send `documentSessionId` once no supported daemon older than
+ * 0.3.3 (the first release that accepts it) can still be running.
+ */
+export const LEGACY_CLAIM_BINDING_SESSION_KEY = "reviewSessionId" as const;
+
+function claimBindingDocumentSessionId(value: Record<string, unknown>): string | undefined {
+  const current = value.documentSessionId;
+  const legacy = value[LEGACY_CLAIM_BINDING_SESSION_KEY];
+  if (current !== undefined && legacy !== undefined && current !== legacy) return undefined;
+  const sessionId = current ?? legacy;
+  return typeof sessionId === "string" ? sessionId : undefined;
+}
+
+/** Validates and normalizes one decoded control request; the only receive-side
+ * translation point for renamed wire fields. */
+export function parseControlRequest(value: unknown): PlacekeeperControlRequest | undefined {
+  if (!isControlRequest(value)) return undefined;
+  const request = value as Record<string, unknown>;
+  if (request.kind === "upgrade-preparation") {
+    return { kind: "upgrade-preparation", request: normalizeUpgradePreparationRequest(request.request as UpgradePreparationRequest) };
+  }
+  if (request.kind !== "claim-binding") return value as PlacekeeperControlRequest;
+  const { [LEGACY_CLAIM_BINDING_SESSION_KEY]: _legacy, documentSessionId: _current, ...rest } = request;
+  return { ...rest, documentSessionId: claimBindingDocumentSessionId(request)! } as PlacekeeperControlRequest;
+}
+
+/** The only receive-side translation point for renamed control response
+ * fields. Malformed activity is left untouched for the caller's validator. */
+export function parseControlResponse(value: unknown): PlacekeeperControlResponse {
+  if (!isObject(value)) return value as PlacekeeperControlResponse;
+  const withActivity = (holder: unknown): unknown => {
+    if (!isObject(holder) || !("activity" in holder)) return holder;
+    const activity = parseAggregateActivity(holder.activity);
+    return activity === undefined ? holder : { ...holder, activity };
+  };
+  if (value.kind === "management" && value.operation === "status") {
+    return { ...value, status: withActivity(value.status) } as PlacekeeperControlResponse;
+  }
+  if (value.kind === "management" && value.operation === "shutdown-if-idle") {
+    return { ...value, result: withActivity(value.result) } as PlacekeeperControlResponse;
+  }
+  if (value.kind === "upgrade-preparation") {
+    return { ...value, result: withActivity(value.result) } as PlacekeeperControlResponse;
+  }
+  return value as PlacekeeperControlResponse;
+}
+
+/** The only send-side translation point for renamed control response fields. */
+export function toWireControlResponse(response: PlacekeeperControlResponse): unknown {
+  if (response.kind === "management" && response.operation === "status") {
+    return { ...response, status: { ...response.status, activity: toWireAggregateActivity(response.status.activity) } };
+  }
+  if (response.kind === "management" && response.operation === "shutdown-if-idle" && response.result.status === "refused") {
+    return { ...response, result: { ...response.result, activity: toWireAggregateActivity(response.result.activity) } };
+  }
+  if (response.kind === "upgrade-preparation" && "activity" in response.result) {
+    return { ...response, result: { ...response.result, activity: toWireAggregateActivity(response.result.activity) } };
+  }
+  return response;
+}
+
+/** The only send-side translation point for renamed control request fields. */
+export function toWireControlRequest(request: PlacekeeperControlRequest): Readonly<Record<string, unknown>> {
+  if (request.kind === "upgrade-preparation") return { ...request, request: toWireUpgradePreparationRequest(request.request) };
+  if (request.kind !== "claim-binding") return request;
+  const { documentSessionId, ...rest } = request;
+  return { ...rest, [LEGACY_CLAIM_BINDING_SESSION_KEY]: documentSessionId };
+}
+
+/** Validates the wire form, including legacy field spellings. Use
+ * `parseControlRequest` to obtain the normalized in-memory request. */
+export function isControlRequest(value: unknown): boolean {
   if (!isObject(value) || typeof value.kind !== "string") return false;
   if (value.kind === "upgrade-preparation") return Object.keys(value).length === 2 && isUpgradePreparationRequest(value.request);
   if (value.kind === "editor-control") return Object.keys(value).length === (value.installation === undefined ? 2 : 3) && parseEditorControlRequest(value.request) !== undefined
@@ -390,7 +496,7 @@ export function isControlRequest(value: unknown): value is PlacekeeperControlReq
   }
   if (value.kind === "claim-binding") {
     return (value.native === undefined || value.native === true) && typeof value.taskSessionId === "string" &&
-      typeof value.reviewSessionId === "string" &&
+      claimBindingDocumentSessionId(value) !== undefined &&
       typeof value.documentGeneration === "number" &&
       typeof value.bindProof === "string";
   }

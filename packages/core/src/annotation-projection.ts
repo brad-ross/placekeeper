@@ -44,7 +44,7 @@ export function projectAnnotation(
   const annotation: PdfWriterAnnotation = {
     ...annotationBase(item, author),
     id: item.id,
-    reviewItemId: item.id,
+    annotationItemId: item.id,
     projectionIndex: 0,
     projectionCount: 1,
     pageIndex: anchor.pageIndex,
@@ -107,7 +107,7 @@ function projectedAnnotation(input: {
   const annotation: PdfWriterAnnotation = {
     ...annotationBase(item, input.author),
     id: projectionId,
-    reviewItemId: item.id,
+    annotationItemId: item.id,
     projectionIndex,
     projectionCount,
     pageIndex: input.pageIndex,

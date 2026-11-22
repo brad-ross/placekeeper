@@ -11,6 +11,7 @@ import type { App } from '@modelcontextprotocol/ext-apps';
 import { createCodexHostRuntime } from '../../web/src/host/codex-runtime.js';
 import { mountCodexProductionDocument } from '../../web/src/codex-entry.js';
 import type { HostRuntimeInvalidation } from '../../web/src/host/runtime.js';
+import { wireAnnotationRevision } from '../../../packages/core/src/document-runtime-protocol.js';
 import { NativeOperationError, parseCodexAppResponse, type CodexAppRequest, type CodexAppResponse } from '../../../packages/core/src/codex-mcp-protocol.js';
 import { EXTENSION_META_KEY, EXTENSION_TOOL, extensionPickerTimeouts, parseExtensionResult, type ExtensionRequest, type ExtensionResult, type ExtensionPresentation } from '../../../packages/core/src/extension-protocol.js';
 import { PanelLiveness } from './panel-liveness.js';
@@ -698,7 +699,7 @@ export class ExtensionShell {
         if (!this.#readerTools.supported) this.#show('Live reader tools are unavailable on this host. Open the reader to search and navigate.');
         this.#listeners.clear();
         this.#watermark = undefined;
-        const runtime = createCodexHostRuntime({ runtimeId: active.runtimeId, contextOwner: 'app', ...(this.#host ? { reviewedCopyExport: this.app.getHostCapabilities?.()?.downloadFile !== undefined } : {}), call: (method, payload) => this.#payload(method, payload, epoch), openExternalUrl: async value => {
+        const runtime = createCodexHostRuntime({ runtimeId: active.runtimeId, contextOwner: 'app', ...(this.#host ? { annotatedCopyExport: this.app.getHostCapabilities?.()?.downloadFile !== undefined } : {}), call: (method, payload) => this.#payload(method, payload, epoch), openExternalUrl: async value => {
             const url = externalWebUrl(value);
             if (epoch !== this.#epoch || this.#closed || !this.#connected || url === null || this.app.getHostCapabilities?.()?.openLinks === undefined) throw new Error('Host link opening is unavailable.');
             const result = await this.app.openLink({ url });
@@ -738,7 +739,6 @@ export class ExtensionShell {
                 watermark?: number;
                 sessionId?: string;
                 documentGeneration: number;
-                reviewRevision: number;
             };
             if (epoch !== this.#epoch || this.#closed)
                 return;
@@ -755,7 +755,8 @@ export class ExtensionShell {
             if (method === 'watermark' && value.sessionId) {
                 if (this.#watermark !== undefined && value.watermark !== this.#watermark)
                     for (const listener of this.#listeners)
-                        listener({ sessionId: value.sessionId, generation: value.documentGeneration, revision: value.reviewRevision, reason: 'freshness' });
+                        // Either revision spelling; see LEGACY_ANNOTATION_REVISION_KEY.
+                        listener({ sessionId: value.sessionId, generation: value.documentGeneration, revision: wireAnnotationRevision(value)!, reason: 'freshness' });
                 this.#watermark = value.watermark;
             }
         }

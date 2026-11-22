@@ -39,7 +39,7 @@ export interface CoordinateUpgradeOptions {
 
 export function upgradeReason(activity: DaemonAggregateActivity):
   "review-presence" | "codex-task" | "transient-busy" | undefined {
-  if (activity.reviewPresence > 0) return "review-presence";
+  if (activity.documentPresence > 0) return "review-presence";
   if (activity.codexTasks > 0) return "codex-task";
   if (activity.transientWork > 0) return "transient-busy";
   return undefined;

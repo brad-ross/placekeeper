@@ -27,10 +27,19 @@ export class InvalidLiveContextContractError extends Error {
   }
 }
 
+/**
+ * Identity of one live observation. This and the V1 observation below are the
+ * agent-facing live-context contract: they are sent as-is to the hook CLI,
+ * printed by `placekeeper context` (source workflow and reconciliation
+ * reports), and validated with exact keys by Codex and VS Code readers from
+ * other builds. Their `review*` keys (`reviewRevision`, `reviewItems`,
+ * `reviewState`) are therefore frozen and deliberately not renamed.
+ */
 export interface LiveObservationIdentity {
   readonly placekeeperSessionId: string;
   readonly documentGeneration: number;
   readonly source: DocumentSourceIdentity;
+  /** The annotation revision; frozen agent-facing key. */
   readonly reviewRevision: number;
   readonly stateDigest: string;
 }
@@ -205,6 +214,7 @@ export interface AtomicLiveContextObservationV1 {
   readonly observedAt: string;
   readonly identity: LiveObservationIdentity;
   readonly saveStatus: LiveSaveStatus;
+  /** Annotation changes; frozen agent-facing key (see LiveObservationIdentity). */
   readonly reviewItems: AnnotationChanges;
   readonly existingPdfAnnotations: ExistingPdfAnnotationInventory;
   readonly evidence: PdfEvidenceCatalog;
@@ -637,7 +647,7 @@ export function createAtomicLiveContextObservation(input: {
     input.identity.reviewRevision !== input.reviewItems.revision ||
     input.identity.stateDigest !== input.reviewItems.semanticDigest
   ) {
-    throw new InvalidLiveContextContractError("Observation identity must match its Review Item snapshot");
+    throw new InvalidLiveContextContractError("Observation identity must match its annotation snapshot");
   }
   if (
     input.evidence.handle.documentGeneration !== input.identity.documentGeneration ||

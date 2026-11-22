@@ -889,7 +889,7 @@ export function ProductionReaderApp(props: ProductionReaderAppProps) {
   >(null);
   const [navigationAnnouncement, setNavigationAnnouncement] = useState('');
   // Transient link-destination presentation (KTD1, KTD9, KTD10). Never part of
-  // ReviewState, durable navigation, export, or Codex context.
+  // DocumentState, durable navigation, export, or Codex context.
   const [linkDescription, setLinkDescription] = useState<LinkDescriptionPresentationState | null>(null);
   const [linkActionBusy, setLinkActionBusy] = useState<LinkActionBusyState | null>(null);
   const [destinationBands, setDestinationBands] = useState<DestinationBandPresentationState | null>(null);
@@ -2496,7 +2496,7 @@ export function ProductionReaderApp(props: ProductionReaderAppProps) {
     : currentDestinationBands?.references.get(navigationState.activeTabIdentity) ?? null;
   const viewer = props.viewer ?? (
     <App
-      embeddedInReviewShell
+      embeddedInReaderShell
       assets={viewerAssets}
       {...(resourcePolicyRef.current === undefined ? {} : { resourcePolicy: resourcePolicyRef.current })}
       documentTitle={scope.documentTitle}
@@ -2895,7 +2895,7 @@ export function ProductionReaderApp(props: ProductionReaderAppProps) {
             ? 'not-saved'
             : state.workflow.mode === 'generated-output' ? 'clean' : saveStatus.sync.phase,
           exportOnly,
-          showExportAction: scope.launchSurface === 'codex' && scope.sourceDisposition === 'remote-temporary' && props.api.capabilities?.reviewedCopyExport !== false,
+          showExportAction: scope.launchSurface === 'codex' && scope.sourceDisposition === 'remote-temporary' && props.api.capabilities?.annotatedCopyExport !== false,
           ...(!exportOnly && state.workflow.mode !== 'generated-output'
             && saveStatus.sync.phase === 'not-saved' && saveStatus.destination.phase === 'active'
             ? {
@@ -2917,7 +2917,7 @@ export function ProductionReaderApp(props: ProductionReaderAppProps) {
           ...(state.workflow.mode === 'generated-output' || exportOnly
             ? {}
             : { onSaveOptions: () => openCopyDialog("menu") }),
-          ...(props.api.capabilities?.reviewedCopyExport === false ? {} : { onExportAnnotatedCopy: annotationExport.open }),
+          ...(props.api.capabilities?.annotatedCopyExport === false ? {} : { onExportAnnotatedCopy: annotationExport.open }),
         }}
         selection={{
           onSelectionPageLimitExceeded: () => setCommandError(PDF_SELECTION_PAGE_LIMIT_MESSAGE),

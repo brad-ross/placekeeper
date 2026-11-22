@@ -945,7 +945,7 @@ function Harness() {
               const mark = document.createElement('span');
               mark.dataset.harnessAuthoringPreview = '';
               mark.dataset.ownedMark = annotation.kind;
-              mark.dataset.annotationId = annotation.reviewItemId ?? annotation.id;
+              mark.dataset.annotationId = annotation.annotationItemId ?? annotation.id;
               mark.dataset.previewPage = String(annotation.pageIndex);
               mark.dataset.previewSegment = String(index);
               layer?.append(mark);

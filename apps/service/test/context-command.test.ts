@@ -9,8 +9,8 @@ import {
   parseContextSourceArguments,
   runContextCommand,
 } from "../src/cli/context-command.js";
-import { requestControl, startLaunchControlServer, type PlacekeeperControlResponse } from "../src/host/launch-control.js";
-import { isControlRequest } from "../src/host/control-protocol.js";
+import { managementShutdownResult, requestControl, startLaunchControlServer, type PlacekeeperControlResponse } from "../src/host/launch-control.js";
+import { isControlRequest, parseAggregateActivity, parseControlRequest, parseControlResponse, toWireControlRequest, toWireControlResponse } from "../src/host/control-protocol.js";
 import type { PlacekeeperHost } from "../src/host/placekeeper-host.js";
 
 const roots: string[] = [];
@@ -263,6 +263,74 @@ describe("renamed context retrieval control kinds", () => {
       }
       expect(evidence.retrieveAnnotationsWithHandle).toHaveBeenCalledTimes(2);
       expect(evidence.retrieveDocumentChangesWithHandle).toHaveBeenCalledTimes(2);
+    } finally {
+      await server.close();
+    }
+  });
+});
+
+describe("renamed control protocol fields", () => {
+  const claim = { kind: "claim-binding", taskSessionId: "task-a", documentGeneration: 1, bindProof: "proof" };
+  const participant = { participantId: "participant-a", participantToken: "t".repeat(43) };
+  const attempt = { attemptId: "a".repeat(43), candidate: { daemonIdentity: "b".repeat(64), installArtifactIdentity: "c".repeat(64) } };
+  const acknowledgement = { revision: "1", protectedDraftDurable: true, pdfSaveSettled: true };
+
+  it("accepts both claim-binding session spellings and keeps sending the legacy one", () => {
+    for (const wire of [{ ...claim, reviewSessionId: "document-a" }, { ...claim, documentSessionId: "document-a" },
+      { ...claim, reviewSessionId: "document-a", documentSessionId: "document-a" }]) {
+      expect(isControlRequest(wire)).toBe(true);
+      const parsed = parseControlRequest(wire);
+      expect(parsed).toEqual({ ...claim, documentSessionId: "document-a" });
+    }
+    expect(parseControlRequest({ ...claim, reviewSessionId: "document-a", documentSessionId: "document-b" })).toBeUndefined();
+    expect(parseControlRequest(claim)).toBeUndefined();
+    const wire = toWireControlRequest({ kind: "claim-binding", taskSessionId: "task-a", documentSessionId: "document-a", documentGeneration: 1, bindProof: "proof" });
+    expect(wire).toEqual({ ...claim, reviewSessionId: "document-a" });
+    expect(wire).not.toHaveProperty("documentSessionId");
+  });
+
+  it("accepts both upgrade acknowledgement spellings and keeps sending the legacy one", () => {
+    for (const durable of [{ reviewRevisionDurable: true }, { annotationRevisionDurable: true }]) {
+      const parsed = parseControlRequest({ kind: "upgrade-preparation", request: { operation: "participant-ack", participant, credentials: attempt, acknowledgement: { ...acknowledgement, ...durable } } });
+      expect(parsed).toEqual({ kind: "upgrade-preparation", request: { operation: "participant-ack", participant, credentials: attempt, acknowledgement: { ...acknowledgement, annotationRevisionDurable: true } } });
+    }
+    expect(parseControlRequest({ kind: "upgrade-preparation", request: { operation: "participant-ack", participant, credentials: attempt, acknowledgement } })).toBeUndefined();
+    const wire = toWireControlRequest({ kind: "upgrade-preparation", request: { operation: "participant-ack", participant, credentials: attempt, acknowledgement: { ...acknowledgement, annotationRevisionDurable: false } } });
+    expect(wire).toMatchObject({ request: { acknowledgement: { reviewRevisionDurable: false } } });
+    expect((wire.request as { acknowledgement: object }).acknowledgement).not.toHaveProperty("annotationRevisionDurable");
+  });
+
+  it("sends daemon activity with the legacy presence key and reads either spelling", () => {
+    const activity = { documentPresence: 2, codexTasks: 1, transientWork: 0 };
+    const status = { kind: "management", protocolVersion: 1, operation: "status", status: { protocolVersion: 1, daemonIdentity: "development", lifecycle: "accepting", activity } } as const;
+    expect(JSON.parse(JSON.stringify(toWireControlResponse(status)))).toMatchObject({ status: { activity: { reviewPresence: 2, codexTasks: 1, transientWork: 0 } } });
+    expect(JSON.stringify(toWireControlResponse(status))).not.toContain("documentPresence");
+    const refused = { kind: "management", protocolVersion: 1, operation: "shutdown-if-idle", result: { status: "refused", activity } } as const;
+    expect(toWireControlResponse(refused)).toMatchObject({ result: { activity: { reviewPresence: 2 } } });
+    for (const wireActivity of [{ reviewPresence: 2, codexTasks: 1, transientWork: 0 }, activity]) {
+      expect(parseAggregateActivity(wireActivity)).toEqual(activity);
+      expect(parseControlResponse({ ...status, status: { ...status.status, activity: wireActivity } })).toEqual(status);
+      expect(managementShutdownResult({ ...refused, result: { status: "refused", activity: wireActivity } })).toEqual({ status: "refused", activity });
+    }
+    expect(parseAggregateActivity({ codexTasks: 1, transientWork: 0 })).toBeUndefined();
+  });
+
+  it.skipIf(process.platform === "win32")("round-trips renamed fields through the daemon socket", async () => {
+    const root = await mkdtemp(join(tmpdir(), "placekeeper-control-fields-"));
+    roots.push(root);
+    const claimed: unknown[] = [];
+    const host = {
+      broker: { claimTaskBinding: async (input: unknown) => { claimed.push(input); return { status: "denied" }; } },
+      lifecycle: { runActivity: async <T>(work: () => Promise<T>) => work(), status: () => ({ lifecycle: "accepting", activity: { documentPresence: 3, codexTasks: 0, transientWork: 0 } }) },
+    } as unknown as PlacekeeperHost;
+    const socket = join(root, "control.sock");
+    const server = await startLaunchControlServer(host, socket);
+    try {
+      await expect(requestControl(socket, { kind: "claim-binding", taskSessionId: "task-a", documentSessionId: "document-a", documentGeneration: 1, bindProof: "proof" }))
+        .resolves.toEqual({ kind: "binding", result: { status: "denied" } });
+      expect(claimed).toEqual([{ kind: "claim-binding", taskSessionId: "task-a", documentSessionId: "document-a", documentGeneration: 1, bindProof: "proof" }]);
+      await expect(requestControl(socket, { kind: "management", protocolVersion: 1, operation: "status" }))
+        .resolves.toMatchObject({ status: { activity: { documentPresence: 3, codexTasks: 0, transientWork: 0 } } });
     } finally {
       await server.close();
     }

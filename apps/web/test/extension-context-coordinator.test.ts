@@ -2,7 +2,7 @@ import { expect, it, vi } from 'vitest';
 import type { DocumentContextMember, DocumentContextPublicationStatus } from '../src/host/document-in-context.js';
 import { ExtensionContextCoordinator, backgroundContextUri } from '../src/host/extension-context-coordinator.js';
 import type { DocumentContextSnapshot } from '../src/host/document-context-snapshot.js';
-const snapshot = (page = 1, generation = 1): DocumentContextSnapshot => ({ documentGeneration: generation, reviewRevision: 2, title: 'PDF', source: { fileId: '/private/secret.pdf', digest: 'digest' }, page, pageCount: 10, selection: null, annotations: [] });
+const snapshot = (page = 1, generation = 1): DocumentContextSnapshot => ({ documentGeneration: generation, annotationRevision: 2, title: 'PDF', source: { fileId: '/private/secret.pdf', digest: 'digest' }, page, pageCount: 10, selection: null, annotations: [] });
 const tick = async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); };
 function setup(initial?: any, freshInvocation = initial === undefined, onDocumentStatus?: (member: DocumentContextMember, status: DocumentContextPublicationStatus) => void, options: NonNullable<ConstructorParameters<typeof ExtensionContextCoordinator>[2]> = {}) {
  let resolve!: (value: any) => void;

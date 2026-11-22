@@ -5,7 +5,7 @@ import { UpgradePreparationCoordinator } from "../src/host/upgrade-preparation.j
 
 const candidate = { daemonIdentity: "b".repeat(64), installArtifactIdentity: "c".repeat(64) };
 function fixture(timeoutMs = 60_000) {
-  const lifecycle = new DaemonLifecycleCoordinator({ activity: () => ({ reviewPresence: 0, codexTasks: 0, transientWork: 0 }), drain: async () => {} });
+  const lifecycle = new DaemonLifecycleCoordinator({ activity: () => ({ documentPresence: 0, codexTasks: 0, transientWork: 0 }), drain: async () => {} });
   const preparation = new UpgradePreparationCoordinator(lifecycle, timeoutMs);
   const participant = preparation.registerParticipant({ id: "electron:helper", revision: "revision-1" });
   const preview = preparation.preview("a".repeat(64), candidate);
@@ -28,14 +28,14 @@ describe("consent-bound upgrade preparation", () => {
   it("requires durable exact revision acknowledgement before committing closure", () => {
     const f = fixture(); f.preparation.begin(f.credentials, true);
     expect(() => f.preparation.commit(f.credentials)).toThrow("acknowledgements");
-    f.preparation.acknowledge(f.participant, f.credentials, { revision: "revision-1", reviewRevisionDurable: true, protectedDraftDurable: true, pdfSaveSettled: true });
+    f.preparation.acknowledge(f.participant, f.credentials, { revision: "revision-1", annotationRevisionDurable: true, protectedDraftDurable: true, pdfSaveSettled: true });
     expect(f.preparation.commit(f.credentials).phase).toBe("committed");
     expect(f.preparation.poll(f.participant)?.phase).toBe("committed");
     f.preparation.cancel(f.credentials);
   });
   it.each(["stale", "failed"])("cancels %s acknowledgement and restores admission", mode => {
     const f = fixture(); f.preparation.begin(f.credentials, true);
-    f.preparation.acknowledge(f.participant, f.credentials, { revision: mode === "stale" ? "revision-0" : "revision-1", reviewRevisionDurable: true, protectedDraftDurable: mode !== "failed", pdfSaveSettled: true });
+    f.preparation.acknowledge(f.participant, f.credentials, { revision: mode === "stale" ? "revision-0" : "revision-1", annotationRevisionDurable: true, protectedDraftDurable: mode !== "failed", pdfSaveSettled: true });
     expect(f.preparation.status(f.credentials).phase).toBe("canceled");
     expect(f.lifecycle.enterActivity()).toBeDefined();
   });
@@ -67,14 +67,14 @@ it("does not disclose installer authority to review participants", () => {
   const f = fixture(); f.preparation.begin(f.credentials, true);
   expect(f.preparation.poll(f.participant)).not.toHaveProperty("token");
   const { token: _token, ...participantAttempt } = f.credentials;
-  expect(f.preparation.acknowledge(f.participant, participantAttempt, { revision: "revision-1", reviewRevisionDurable: true, protectedDraftDurable: true, pdfSaveSettled: true })).not.toHaveProperty("token");
+  expect(f.preparation.acknowledge(f.participant, participantAttempt, { revision: "revision-1", annotationRevisionDurable: true, protectedDraftDurable: true, pdfSaveSettled: true })).not.toHaveProperty("token");
   f.preparation.cancel(f.credentials);
 });
 it("accepts a final trusted settlement revision but rejects its stale acknowledgement", () => {
   const f = fixture(); f.preparation.begin(f.credentials, true);
   f.preparation.updateParticipant(f.participant, "revision-2", { settlement: true });
   expect(f.preparation.status(f.credentials).participants[0]?.revision).toBe("revision-2");
-  f.preparation.acknowledge(f.participant, f.credentials, { revision: "revision-1", reviewRevisionDurable: true, protectedDraftDurable: true, pdfSaveSettled: true });
+  f.preparation.acknowledge(f.participant, f.credentials, { revision: "revision-1", annotationRevisionDurable: true, protectedDraftDurable: true, pdfSaveSettled: true });
   expect(f.preparation.status(f.credentials).phase).toBe("canceled");
 });
 it("does not turn a stale consent preview into admission freeze", () => {
@@ -84,7 +84,7 @@ it("does not turn a stale consent preview into admission freeze", () => {
 });
 it("preparation wins the boundary against an already draining idle shutdown", async () => {
   const drain = Promise.withResolvers<void>();
-  const lifecycle = new DaemonLifecycleCoordinator({ activity: () => ({ reviewPresence: 0, codexTasks: 0, transientWork: 0 }), drain: () => drain.promise });
+  const lifecycle = new DaemonLifecycleCoordinator({ activity: () => ({ documentPresence: 0, codexTasks: 0, transientWork: 0 }), drain: () => drain.promise });
   const shutdown = lifecycle.shutdownIfIdle();
   lifecycle.freezeAdmission(); drain.resolve();
   expect(await shutdown).toMatchObject({ status: "refused" });
@@ -92,7 +92,7 @@ it("preparation wins the boundary against an already draining idle shutdown", as
   lifecycle.resumeAdmission();
 });
 it("restores a usable lifecycle after a drain write fails", async () => {
-  const lifecycle = new DaemonLifecycleCoordinator({ activity: () => ({ reviewPresence: 0, codexTasks: 0, transientWork: 0 }), drain: async () => { throw new Error("disk full"); } });
+  const lifecycle = new DaemonLifecycleCoordinator({ activity: () => ({ documentPresence: 0, codexTasks: 0, transientWork: 0 }), drain: async () => { throw new Error("disk full"); } });
   await expect(lifecycle.shutdownIfIdle()).rejects.toThrow("disk full");
   expect(lifecycle.status().lifecycle).toBe("accepting");
   expect(lifecycle.enterActivity()).toBeDefined();
@@ -132,14 +132,14 @@ it("enforces the preparation contract over the live private control socket and H
     const poll = await requestControl(socketPath, { kind: "upgrade-preparation", request: { operation: "participant-poll", participant } });
     expect(poll).toMatchObject({ result: { phase: "preparing" } });
     expect(poll).not.toHaveProperty("result.token");
-    await requestControl(socketPath, { kind: "upgrade-preparation", request: { operation: "participant-ack", participant, credentials: { attemptId: credentials.attemptId, candidate }, acknowledgement: { revision: "revision-1", reviewRevisionDurable: true, protectedDraftDurable: false, pdfSaveSettled: true } } });
+    await requestControl(socketPath, { kind: "upgrade-preparation", request: { operation: "participant-ack", participant, credentials: { attemptId: credentials.attemptId, candidate }, acknowledgement: { revision: "revision-1", annotationRevisionDurable: true, protectedDraftDurable: false, pdfSaveSettled: true } } });
     expect(host.lifecycle.admissionAllowed()).toBe(true);
     expect((await fetch(`${host.server.origin}/s/${id}/bootstrap`)).status).not.toBe(503);
     const next = host.upgradePreparation.preview(identity, candidate);
     const finalCredentials = { attemptId: next.attemptId, token: next.token, candidate };
     host.upgradePreparation.begin(finalCredentials, true);
     await host.prepareUpgradeTasks();
-    host.upgradePreparation.acknowledge(participant, finalCredentials, { revision: "revision-1", reviewRevisionDurable: true, protectedDraftDurable: true, pdfSaveSettled: true });
+    host.upgradePreparation.acknowledge(participant, finalCredentials, { revision: "revision-1", annotationRevisionDurable: true, protectedDraftDurable: true, pdfSaveSettled: true });
     host.upgradePreparation.commit(finalCredentials);
     expect(await requestControl(socketPath, { kind: "management", protocolVersion: 1, operation: "shutdown-if-idle" })).toMatchObject({ result: { status: "refused" } });
     expect(await requestControl(socketPath, { kind: "management", protocolVersion: 1, operation: "shutdown-if-idle", preparation: { ...finalCredentials, candidate: { ...candidate, installArtifactIdentity: "e".repeat(64) } } })).toMatchObject({ result: { status: "refused" } });
@@ -148,13 +148,13 @@ it("enforces the preparation contract over the live private control socket and H
 });
 
 it("keeps all peers open until trusted coverage accounts for every host and Codex task", () => {
-  const lifecycle = new DaemonLifecycleCoordinator({ activity: () => ({ reviewPresence: 4, codexTasks: 1, transientWork: 0 }), drain: async () => {} });
+  const lifecycle = new DaemonLifecycleCoordinator({ activity: () => ({ documentPresence: 4, codexTasks: 1, transientWork: 0 }), drain: async () => {} });
   const preparation = new UpgradePreparationCoordinator(lifecycle);
   const participant = preparation.registerParticipant({ id: "electron:known-helper", revision: "revision-1" });
   const preview = preparation.preview("a".repeat(64), candidate);
   const credentials = { attemptId: preview.attemptId, token: preview.token, candidate };
   preparation.begin(credentials, true);
-  preparation.acknowledge(participant, credentials, { revision: "revision-1", reviewRevisionDurable: true, protectedDraftDurable: true, pdfSaveSettled: true });
+  preparation.acknowledge(participant, credentials, { revision: "revision-1", annotationRevisionDurable: true, protectedDraftDurable: true, pdfSaveSettled: true });
   expect(preparation.status(credentials)).toMatchObject({ phase: "preparing", reason: expect.stringContaining("no protected preparation participant") });
   expect(() => preparation.commit(credentials)).toThrow("coverage");
   expect(preparation.poll(participant)?.phase).toBe("preparing");
@@ -163,7 +163,7 @@ it("keeps all peers open until trusted coverage accounts for every host and Code
 });
 it("binds idle retirement to the still-committed attempt and rechecks cancellation during drain", async () => {
   const drain = Promise.withResolvers<void>();
-  const lifecycle = new DaemonLifecycleCoordinator({ activity: () => ({ reviewPresence: 0, codexTasks: 0, transientWork: 0 }), drain: () => drain.promise });
+  const lifecycle = new DaemonLifecycleCoordinator({ activity: () => ({ documentPresence: 0, codexTasks: 0, transientWork: 0 }), drain: () => drain.promise });
   const preparation = new UpgradePreparationCoordinator(lifecycle);
   const preview = preparation.preview("a".repeat(64), candidate);
   const credentials = { attemptId: preview.attemptId, token: preview.token, candidate };
@@ -195,7 +195,7 @@ it("allows authenticated active Codex settlement while refusing new presentation
   try {
     const launch = await host.open({ pdfPath: pdf, surface: "codex-native" });
     if (!launch.ok || !("handoff" in launch)) throw new Error("Expected Codex launch");
-    expect(host.codexRuntime.claimLaunch({ bindProof: launch.bindProof, reviewSessionId: launch.sessionId, documentGeneration: launch.documentGeneration, taskSessionId: "upgrade-settlement-task" })).toBe(true);
+    expect(host.codexRuntime.claimLaunch({ bindProof: launch.bindProof, documentSessionId: launch.sessionId, documentGeneration: launch.documentGeneration, taskSessionId: "upgrade-settlement-task" })).toBe(true);
     const display = host.codexRuntime.display(launch.handoff.token);
     if (!display) throw new Error("Expected Codex display");
     expect(host.codexRuntime.attestDisplay(display.receipt, "upgrade-settlement-task")).toBe(true);

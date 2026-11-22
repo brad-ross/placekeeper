@@ -1706,7 +1706,7 @@ describe("one production review tree", () => {
         sync: { phase, desiredRevision: 1, savedRevision: 0 },
       }}
       api={{
-        capabilities: { localDocumentRefresh: true, ...(download === false ? { reviewedCopyExport: false } : {}) },
+        capabilities: { localDocumentRefresh: true, ...(download === false ? { annotatedCopyExport: false } : {}) },
         command: vi.fn(), saveStatus: vi.fn(), saveProposal: vi.fn(), chooseCopy: vi.fn(),
         chooseFolder: vi.fn(), chooseOriginal: vi.fn(), retrySave: vi.fn(), locateSave: vi.fn(),
         exportAnnotatedCopy: vi.fn(), scope: vi.fn(),

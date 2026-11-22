@@ -22,12 +22,12 @@ function registryFixture() {
 }
 
 function issue(registry: TaskBindingRegistry, overrides: Partial<{
-  reviewSessionId: string;
+  documentSessionId: string;
   documentGeneration: number;
   browserCapability: string;
 }> = {}): string {
   return registry.issueBindProof({
-    reviewSessionId: "review-a",
+    documentSessionId: "review-a",
     documentGeneration: 1,
     browserCapability: BROWSER_CAPABILITY,
     ...overrides,
@@ -54,30 +54,30 @@ describe("task-scoped PDF binding registry", () => {
     expect(registry.claim({
       bindProof,
       taskSessionId: "task-a",
-      reviewSessionId: "review-a",
+      documentSessionId: "review-a",
       documentGeneration: 1,
     })).toMatchObject({ status: "pending" });
     expect(registry.activityCount()).toBe(1);
     expect(registry.claim({
       bindProof,
       taskSessionId: "task-a",
-      reviewSessionId: "review-a",
+      documentSessionId: "review-a",
       documentGeneration: 1,
     })).toEqual({ status: "denied" });
 
     expect(registry.activateBrowser({
-      reviewSessionId: "review-a",
+      documentSessionId: "review-a",
       documentGeneration: 1,
       browserCapability: "wrong-browser-capability-aaaaaaaaaaaaaaaaaaaaaa",
     })).toEqual({ status: "ignored" });
     expect(registry.activateBrowser({
-      reviewSessionId: "review-a",
+      documentSessionId: "review-a",
       documentGeneration: 1,
       browserCapability: BROWSER_CAPABILITY,
     })).toMatchObject({ status: "active" });
     expect(registry.activityCount()).toBe(1);
     expect(registry.bindingForTask("task-a")).toMatchObject({
-      reviewSessionId: "review-a",
+      documentSessionId: "review-a",
       documentGeneration: 1,
     });
     registry.revokeTask("task-a");
@@ -90,24 +90,24 @@ describe("task-scoped PDF binding registry", () => {
 
     expect(registry.attachReconnectedBrowser({
       taskSessionId: "task-a",
-      reviewSessionId: "review-successor",
+      documentSessionId: "review-successor",
       documentGeneration: 2,
       browserCapabilityHash: successorCapabilityHash,
     })).toMatchObject({ status: "active" });
     expect(registry.bindingForTask("task-a")).toMatchObject({
-      reviewSessionId: "review-successor",
+      documentSessionId: "review-successor",
       documentGeneration: 2,
     });
 
     expect(registry.attachReconnectedBrowser({
       taskSessionId: "task-b",
-      reviewSessionId: "review-successor",
+      documentSessionId: "review-successor",
       documentGeneration: 2,
       browserCapabilityHash: successorCapabilityHash,
     })).toEqual({ status: "denied" });
     expect(registry.attachReconnectedBrowser({
       taskSessionId: "task-a",
-      reviewSessionId: "other-review",
+      documentSessionId: "other-review",
       documentGeneration: 2,
       browserCapabilityHash: successorCapabilityHash,
     })).toEqual({ status: "denied" });
@@ -119,7 +119,7 @@ describe("task-scoped PDF binding registry", () => {
     expect(registry.claim({
       bindProof: wrongDocument,
       taskSessionId: "task-a",
-      reviewSessionId: "review-b",
+      documentSessionId: "review-b",
       documentGeneration: 1,
     })).toEqual({ status: "denied" });
 
@@ -127,21 +127,21 @@ describe("task-scoped PDF binding registry", () => {
     expect(registry.claim({
       bindProof: wrongGeneration,
       taskSessionId: "task-a",
-      reviewSessionId: "review-a",
+      documentSessionId: "review-a",
       documentGeneration: 2,
     })).toEqual({ status: "denied" });
 
     const browserFirstCapability = `${BROWSER_CAPABILITY}-3`;
     const browserFirst = issue(registry, { browserCapability: browserFirstCapability });
     expect(registry.activateBrowser({
-      reviewSessionId: "review-a",
+      documentSessionId: "review-a",
       documentGeneration: 1,
       browserCapability: browserFirstCapability,
     })).toEqual({ status: "ignored" });
     expect(registry.claim({
       bindProof: browserFirst,
       taskSessionId: "task-a",
-      reviewSessionId: "review-a",
+      documentSessionId: "review-a",
       documentGeneration: 1,
     })).toEqual({ status: "denied" });
   });
@@ -152,11 +152,11 @@ describe("task-scoped PDF binding registry", () => {
     registry.claim({
       bindProof,
       taskSessionId: "task-a",
-      reviewSessionId: "review-a",
+      documentSessionId: "review-a",
       documentGeneration: 1,
     });
     registry.activateBrowser({
-      reviewSessionId: "review-a",
+      documentSessionId: "review-a",
       documentGeneration: 1,
       browserCapability: BROWSER_CAPABILITY,
     });
@@ -165,7 +165,7 @@ describe("task-scoped PDF binding registry", () => {
     advance(200);
     expect(registry.renew({
       taskSessionId: "task-a",
-      reviewSessionId: "review-a",
+      documentSessionId: "review-a",
       documentGeneration: 1,
     })).toMatchObject({ status: "active" });
     expect(registry.bindingForTask("task-a")?.leaseExpiresAt).not.toBe(firstExpiry);
@@ -174,24 +174,24 @@ describe("task-scoped PDF binding registry", () => {
     expect(registry.claim({
       bindProof: foreignProof,
       taskSessionId: "task-b",
-      reviewSessionId: "review-a",
+      documentSessionId: "review-a",
       documentGeneration: 1,
     })).toEqual({ status: "denied" });
     expect(JSON.stringify(registry.claim({
       bindProof: foreignProof,
       taskSessionId: "task-b",
-      reviewSessionId: "review-a",
+      documentSessionId: "review-a",
       documentGeneration: 1,
     }))).not.toContain("task-a");
 
     const otherDocumentProof = issue(registry, {
-      reviewSessionId: "review-b",
+      documentSessionId: "review-b",
       browserCapability: `${BROWSER_CAPABILITY}-other-review`,
     });
     expect(registry.claim({
       bindProof: otherDocumentProof,
       taskSessionId: "task-a",
-      reviewSessionId: "review-b",
+      documentSessionId: "review-b",
       documentGeneration: 1,
     })).toEqual({ status: "denied" });
   });
@@ -202,11 +202,11 @@ describe("task-scoped PDF binding registry", () => {
     expect(registry.claim({
       bindProof: firstProof,
       taskSessionId: "task-a",
-      reviewSessionId: "review-a",
+      documentSessionId: "review-a",
       documentGeneration: 1,
     })).toMatchObject({ status: "pending" });
     expect(registry.activateBrowser({
-      reviewSessionId: "review-a",
+      documentSessionId: "review-a",
       documentGeneration: 1,
       browserCapability: BROWSER_CAPABILITY,
     })).toMatchObject({ status: "active" });
@@ -216,11 +216,11 @@ describe("task-scoped PDF binding registry", () => {
     expect(registry.claim({
       bindProof: secondProof,
       taskSessionId: "task-a",
-      reviewSessionId: "review-a",
+      documentSessionId: "review-a",
       documentGeneration: 1,
     })).toMatchObject({ status: "active" });
     registry.activateBrowser({
-      reviewSessionId: "review-a",
+      documentSessionId: "review-a",
       documentGeneration: 1,
       browserCapability: secondCapability,
     });
@@ -228,12 +228,12 @@ describe("task-scoped PDF binding registry", () => {
     for (const capability of [BROWSER_CAPABILITY, secondCapability]) {
       expect(registry.statusForDocument("review-a", {
         documentGeneration: 1,
-        reviewRevision: 0,
+        annotationRevision: 0,
         sourceDigest: "a".repeat(64),
         stateDigest: "b".repeat(64),
       }, digestSecretHex(capability))).toMatchObject({ status: "refreshing" });
       expect(registry.renewBrowserHeartbeat({
-        reviewSessionId: "review-a",
+        documentSessionId: "review-a",
         documentGeneration: 1,
         browserCapabilityHash: digestSecretHex(capability),
       })).toMatchObject({ status: "active" });
@@ -246,11 +246,11 @@ describe("task-scoped PDF binding registry", () => {
     registry.claim({
       bindProof,
       taskSessionId: "task-a",
-      reviewSessionId: "review-a",
+      documentSessionId: "review-a",
       documentGeneration: 1,
     });
     registry.activateBrowser({
-      reviewSessionId: "review-a",
+      documentSessionId: "review-a",
       documentGeneration: 1,
       browserCapability: BROWSER_CAPABILITY,
     });
@@ -258,19 +258,19 @@ describe("task-scoped PDF binding registry", () => {
 
     advance(200);
     expect(registry.renewBrowserHeartbeat({
-      reviewSessionId: "review-a",
+      documentSessionId: "review-a",
       documentGeneration: 2,
       browserCapabilityHash: digestSecretHex(BROWSER_CAPABILITY),
     })).toEqual({ status: "ignored" });
     expect(registry.renewBrowserHeartbeat({
-      reviewSessionId: "review-b",
+      documentSessionId: "review-b",
       documentGeneration: 1,
       browserCapabilityHash: digestSecretHex(BROWSER_CAPABILITY),
     })).toEqual({ status: "ignored" });
     expect(registry.bindingForTask("task-a")?.leaseExpiresAt).toBe(originalExpiry);
 
     expect(registry.renewBrowserHeartbeat({
-      reviewSessionId: "review-a",
+      documentSessionId: "review-a",
       documentGeneration: 1,
       browserCapabilityHash: digestSecretHex(BROWSER_CAPABILITY),
     })).toMatchObject({ status: "active" });
@@ -278,7 +278,7 @@ describe("task-scoped PDF binding registry", () => {
 
     registry.revokeTask("task-a");
     expect(registry.renewBrowserHeartbeat({
-      reviewSessionId: "review-a",
+      documentSessionId: "review-a",
       documentGeneration: 1,
       browserCapabilityHash: digestSecretHex(BROWSER_CAPABILITY),
     })).toEqual({ status: "ignored" });
@@ -290,11 +290,11 @@ describe("task-scoped PDF binding registry", () => {
     registry.claim({
       bindProof,
       taskSessionId: "task-a",
-      reviewSessionId: "review-a",
+      documentSessionId: "review-a",
       documentGeneration: 1,
     });
     registry.activateBrowser({
-      reviewSessionId: "review-a",
+      documentSessionId: "review-a",
       documentGeneration: 1,
       browserCapability: BROWSER_CAPABILITY,
     });
@@ -304,27 +304,27 @@ describe("task-scoped PDF binding registry", () => {
 
     advance(200);
     expect(registry.renewBrowserHeartbeat({
-      reviewSessionId: "review-a",
+      documentSessionId: "review-a",
       documentGeneration: 1,
       browserCapabilityHash: otherDiscriminator,
     })).toEqual({ status: "ignored" });
     expect(registry.bindingForTask("task-a")?.leaseExpiresAt).toBe(originalExpiry);
     expect(registry.statusForDocument("review-a", {
       documentGeneration: 1,
-      reviewRevision: 0,
+      annotationRevision: 0,
       sourceDigest: "a".repeat(64),
       stateDigest: "b".repeat(64),
     }, otherDiscriminator)).toEqual({ status: "unbound" });
 
     expect(registry.renewBrowserHeartbeat({
-      reviewSessionId: "review-a",
+      documentSessionId: "review-a",
       documentGeneration: 1,
       browserCapabilityHash: activeDiscriminator,
     })).toMatchObject({ status: "active" });
     expect(registry.bindingForTask("task-a")?.leaseExpiresAt).not.toBe(originalExpiry);
     expect(registry.statusForDocument("review-a", {
       documentGeneration: 1,
-      reviewRevision: 0,
+      annotationRevision: 0,
       sourceDigest: "a".repeat(64),
       stateDigest: "b".repeat(64),
     }, activeDiscriminator)).toMatchObject({ status: "refreshing" });
@@ -336,11 +336,11 @@ describe("task-scoped PDF binding registry", () => {
     registry.claim({
       bindProof,
       taskSessionId: "task-a",
-      reviewSessionId: "review-a",
+      documentSessionId: "review-a",
       documentGeneration: 1,
     });
     registry.activateBrowser({
-      reviewSessionId: "review-a",
+      documentSessionId: "review-a",
       documentGeneration: 1,
       browserCapability: BROWSER_CAPABILITY,
     });
@@ -349,31 +349,31 @@ describe("task-scoped PDF binding registry", () => {
 
     expect(registry.statusForDocument("review-a", {
       documentGeneration: 1,
-      reviewRevision: 4,
+      annotationRevision: 4,
       sourceDigest: "a".repeat(64),
       stateDigest: verified.stateDigest,
     }, digestSecretHex(BROWSER_CAPABILITY))).toMatchObject({ status: "current", identity: verified });
     expect(registry.statusForDocument("review-a", {
       documentGeneration: 1,
-      reviewRevision: 4,
+      annotationRevision: 4,
       sourceDigest: "a".repeat(64),
       stateDigest: "d".repeat(64),
     }, digestSecretHex(BROWSER_CAPABILITY))).toMatchObject({ status: "refreshing", lastVerified: verified });
     expect(registry.statusForDocument("review-a", {
       documentGeneration: 1,
-      reviewRevision: 5,
+      annotationRevision: 5,
       sourceDigest: "a".repeat(64),
       stateDigest: verified.stateDigest,
     }, digestSecretHex(BROWSER_CAPABILITY))).toMatchObject({ status: "refreshing", lastVerified: verified });
     expect(registry.statusForDocument("review-a", {
       documentGeneration: 1,
-      reviewRevision: 4,
+      annotationRevision: 4,
       sourceDigest: "c".repeat(64),
       stateDigest: verified.stateDigest,
     }, digestSecretHex(BROWSER_CAPABILITY))).toMatchObject({ status: "refreshing", lastVerified: verified });
     expect(registry.statusForDocument("review-a", {
       documentGeneration: 2,
-      reviewRevision: 4,
+      annotationRevision: 4,
       sourceDigest: "a".repeat(64),
       stateDigest: verified.stateDigest,
     }, digestSecretHex(BROWSER_CAPABILITY))).toEqual({ status: "unbound" });
@@ -385,23 +385,23 @@ describe("task-scoped PDF binding registry", () => {
     registry.claim({
       bindProof,
       taskSessionId: "task-a",
-      reviewSessionId: "review-a",
+      documentSessionId: "review-a",
       documentGeneration: 1,
     });
     registry.activateBrowser({
-      reviewSessionId: "review-a",
+      documentSessionId: "review-a",
       documentGeneration: 1,
       browserCapability: BROWSER_CAPABILITY,
     });
     expect(registry.markVerified("task-a", verifiedIdentity())).toBe(true);
 
     expect(registry.migrateGeneration({
-      reviewSessionId: "review-a",
+      documentSessionId: "review-a",
       previousGeneration: 1,
       successorGeneration: 2,
     })).toEqual({ status: "migrated", taskSessionId: "task-a" });
     expect(registry.bindingForTask("task-a")).toMatchObject({
-      reviewSessionId: "review-a",
+      documentSessionId: "review-a",
       documentGeneration: 2,
     });
     expect(registry.bindingForTask("task-a")?.lastVerified).toBeUndefined();
@@ -409,7 +409,7 @@ describe("task-scoped PDF binding registry", () => {
     expect(registry.taskForGeneration("review-a", 2)).toBe("task-a");
 
     expect(registry.migrateGeneration({
-      reviewSessionId: "review-a",
+      documentSessionId: "review-a",
       previousGeneration: 1,
       successorGeneration: 3,
     })).toEqual({ status: "revoked" });
@@ -422,7 +422,7 @@ describe("task-scoped PDF binding registry", () => {
     registry.claim({
       bindProof: pendingProof,
       taskSessionId: "task-pending",
-      reviewSessionId: "review-a",
+      documentSessionId: "review-a",
       documentGeneration: 1,
     });
     expect(registry.unavailableReasonForTask("task-pending")).toBe("pending");
@@ -435,11 +435,11 @@ describe("task-scoped PDF binding registry", () => {
     registry.claim({
       bindProof: activeProof,
       taskSessionId: "task-active",
-      reviewSessionId: "review-a",
+      documentSessionId: "review-a",
       documentGeneration: 1,
     });
     registry.activateBrowser({
-      reviewSessionId: "review-a",
+      documentSessionId: "review-a",
       documentGeneration: 1,
       browserCapability: activeCapability,
     });
@@ -452,11 +452,11 @@ describe("task-scoped PDF binding registry", () => {
     registry.claim({
       bindProof: revokeProof,
       taskSessionId: "task-revoke",
-      reviewSessionId: "review-a",
+      documentSessionId: "review-a",
       documentGeneration: 1,
     });
     registry.activateBrowser({
-      reviewSessionId: "review-a",
+      documentSessionId: "review-a",
       documentGeneration: 1,
       browserCapability: revokeCapability,
     });
@@ -469,7 +469,7 @@ describe("task-scoped PDF binding registry", () => {
     registry.claim({
       bindProof: generationProof,
       taskSessionId: "task-generation",
-      reviewSessionId: "review-a",
+      documentSessionId: "review-a",
       documentGeneration: 1,
     });
     registry.revokeGeneration("review-a", 2);
@@ -480,12 +480,12 @@ describe("task-scoped PDF binding registry", () => {
 describe("native reservations preserve browser behavior", () => {
   it("keeps native proofs out of browser auto-add and reserves exclusive ownership until activation", () => {
     const { registry } = registryFixture();
-    const input = { taskSessionId: "task-a", reviewSessionId: "review-a", documentGeneration: 1 };
+    const input = { taskSessionId: "task-a", documentSessionId: "review-a", documentGeneration: 1 };
     const capability = "native-private-capability";
     const proof = registry.issueBindProof({ ...input, browserCapability: capability, native: true });
     expect(registry.claim({ ...input, bindProof: proof })).toEqual({ status: "denied" });
     expect(registry.claimNative({ ...input, bindProof: proof }).status).toBe("pending");
-    const browser = registry.issueBindProof({ reviewSessionId: "review-a", documentGeneration: 1, browserCapability: "browser-peer" });
+    const browser = registry.issueBindProof({ documentSessionId: "review-a", documentGeneration: 1, browserCapability: "browser-peer" });
     expect(registry.claim({ ...input, taskSessionId: "task-b", bindProof: browser })).toEqual({ status: "denied" });
     expect(registry.bindingForTask("task-a")).toBeUndefined();
     expect(registry.activateNative({ ...input, browserCapabilityHash: digestSecretHex(capability) }).status).toBe("active");
@@ -505,7 +505,7 @@ describe("same-association browser/native admission coexistence", () => {
     ["browser-first", "browser-first"],
   ])("preserves both memberships with %s claim and %s activation", (claimOrder, activationOrder) => {
     const { registry } = registryFixture();
-    const binding = { taskSessionId: "task-a", reviewSessionId: "review-a", documentGeneration: 1 };
+    const binding = { taskSessionId: "task-a", documentSessionId: "review-a", documentGeneration: 1 };
     const nativeScope = { ...binding, browserCapabilityHash: digestSecretHex("native-panel") };
     const native = registry.issueBindProof({ ...binding, browserCapability: "native-panel", native: true });
     const browser = registry.issueBindProof({ ...binding, browserCapability: "browser-panel" });
@@ -534,8 +534,8 @@ describe("same-association browser/native admission coexistence", () => {
 describe("in-flight native authority checks", () => {
   it("invalidates only matching task/review checks and releases without tombstones", () => {
     const { registry } = registryFixture();
-    const one = registry.beginAuthorityCheck({ taskSessionId: "task-a", reviewSessionId: "review-a", documentGeneration: 1 });
-    const peer = registry.beginAuthorityCheck({ taskSessionId: "task-b", reviewSessionId: "review-b", documentGeneration: 1 });
+    const one = registry.beginAuthorityCheck({ taskSessionId: "task-a", documentSessionId: "review-a", documentGeneration: 1 });
+    const peer = registry.beginAuthorityCheck({ taskSessionId: "task-b", documentSessionId: "review-b", documentGeneration: 1 });
     expect(registry.activityCount()).toBe(2);
     registry.revokeTask("task-a");
     expect(one.isCurrent()).toBe(false);
@@ -550,7 +550,7 @@ describe("in-flight native authority checks", () => {
 
 describe("advisory native reconnect hints", () => {
   function activateHint(registry: TaskBindingRegistry, task = "task-a", documentSession = "review-a", pdfPath = "/private/tmp/paper.pdf") {
-    const input = { taskSessionId: task, reviewSessionId: documentSession, documentGeneration: 1, browserCapabilityHash: digestSecretHex(`native-${task}`) };
+    const input = { taskSessionId: task, documentSessionId: documentSession, documentGeneration: 1, browserCapabilityHash: digestSecretHex(`native-${task}`) };
     const bindProof = registry.issueBindProof({ ...input, browserCapability: `native-${task}`, native: true });
     expect(registry.claimNative({ ...input, bindProof }).status).toBe("pending");
     expect(registry.rememberNativeReconnect({ ...input, pdfPath })).toBe(false);
@@ -620,17 +620,17 @@ describe("advisory native reconnect hints", () => {
     const { registry } = registryFixture();
     const native = activateHint(registry);
     registry.detachPresentation(native.browserCapabilityHash);
-    const bindProof = issue(registry, { reviewSessionId: "browser-review", browserCapability: "browser-new" });
-    expect(registry.claim({ bindProof, taskSessionId: "task-a", reviewSessionId: "browser-review", documentGeneration: 1 }).status).toBe("pending");
+    const bindProof = issue(registry, { documentSessionId: "browser-review", browserCapability: "browser-new" });
+    expect(registry.claim({ bindProof, taskSessionId: "task-a", documentSessionId: "browser-review", documentGeneration: 1 }).status).toBe("pending");
     expect(registry.nativeReconnectForTask("task-a")).toBeUndefined();
-    expect(registry.activateBrowser({ reviewSessionId: "browser-review", documentGeneration: 1, browserCapability: "browser-new" }).status).toBe("active");
+    expect(registry.activateBrowser({ documentSessionId: "browser-review", documentGeneration: 1, browserCapability: "browser-new" }).status).toBe("active");
   });
 });
 
 describe("daemon continuation authority snapshots", () => {
   it("survives ordinary lease expiry without retaining activity, but records later revocation", () => {
     const { registry, advance } = registryFixture();
-    const input = { taskSessionId: "task-a", reviewSessionId: "review-a", documentGeneration: 1, browserCapabilityHash: digestSecretHex(BROWSER_CAPABILITY) };
+    const input = { taskSessionId: "task-a", documentSessionId: "review-a", documentGeneration: 1, browserCapabilityHash: digestSecretHex(BROWSER_CAPABILITY) };
     expect(registry.attachReconnectedNative(input).status).toBe("active");
     const snapshot = registry.captureAuthoritySnapshot(input);
     advance(1001);
@@ -643,7 +643,7 @@ describe("daemon continuation authority snapshots", () => {
   });
   it("invalidates a previous owner even if a conflicting successor is later detached", () => {
     const { registry } = registryFixture();
-    const input = { taskSessionId: "task-a", reviewSessionId: "review-a", documentGeneration: 1 };
+    const input = { taskSessionId: "task-a", documentSessionId: "review-a", documentGeneration: 1 };
     const snapshot = registry.captureAuthoritySnapshot(input);
     const browserCapabilityHash = digestSecretHex(BROWSER_CAPABILITY);
     expect(registry.attachReconnectedNative({ ...input, taskSessionId: "task-b", browserCapabilityHash }).status).toBe("active");

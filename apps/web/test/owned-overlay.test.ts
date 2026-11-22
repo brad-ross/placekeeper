@@ -28,7 +28,7 @@ describe("owned annotation overlay geometry", () => {
       readerStyle: {},
     } as const;
     const owned = [{
-      id: 'owned-native', reviewItemId: 'review-17', kind: 'pdfAnnotation', pageIndex: 2,
+      id: 'owned-native', annotationItemId: 'review-17', kind: 'pdfAnnotation', pageIndex: 2,
       rect: { x: 1, y: 2, width: 3, height: 4 }, contents: 'Editable note',
       author: 'Reviewer', createdAt: '2026-09-17T00:00:00.000Z',
       modifiedAt: '2026-09-17T00:00:00.000Z',

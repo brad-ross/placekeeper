@@ -242,7 +242,7 @@ export function canonicalStateForFinalizedInteraction(
   if (
     canonicalGeneration !== receipt.generation
     || documentGeneration !== receipt.generation
-    || state.revision < receipt.reviewRevision
+    || state.revision < receipt.annotationRevision
   ) {
     return undefined;
   }
@@ -643,7 +643,7 @@ export function useAuthoringSession({
       }
       setAuthoringTerminalPending((pending) => pending?.token === session.token ? null : pending);
       if (canonical.revision >= acknowledgedRef.current.revision) acknowledgedRef.current = canonical;
-      const pendingPersistence = { token: session.token, revision: receipt.reviewRevision };
+      const pendingPersistence = { token: session.token, revision: receipt.annotationRevision };
       pendingPersistenceRef.current = pendingPersistence;
       setPendingPersistence(pendingPersistence);
       return;

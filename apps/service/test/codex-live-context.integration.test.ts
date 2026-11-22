@@ -322,7 +322,7 @@ describe("packaged Codex live-context lifecycle", () => {
     expect(await requestControl(socketPath, {
       kind: "claim-binding",
       taskSessionId: "second-codex-task",
-      reviewSessionId: launch.sessionId,
+      documentSessionId: launch.sessionId,
       documentGeneration: launch.documentGeneration,
       bindProof: launch.bindProof,
     })).toMatchObject({ kind: "binding", result: { status: "denied" } });

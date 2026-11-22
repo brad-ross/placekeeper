@@ -511,7 +511,7 @@ describe("atomic live document replacement", () => {
     await expect(value.broker.documentBytes(value.launch.sessionId)).resolves.toEqual(value.original);
     expect(invalidated).toHaveBeenCalledWith(value.launch.sessionId, {
       documentGeneration: 1,
-      reviewRevision: 0,
+      annotationRevision: 0,
       reason: "freshness",
     });
   });
@@ -531,7 +531,7 @@ describe("atomic live document replacement", () => {
     expect(value.broker.state(value.launch.sessionId)?.workflow.freshness).toBe("current");
     expect(invalidated).toHaveBeenLastCalledWith(value.launch.sessionId, {
       documentGeneration: 1,
-      reviewRevision: 0,
+      annotationRevision: 0,
       reason: "freshness",
     });
   });
@@ -635,7 +635,7 @@ describe("atomic live document replacement", () => {
 
     expect(invalidated).toHaveBeenCalledWith(value.launch.sessionId, {
       documentGeneration: 1,
-      reviewRevision: 1,
+      annotationRevision: 1,
       reason: "revision",
     });
   });
@@ -958,7 +958,7 @@ describe("atomic live document replacement", () => {
     await expect(candidate).resolves.toMatchObject({
       status: "committed",
       documentGeneration: 2,
-      reviewRevision: 2,
+      annotationRevision: 2,
     });
     expect(guarded.broker.state(guarded.launch.sessionId)).toMatchObject({
       workflow: { documentGeneration: 2 }, items: [{ id: ITEM_IDS.racing }],
@@ -1180,7 +1180,7 @@ describe("atomic live document replacement", () => {
     });
     expect(invalidated).toHaveBeenCalledWith(value.launch.sessionId, {
       documentGeneration: 1,
-      reviewRevision: 2,
+      annotationRevision: 2,
       reason: "presence",
     });
   });
@@ -1244,11 +1244,11 @@ describe("atomic live document replacement", () => {
     await expect(value.broker.finalizeDocumentInteraction({
       sessionId: value.launch.sessionId, attachment, interactionToken, order: 2,
       outcome: "discarded", draftId, expectedDraftRevision: 0,
-    })).resolves.toMatchObject({ status: "finalized", outcome: "discarded", reviewRevision: 2 });
+    })).resolves.toMatchObject({ status: "finalized", outcome: "discarded", annotationRevision: 2 });
 
     expect(invalidated).toHaveBeenCalledWith(value.launch.sessionId, {
       documentGeneration: 1,
-      reviewRevision: 2,
+      annotationRevision: 2,
       reason: "revision",
     });
   });
@@ -1316,7 +1316,7 @@ describe("atomic live document replacement", () => {
       payload: {
         sessionId: publishedSessionId,
         generation: event.documentGeneration,
-        revision: event.reviewRevision,
+        revision: event.annotationRevision,
         reason: event.reason,
       },
     }));
@@ -1399,23 +1399,23 @@ describe("atomic live document replacement", () => {
     })).resolves.toMatchObject({
       status: "finalized",
       outcome: "discarded",
-      reviewRevision: 2,
+      annotationRevision: 2,
     });
     expect(value.broker.state(value.launch.sessionId)?.pendingDrafts).toEqual([]);
     expect(invalidated).toHaveBeenCalledWith(value.launch.sessionId, {
       documentGeneration: 1,
-      reviewRevision: 2,
+      annotationRevision: 2,
       reason: "revision",
     });
     expect(invalidated).toHaveBeenCalledWith(value.launch.sessionId, {
       documentGeneration: 1,
-      reviewRevision: 2,
+      annotationRevision: 2,
       reason: "presence",
     });
 
     await expect(value.broker.beginDocumentInteraction({
       sessionId: value.launch.sessionId, attachment, generation: 1, interactionToken, order: 4, draftId,
-    })).resolves.toMatchObject({ status: "finalized", reviewRevision: 2 });
+    })).resolves.toMatchObject({ status: "finalized", annotationRevision: 2 });
     expect(invalidated).toHaveBeenCalledTimes(2);
 
     await expect(runtime.acknowledgeInteraction!({
@@ -1442,7 +1442,7 @@ describe("atomic live document replacement", () => {
         payload: {
           sessionId: publishedSessionId,
           generation: event.documentGeneration,
-          revision: event.reviewRevision,
+          revision: event.annotationRevision,
           reason: event.reason,
         },
       });
@@ -1714,12 +1714,12 @@ describe("atomic live document replacement", () => {
     expect(value.broker.taskBindings.claim({
       bindProof: codex.launch.bindProof,
       taskSessionId: "task-missing",
-      reviewSessionId: value.launch.sessionId,
+      documentSessionId: value.launch.sessionId,
       documentGeneration: 1,
     }).status).toBe("pending");
     expect(value.broker.exchangeBootstrap(value.launch.sessionId, browserCapability)).toBeTypeOf("string");
     expect(value.broker.taskBindings.bindingForTask("task-missing")).toMatchObject({
-      reviewSessionId: value.launch.sessionId,
+      documentSessionId: value.launch.sessionId,
       documentGeneration: 1,
     });
     await rm(value.pdfPath);
@@ -1732,7 +1732,7 @@ describe("atomic live document replacement", () => {
     });
     await expect(value.broker.documentBytes(value.launch.sessionId)).resolves.toEqual(value.original);
     expect(value.broker.taskBindings.bindingForTask("task-missing")).toMatchObject({
-      reviewSessionId: value.launch.sessionId,
+      documentSessionId: value.launch.sessionId,
       documentGeneration: 1,
     });
 
@@ -1957,7 +1957,7 @@ describe("atomic live document replacement", () => {
     expect(value.broker.taskBindings.claim({
       bindProof: codex.launch.bindProof,
       taskSessionId: "task-a",
-      reviewSessionId: value.launch.sessionId,
+      documentSessionId: value.launch.sessionId,
       documentGeneration: 1,
     }).status).toBe("pending");
     const credential = value.broker.exchangeBootstrap(value.launch.sessionId, capability);
@@ -1986,7 +1986,7 @@ describe("atomic live document replacement", () => {
       pageCount: 1,
       sourceByteLength: before.source.byteLength,
       existingAnnotations: [],
-      reviewItems: [],
+      annotations: [],
     }).handle.value;
     await writeFile(value.pdfPath, value.successor);
     await expect(value.broker.replaceLiveDocument({
@@ -1995,7 +1995,7 @@ describe("atomic live document replacement", () => {
       observationEpoch: 1,
     })).resolves.toMatchObject({ status: "committed", migratedTaskSessionId: "task-a" });
     expect(value.broker.taskBindings.bindingForTask("task-a")).toMatchObject({
-      reviewSessionId: value.launch.sessionId,
+      documentSessionId: value.launch.sessionId,
       documentGeneration: 2,
     });
     expect(value.broker.taskBindings.bindingForTask("task-a")?.lastVerified).toBeUndefined();

@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
 import { prepareDocumentContext } from '../src/document-context-attachment.js';
-const snapshot = () => ({ documentGeneration: 1, reviewRevision: 3, title: 'First PDF', source: { fileId: '/private/a.pdf', digest: 'original' }, page: 2, pageCount: 4, selection: { text: 'original selection', pages: [2] }, annotations: [{ id: 'a', page: 3, kind: 'note', text: 'original note' }] });
+const snapshot = () => ({ documentGeneration: 1, annotationRevision: 3, title: 'First PDF', source: { fileId: '/private/a.pdf', digest: 'original' }, page: 2, pageCount: 4, selection: { text: 'original selection', pages: [2] }, annotations: [{ id: 'a', page: 3, kind: 'note', text: 'original note' }] });
 it('captures chosen evidence and the user note without a prompt instruction or private path', async () => {
  const s=snapshot(); const pending=prepareDocumentContext({kind:'annotations',snapshot:s,annotationIds:['a'],note:'Compare this with the earlier result.'});
  s.annotations[0]!.text='revised';s.source.digest='replacement';

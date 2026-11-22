@@ -147,7 +147,7 @@ it("releases recovered Electron admission without leaking browser presence", asy
     await expect(requestControl(socket, { kind: runtimeKind, appInstanceId, helperId,
       message: { ...envelope, type: "release", requestId: "request_native_recovery_release" } })).resolves.toMatchObject({ response: { type: "released" } });
     await expect(requestControl(socket, { kind: appControlKind, message: { protocolVersion: 1, type: "detach", appInstanceId, reason: "controlled-exit" } })).resolves.toMatchObject({ response: { type: "ack" } });
-    expect(host.lifecycle.status().activity).toEqual({ reviewPresence: 0, codexTasks: 0, transientWork: 0 });
+    expect(host.lifecycle.status().activity).toEqual({ documentPresence: 0, codexTasks: 0, transientWork: 0 });
     expect(browserExchanges).not.toHaveBeenCalled();
     expect(authenticatedPages).not.toHaveBeenCalled();
     const retained = JSON.parse(await readFile(join(recoveryRoot, sessionId, "draft.json"), "utf8")) as { payload: { state: { annotationName: string } } };

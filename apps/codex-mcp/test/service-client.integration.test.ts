@@ -81,7 +81,7 @@ it.runIf(process.platform === "darwin")("retains native picker results after the
     if (opened.kind === "recovery-offered") throw new Error("unexpected recovery");
     const sessionId = opened.launch.sessionId, manager = host.codexRuntime;
     const launch = manager.stageLaunch({ sessionId, kind: "opened" })!;
-    expect(manager.claimLaunch({ bindProof: launch.bindProof, reviewSessionId: sessionId, documentGeneration: 1, taskSessionId: "picker-chat" })).toBe(true);
+    expect(manager.claimLaunch({ bindProof: launch.bindProof, documentSessionId: sessionId, documentGeneration: 1, taskSessionId: "picker-chat" })).toBe(true);
     const display = manager.display(launch.handoff.token)!;
     expect(manager.attestDisplay(display.receipt, "picker-chat")).toBe(true);
     const active = await manager.pending({ protocolVersion: 1, runtimeId: display.privateMeta.runtimeId, attemptId: display.privateMeta.attemptId,

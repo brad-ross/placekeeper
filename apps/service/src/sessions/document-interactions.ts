@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import { digestSecretHex } from "../../../../packages/core/src/session-security.js";
+import { withLegacyAnnotationRevision } from "../../../../packages/core/src/document-runtime-protocol.js";
 
 export const DOCUMENT_INTERACTION_PROTOCOL_VERSION = 1 as const;
 export const DOCUMENT_INTERACTION_CAPABILITIES = [
@@ -29,7 +30,15 @@ export interface DocumentInteractionReceipt {
   readonly draftId?: string;
   readonly generation: number;
   readonly outcome: DocumentInteractionOutcome;
-  readonly reviewRevision: number;
+  readonly annotationRevision: number;
+}
+
+/** Maps an interaction lifecycle result to the form sent to readers and hosts,
+ * which may come from another build (see LEGACY_ANNOTATION_REVISION_KEY). */
+export function toWireInteractionResult(result: unknown): unknown {
+  if (typeof result !== "object" || result === null || (result as { status?: unknown }).status !== "finalized" ||
+    typeof (result as { annotationRevision?: unknown }).annotationRevision !== "number") return result;
+  return withLegacyAnnotationRevision(result as DocumentInteractionReceipt);
 }
 
 type LifecycleResult =
@@ -83,7 +92,7 @@ function stableAttachmentId(stableOwner: string): string {
 }
 
 /**
- * Attachment authority for a review session. Holds belong to one live
+ * Attachment authority for a document session. Holds belong to one live
  * connection incarnation. Terminal receipts use a stable attachment identity
  * and can be hydrated from recovery so reconnect can recover an uncertain
  * finalize without authorizing the old connection.
@@ -272,9 +281,9 @@ export class DocumentInteractions {
   async finalize(input: AuthenticatedOperation & {
     readonly outcome: DocumentInteractionOutcome;
     readonly draftId: string;
-    readonly reviewRevision?: number;
+    readonly annotationRevision?: number;
     readonly commit?: () => Promise<number | {
-      readonly reviewRevision: number;
+      readonly annotationRevision: number;
       readonly persist: (receipt: DocumentInteractionReceipt) => Promise<void>;
     }>;
   }): Promise<LifecycleResult> {
@@ -292,10 +301,10 @@ export class DocumentInteractions {
     const maximum = this.#options.maxPendingReceipts ?? 256;
     if (this.#receipts.size >= maximum) return { status: "backpressure" };
     const committed = input.commit === undefined
-      ? input.reviewRevision
+      ? input.annotationRevision
       : await input.commit();
     const annotationRevision = typeof committed === "object" && committed !== null
-      ? committed.reviewRevision : committed;
+      ? committed.annotationRevision : committed;
     if (!Number.isSafeInteger(annotationRevision) || (annotationRevision as number) < 0) {
       throw new Error("A terminal interaction receipt requires an authoritative review revision");
     }
@@ -307,7 +316,7 @@ export class DocumentInteractions {
       draftId: input.draftId,
       generation: hold.generation,
       outcome: input.outcome,
-      reviewRevision: annotationRevision as number,
+      annotationRevision: annotationRevision as number,
     };
     // Persistence is the commit point. A rejection leaves both the editor hold
     // and its retry identity intact.

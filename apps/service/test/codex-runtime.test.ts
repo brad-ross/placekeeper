@@ -49,7 +49,7 @@ function activeRequest(active: Extract<CodexAppResponse, { status: "active" }>) 
 }
 function stage(manager: CodexRuntimeManager, sessionId: string, task = "task-a") {
   const launch = manager.stageLaunch({ sessionId, kind: "opened" })!;
-  expect(manager.claimLaunch({ bindProof: launch.bindProof, reviewSessionId: launch.sessionId, documentGeneration: launch.documentGeneration, taskSessionId: task })).toBe(true);
+  expect(manager.claimLaunch({ bindProof: launch.bindProof, documentSessionId: launch.sessionId, documentGeneration: launch.documentGeneration, taskSessionId: task })).toBe(true);
   return { launch, ...manager.display(launch.handoff.token)! };
 }
 async function activate(manager: CodexRuntimeManager, sessionId: string) {
@@ -239,14 +239,14 @@ describe("native two-hook admission with real broker authority", () => {
       expect(active.status).toBe("active");
       if (active.status === "active") expect(manager.resolveActive(activeRequest(active))).toMatchObject({ sessionId, taskSessionId: "task-a" });
     }
-    expect(broker.taskBindings.bindingForTask("task-a")?.reviewSessionId).toBe(sessionId);
+    expect(broker.taskBindings.bindingForTask("task-a")?.documentSessionId).toBe(sessionId);
   });
 
   it("rejects wrong hooks, launch/display replays and ownership conflicts", async () => {
     const { manager, broker, sessionId, pdf } = await fixture();
     const launch = manager.stageLaunch({ sessionId, kind: "opened" })!;
     expect(manager.display(launch.handoff.token)).toBeUndefined();
-    const claim = { bindProof: launch.bindProof, reviewSessionId: sessionId, documentGeneration: 1, taskSessionId: "task-a" };
+    const claim = { bindProof: launch.bindProof, documentSessionId: sessionId, documentGeneration: 1, taskSessionId: "task-a" };
     expect(manager.claimLaunch(claim)).toBe(true); expect(manager.claimLaunch(claim)).toBe(false);
     const panel = manager.display(launch.handoff.token)!;
     expect(manager.display(launch.handoff.token)).toBeUndefined();
@@ -257,7 +257,7 @@ describe("native two-hook admission with real broker authority", () => {
     const otherPdf = pdf.replace("paper", "other"); await writeFile(otherPdf, "%PDF-1.7\nother\n%%EOF");
     const other = await broker.openDocument({ pdfPath: otherPdf }); if (other.kind !== "opened") throw new Error("Expected opened");
     const second = manager.stageLaunch({ sessionId: other.launch.sessionId, kind: "opened" })!;
-    expect(manager.claimLaunch({ ...claim, bindProof: second.bindProof, reviewSessionId: second.sessionId })).toBe(false);
+    expect(manager.claimLaunch({ ...claim, bindProof: second.bindProof, documentSessionId: second.sessionId })).toBe(false);
     expect(manager.attestDisplay(panel.receipt, "task-a")).toBe(true);
     expect((await manager.pending(request(panel.privateMeta))).status).toBe("active");
   });
@@ -273,7 +273,7 @@ describe("native two-hook admission with real broker authority", () => {
     expect(manager.activityCount()).toBe(0);
     const active = await activate(manager, sessionId);
     expect(manager.resolveActive({ ...activeRequest(active.active), attemptId: "wrong_attempt" })).toBeUndefined();
-    broker.taskBindings.migrateGeneration({ reviewSessionId: sessionId, previousGeneration: 1, successorGeneration: 2 });
+    broker.taskBindings.migrateGeneration({ documentSessionId: sessionId, previousGeneration: 1, successorGeneration: 2 });
     expect(manager.resolveActive(activeRequest(active.active))).toBeUndefined();
     expect(manager.activityCount()).toBe(0);
   });
@@ -427,7 +427,7 @@ describe("native two-hook admission with real broker authority", () => {
     expect(broker.taskBindings.activityCount()).toBe(1);
     if (scope === "task") await broker.revokeTask("task-a");
     if (scope === "session") broker.taskBindings.revokeSession(sessionId);
-    if (scope === "generation") broker.taskBindings.migrateGeneration({ reviewSessionId: sessionId, previousGeneration: 1, successorGeneration: 2 });
+    if (scope === "generation") broker.taskBindings.migrateGeneration({ documentSessionId: sessionId, previousGeneration: 1, successorGeneration: 2 });
     if (scope === "stale-generation") broker.taskBindings.revokeGeneration(sessionId, 2);
     if (scope === "all") broker.taskBindings.revokeAll();
     release();
@@ -513,7 +513,7 @@ describe("canonical native watermark", () => {
     const saving = manager.readWatermark(raw)!;
     expect(saving.watermark).toBeGreaterThan(initial.watermark);
     expect(saving.documentGeneration).toBe(initial.documentGeneration);
-    expect(saving.reviewRevision).toBe(initial.reviewRevision);
+    expect(saving.annotationRevision).toBe(initial.annotationRevision);
     await broker.markSaveFailed(sessionId, broker.saveStatus(sessionId)!.destination.generation, "write-failed");
     expect(manager.readWatermark(raw)!.watermark).toBeGreaterThan(saving.watermark);
     expect(events).toEqual(["save", "save"]);
@@ -558,6 +558,8 @@ describe("canonical native watermark", () => {
     expect(events.filter((reason) => reason === "revision")).toHaveLength(3);
     expect(events.filter((reason) => reason === "presence").length).toBeGreaterThanOrEqual(6);
     expect(frames.some((frame) => frame.includes('"kind":"session-invalidated"') && frame.includes('"reason":"revision"'))).toBe(true);
+    // Readers in other builds read the legacy revision key (LEGACY_ANNOTATION_REVISION_KEY).
+    expect(frames.filter((frame) => frame.includes('"kind":"session-invalidated"')).every((frame) => frame.includes('"reviewRevision":') && !frame.includes('annotationRevision'))).toBe(true);
     expect(frames.some((frame) => frame.includes('"reason":"presence"'))).toBe(true);
     close(); socket.destroy();
   });
@@ -648,7 +650,11 @@ it("routine successful polling leaves private evidence capacity for later denial
   }
   expect((await f.manager.handle({ ...activeRequest(initial.active), capability: "x".repeat(43) })).status).toBe("denied");
   // A changed outcome for the same method must be recorded after the denial.
-  expect((await f.manager.handle(activeRequest(initial.active))).status).toBe("ok");
+  const watermark = await f.manager.handle(activeRequest(initial.active));
+  expect(watermark.status).toBe("ok");
+  // The Codex shell may come from another build: the legacy revision key stays on the wire.
+  expect(watermark).toMatchObject({ payload: { reviewRevision: expect.any(Number) } });
+  expect((watermark as { payload: object }).payload).not.toHaveProperty("annotationRevision");
   f.advance(f.manager.panelLeaseMs + 1);
   expect(f.manager.resolveActive(activeRequest(initial.active))).toBeUndefined();
   await activate(f.manager, f.sessionId);

@@ -4,7 +4,7 @@ import type { SelectionUpdate } from '../pdf/selection-state.js';
 /** Document-derived strings are data. The host adapter supplies their trust boundary. */
 export interface DocumentContextSnapshot {
   readonly documentGeneration: number;
-  readonly reviewRevision: number;
+  readonly annotationRevision: number;
   readonly title: string;
   readonly source: { readonly fileId: string; readonly digest: string };
   /** One-based page numbers; zero means the viewer is not ready. */
@@ -27,7 +27,7 @@ export function documentContextSnapshot(input: {
   const { state, selection } = input;
   return {
     documentGeneration: state.workflow.documentGeneration,
-    reviewRevision: state.revision,
+    annotationRevision: state.revision,
     title: input.title,
     source: { fileId: state.source.fileId, digest: state.source.digest },
     page: input.page,

@@ -3,6 +3,7 @@ import { isUpgradeDocumentSettlement } from "../../../../packages/core/src/upgra
 import {
   DocumentExportConflictError,
   isReadingLocationResolutionRequest,
+  LEGACY_ANNOTATION_REVISION_KEY,
   isDocumentExportFence,
   isSaveDestinationConfirmation,
   type DocumentExportFence,
@@ -36,7 +37,7 @@ import type { PdfSaveCoordinator } from "../saving/pdf-save-coordinator.js";
 import type { DaemonLifecycleCoordinator } from "../host/daemon-lifecycle.js";
 import { ExportCoordinatorError, type ExportCoordinator } from "../export/export-coordinator.js";
 import { openPlacekeeperLink, parsePlacekeeperReadableViewRoute } from "../links/placekeeper-link.js";
-import type { DocumentInteractionAttachment } from "../sessions/document-interactions.js";
+import { toWireInteractionResult, type DocumentInteractionAttachment } from "../sessions/document-interactions.js";
 
 const MAX_BODY_BYTES = 256 * 1024;
 const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}";
@@ -307,7 +308,7 @@ export interface WebAssetOptions {
 
 export interface LocalHttpServerOptions {
   readonly upgradeParticipants?: UpgradeDocumentParticipants;
-  readonly protectUpgradeReview?: (sessionId: string) => Promise<void>;
+  readonly protectUpgradeDocument?: (sessionId: string) => Promise<void>;
   readonly port?: number;
   readonly webAssets?: WebAssetOptions;
   readonly saving?: Pick<
@@ -939,16 +940,16 @@ export async function startHttpServer(
             send(response, 400, "Invalid authoring draft identity");
             return;
           }
-          sendJson(response, 200, await broker.beginDocumentInteraction({ ...common, generation: body.generation as number,
-            ...(typeof body.draftId === "string" ? { draftId: body.draftId } : {}) }));
+          sendJson(response, 200, toWireInteractionResult(await broker.beginDocumentInteraction({ ...common, generation: body.generation as number,
+            ...(typeof body.draftId === "string" ? { draftId: body.draftId } : {}) })));
           return;
         }
         if (action === "release") {
-          sendJson(response, 200, await broker.releaseDocumentInteraction(common));
+          sendJson(response, 200, toWireInteractionResult(await broker.releaseDocumentInteraction(common)));
           return;
         }
         if (action === "acknowledge") {
-          sendJson(response, 200, await broker.acknowledgeDocumentInteraction(common));
+          sendJson(response, 200, toWireInteractionResult(await broker.acknowledgeDocumentInteraction(common)));
           return;
         }
         if ((body.outcome !== "applied" && body.outcome !== "discarded") ||
@@ -966,7 +967,7 @@ export async function startHttpServer(
         if (body.outcome === "applied" && broker.saveStatus(common.sessionId)?.destination.phase === "active") {
           void options.saving?.requestSave(common.sessionId);
         }
-        sendJson(response, 200, finalized);
+        sendJson(response, 200, toWireInteractionResult(finalized));
         return;
       }
       if (documentMatch !== null && request.method === "GET") {
@@ -1052,7 +1053,8 @@ export async function startHttpServer(
           error: {
             kind: "generation-conflict",
             documentGeneration: error.currentGeneration,
-            reviewRevision: error.currentRevision,
+            // Legacy wire key; see LEGACY_ANNOTATION_REVISION_KEY.
+            [LEGACY_ANNOTATION_REVISION_KEY]: error.currentRevision,
           },
         });
       } else if (error instanceof DocumentConflictError || error instanceof DocumentDraftConflictError) {
@@ -1167,12 +1169,12 @@ export async function startHttpServer(
         `HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\nSec-WebSocket-Protocol: placekeeper\r\n\r\n`,
       );
       const upgradeId = `control:${interactionAttachment.incarnationId}`;
-      if (options.upgradeParticipants && options.protectUpgradeReview) {
+      if (options.upgradeParticipants && options.protectUpgradeDocument) {
         upgradeAttachments.set(interactionAttachment.incarnationId, { sessionId: match[1]!, credential, attachment: interactionAttachment });
         options.upgradeParticipants.attach(upgradeId, {
           generation: () => broker.state(match[1]!)?.workflow.documentGeneration ?? -1,
           revision: () => { const state = broker.state(match[1]!); if (!state) throw new Error('Review ended'); return `${state.workflow.documentGeneration}:${state.revision}`; },
-          protect: () => options.protectUpgradeReview!(match[1]!),
+          protect: () => options.protectUpgradeDocument!(match[1]!),
         });
       }
       broker.controls.registerSocket(match[1]!, socket, head, {

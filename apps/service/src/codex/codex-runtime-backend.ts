@@ -216,7 +216,7 @@ export class CodexServiceRuntimeBackend {
     if (scope.taskSessionId === undefined) return { ...value as object, launchSurface: "codex" };
     const binding = this.#broker.taskBindings.bindingForTask(scope.taskSessionId);
     let codexContext: LiveContextBindingStatus = { status: "unavailable", reason: "unbound" };
-    if (binding?.reviewSessionId === scope.sessionId && binding.documentGeneration === scope.generation &&
+    if (binding?.documentSessionId === scope.sessionId && binding.documentGeneration === scope.generation &&
       this.#broker.taskBindings.taskForGeneration(scope.sessionId, scope.generation) === scope.taskSessionId &&
       Date.parse(binding.leaseExpiresAt) > Date.now()) {
       const verified = binding.lastVerified;

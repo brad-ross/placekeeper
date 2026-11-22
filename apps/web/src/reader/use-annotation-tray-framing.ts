@@ -75,7 +75,7 @@ function committedWorkspaceRunway(
 
 export type WorkspaceOpenRequest =
   | { readonly kind: 'reading'; readonly token: number }
-  | { readonly kind: 'mark'; readonly reviewId: string; readonly pageIndex: number; readonly token: number };
+  | { readonly kind: 'mark'; readonly annotationId: string; readonly pageIndex: number; readonly token: number };
 
 export function workspaceRequestRequiresReframe(input: {
   readonly presentationChanged: boolean;
@@ -425,7 +425,7 @@ export function useWorkspaceFraming(input: {
       !settlement.signal.aborted && layoutOperationRef.current === operation
     );
     const target = input.request.kind === 'mark'
-      ? { pageIndex: input.request.pageIndex, reviewId: input.request.reviewId }
+      ? { pageIndex: input.request.pageIndex, annotationId: input.request.annotationId }
       : undefined;
     const first = controls.snapshot(target);
     const startingUserRevision = userRevisionRef.current;

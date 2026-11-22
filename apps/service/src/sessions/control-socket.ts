@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import type { Duplex } from "node:stream";
+import { withLegacyAnnotationRevision } from "../../../../packages/core/src/document-runtime-protocol.js";
 
 const DEFAULT_PRESENCE_GRACE_MS = 5_000;
 const HEARTBEAT_INTERVAL_MS = 15_000;
@@ -194,7 +195,7 @@ export class SessionControlRegistry {
     return this.#graceExpiresAt.size === 0 && [...this.#clients.values()].every(clients => [...clients].every(client => client.upgradeParticipantId !== undefined && has(client.upgradeParticipantId)));
   }
 
-  activity(): { readonly reviewPresence: number; readonly transientWork: number } {
+  activity(): { readonly documentPresence: number; readonly transientWork: number } {
     const now = this.#now();
     for (const [sessionId, expiresAt] of this.#graceExpiresAt) {
       if (expiresAt <= now) this.#graceExpiresAt.delete(sessionId);
@@ -204,7 +205,7 @@ export class SessionControlRegistry {
     let writes = 0;
     for (const pending of this.#writes.values()) writes += pending.size;
     return {
-      reviewPresence: connected + this.#graceExpiresAt.size,
+      documentPresence: connected + this.#graceExpiresAt.size,
       transientWork: writes,
     };
   }
@@ -214,26 +215,33 @@ export class SessionControlRegistry {
     event: {
       readonly previousGeneration: number;
       readonly documentGeneration: number;
-      readonly reviewRevision: number;
+      readonly annotationRevision: number;
     },
   ): void {
-    this.#publish(sessionId, {
+    // Readers in the Chrome and VS Code extensions come from other builds;
+    // the revision keeps its legacy key (see LEGACY_ANNOTATION_REVISION_KEY).
+    this.#publish(sessionId, withLegacyAnnotationRevision({
       kind: "document-successor",
       previousGeneration: event.previousGeneration,
       documentGeneration: event.documentGeneration,
-      reviewRevision: event.reviewRevision,
-    });
+      annotationRevision: event.annotationRevision,
+    }));
   }
 
   publishStateInvalidation(
     sessionId: string,
     event: {
       readonly documentGeneration: number;
-      readonly reviewRevision: number;
+      readonly annotationRevision: number;
       readonly reason: SessionStateInvalidationReason;
     },
   ): void {
-    this.#publish(sessionId, { kind: "session-invalidated", ...event });
+    this.#publish(sessionId, withLegacyAnnotationRevision({
+      kind: "session-invalidated",
+      documentGeneration: event.documentGeneration,
+      annotationRevision: event.annotationRevision,
+      reason: event.reason,
+    }));
   }
 
   #publish(sessionId: string, event: Readonly<Record<string, unknown>>): void {

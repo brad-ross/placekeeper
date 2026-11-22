@@ -1,6 +1,6 @@
 import { reconcileNativeSource } from "./reconcile-native-source.js";
 import type { UpgradeDocumentStatus } from "../../../../packages/core/src/upgrade-document-protocol.js";
-import { DocumentExportConflictError } from "../../../../packages/core/src/document-runtime-protocol.js";
+import { DocumentExportConflictError, withLegacyAnnotationRevision } from "../../../../packages/core/src/document-runtime-protocol.js";
 import type { NativeQualificationExperiments } from "./native-qualification-experiments.js";
 import type { NativeQualificationObserver } from "./native-qualification.js";
 import { randomBytes } from "node:crypto";
@@ -121,7 +121,7 @@ export class CodexRuntimeManager {
         if (committedScope !== undefined) broker.taskBindings.relocateNativeReconnect(event.sessionId, committedScope.canonicalSourcePath);
       }
       for (const [id, panel] of this.#panels) {
-        if (panel.launch.scope.reviewSessionId !== event.sessionId) continue;
+        if (panel.launch.scope.documentSessionId !== event.sessionId) continue;
         panel.watermark += 1;
         // Only the broker's committed save notification can migrate a path.
         // Relocation preserves this exact review, generation and PDF digest.
@@ -156,7 +156,7 @@ export class CodexRuntimeManager {
       if (event.reason === "save") {
         const relocated = broker.nativeAdmissionScope(event.sessionId);
         for (const launch of this.#launches.values()) {
-          if (relocated !== undefined && launch.scope.reviewSessionId === event.sessionId &&
+          if (relocated !== undefined && launch.scope.documentSessionId === event.sessionId &&
             launch.scope.documentGeneration === relocated.documentGeneration && launch.scope.sourceDigest === relocated.sourceDigest) {
             launch.scope = relocated;
           }
@@ -164,7 +164,7 @@ export class CodexRuntimeManager {
       }
       if (event.reason === "generation") {
         for (const [key, launch] of this.#launches) {
-          if (launch.scope.reviewSessionId === event.sessionId && launch.scope.documentGeneration !== event.documentGeneration) {
+          if (launch.scope.documentSessionId === event.sessionId && launch.scope.documentGeneration !== event.documentGeneration) {
             this.#broker.taskBindings.detachPresentation(digestSecretHex(launch.admissionKey));
             this.#launches.delete(key);
           }
@@ -172,14 +172,14 @@ export class CodexRuntimeManager {
       }
     });
     this.#unsubscribe = broker.onSessionEnd((sessionId) => {
-      for (const [key, value] of this.#continuations) if (value.panel.launch.scope.reviewSessionId === sessionId) this.#continuations.delete(key);
+      for (const [key, value] of this.#continuations) if (value.panel.launch.scope.documentSessionId === sessionId) this.#continuations.delete(key);
       for (const [id, panel] of this.#panels) {
-        if (panel.launch.scope.reviewSessionId === sessionId) {
+        if (panel.launch.scope.documentSessionId === sessionId) {
           this.#removePanel(id);
         }
       }
       for (const [key, launch] of this.#launches) {
-        if (launch.scope.reviewSessionId === sessionId) {
+        if (launch.scope.documentSessionId === sessionId) {
           this.#launches.delete(key);
         }
       }
@@ -218,7 +218,7 @@ export class CodexRuntimeManager {
       ok: true,
       kind: input.kind,
       surface: "codex-native",
-      sessionId: scope.reviewSessionId,
+      sessionId: scope.documentSessionId,
       documentGeneration: scope.documentGeneration,
       bindProof,
       handoff: {
@@ -231,10 +231,10 @@ export class CodexRuntimeManager {
   claimLaunch(input: {
     readonly bindProof: string;
     readonly taskSessionId: string;
-    readonly reviewSessionId: string;
+    readonly documentSessionId: string;
     readonly documentGeneration: number;
   }): boolean {
-    this.#qualification?.record("claim-arrived", { taskSessionId: input.taskSessionId, reviewSessionId: input.reviewSessionId, generation: input.documentGeneration });
+    this.#qualification?.record("claim-arrived", { taskSessionId: input.taskSessionId, documentSessionId: input.documentSessionId, generation: input.documentGeneration });
     if (this.#closing) return false;
     this.#sweep();
     const launch = [...this.#launches.values()].find((entry) => entry.bindProof === input.bindProof);
@@ -243,16 +243,16 @@ export class CodexRuntimeManager {
       launch.owner !== undefined ||
       !this.#current(launch)
     ) {
-      this.#qualification?.record("claim-denied", { taskSessionId: input.taskSessionId, reviewSessionId: input.reviewSessionId, generation: input.documentGeneration, ...(launch?.owner === undefined ? { denial: "launch-not-current" } : {}) });
+      this.#qualification?.record("claim-denied", { taskSessionId: input.taskSessionId, documentSessionId: input.documentSessionId, generation: input.documentGeneration, ...(launch?.owner === undefined ? { denial: "launch-not-current" } : {}) });
       return false;
     }
     const result = this.#broker.taskBindings.claimNative(input);
     if (result.status === "denied") {
-      this.#qualification?.record("claim-denied", { taskSessionId: input.taskSessionId, reviewSessionId: input.reviewSessionId, generation: input.documentGeneration });
+      this.#qualification?.record("claim-denied", { taskSessionId: input.taskSessionId, documentSessionId: input.documentSessionId, generation: input.documentGeneration });
       return false;
     }
     launch.owner = input.taskSessionId;
-    this.#qualification?.record("claim-accepted", { taskSessionId: input.taskSessionId, reviewSessionId: input.reviewSessionId, generation: input.documentGeneration });
+    this.#qualification?.record("claim-accepted", { taskSessionId: input.taskSessionId, documentSessionId: input.documentSessionId, generation: input.documentGeneration });
     return true;
   }
 
@@ -295,7 +295,7 @@ export class CodexRuntimeManager {
       attested: false,
     });
     try { this.#experiments?.displayIssued({ protocolVersion: 1, status: "pending", receiptId: meta.receiptId, attemptId: meta.attemptId, generation: meta.generation }, launch.expiresAtMs); } catch { /* Scheduling diagnostics cannot affect admission. */ }
-    this.#qualification?.record("display-issued", { runtimeId: meta.runtimeId, attemptId: meta.attemptId, receiptId: meta.receiptId, generation: meta.generation, taskSessionId: launch.owner, reviewSessionId: launch.scope.reviewSessionId });
+    this.#qualification?.record("display-issued", { runtimeId: meta.runtimeId, attemptId: meta.attemptId, receiptId: meta.receiptId, generation: meta.generation, taskSessionId: launch.owner, documentSessionId: launch.scope.documentSessionId });
     return {
       receipt: {
         protocolVersion: 1,
@@ -336,7 +336,7 @@ export class CodexRuntimeManager {
       return false;
     }
     panel.attested = true;
-    this.#qualification?.record("attestation-accepted", { runtimeId: panel.meta.runtimeId, attemptId: panel.meta.attemptId, receiptId: panel.meta.receiptId, generation: panel.meta.generation, taskSessionId: trustedTaskSessionId, reviewSessionId: panel.launch.scope.reviewSessionId });
+    this.#qualification?.record("attestation-accepted", { runtimeId: panel.meta.runtimeId, attemptId: panel.meta.attemptId, receiptId: panel.meta.receiptId, generation: panel.meta.generation, taskSessionId: trustedTaskSessionId, documentSessionId: panel.launch.scope.documentSessionId });
     // This hook acknowledgment never returns app authority. The authenticated pending channel promotes.
     return true;
   }
@@ -366,7 +366,7 @@ export class CodexRuntimeManager {
         return this.#authorized(panel) ? panel.active : denied("revoked");
       }
       if (request.method === "ready") {
-        this.#qualification?.record("ready-accepted", { runtimeId: panel.meta.runtimeId, attemptId: panel.meta.attemptId, receiptId: panel.meta.receiptId, generation: panel.meta.generation, taskSessionId: panel.launch.owner, reviewSessionId: panel.launch.scope.reviewSessionId });
+        this.#qualification?.record("ready-accepted", { runtimeId: panel.meta.runtimeId, attemptId: panel.meta.attemptId, receiptId: panel.meta.receiptId, generation: panel.meta.generation, taskSessionId: panel.launch.owner, documentSessionId: panel.launch.scope.documentSessionId });
         panel.ready = true;
       }
       if (panel.restart !== undefined) {
@@ -420,7 +420,7 @@ export class CodexRuntimeManager {
       return undefined;
     }
     return {
-      sessionId: panel.launch.scope.reviewSessionId,
+      sessionId: panel.launch.scope.documentSessionId,
       taskSessionId: panel.launch.owner!,
       runtimeId: request.runtimeId,
       attemptId: request.attemptId,
@@ -484,7 +484,8 @@ export class CodexRuntimeManager {
     if (request.method === "watermark") {
       await panel.relocatedTicket;
       const watermark = this.readWatermark(request);
-      return watermark === undefined ? denied("revoked") : { status: "ok", payload: watermark };
+      // The Codex shell may come from another build: keep the legacy revision key.
+      return watermark === undefined ? denied("revoked") : { status: "ok", payload: withLegacyAnnotationRevision(watermark) };
     }
     if (this.#backend === undefined) return denied("unavailable");
     try {
@@ -524,7 +525,7 @@ export class CodexRuntimeManager {
     readonly watermark: number;
     readonly sessionId: string;
     readonly documentGeneration: number;
-    readonly reviewRevision: number;
+    readonly annotationRevision: number;
     readonly presentation?: Extract<CodexAppResponse, { status: "active" }>;
   } | undefined {
     const scope = this.resolveActive(raw);
@@ -536,7 +537,7 @@ export class CodexRuntimeManager {
       watermark: panel.watermark,
       sessionId: scope.sessionId,
       documentGeneration: state.workflow.documentGeneration,
-      reviewRevision: state.revision,
+      annotationRevision: state.revision,
       ...(parseCodexAppRequest(raw)?.generation !== panel.meta.generation ? { presentation: panel.active! } : {}),
     };
   }
@@ -568,7 +569,7 @@ export class CodexRuntimeManager {
       ) {
         return denied("revoked");
       }
-      const scope = this.#broker.nativeRestartScope(ticket.sourcePathHash, ticket.sourceDigest, ticket.reviewSessionHash);
+      const scope = this.#broker.nativeRestartScope(ticket.sourcePathHash, ticket.sourceDigest, ticket.documentSessionHash);
       if (scope === undefined) {
         return denied("unavailable");
       }
@@ -675,7 +676,7 @@ export class CodexRuntimeManager {
       const continuation = this.#continuations.get(key);
       if (continuation === undefined || !this.#continuationEnvelope(continuation, request) || !continuation.authority.isCurrent()) return denied("revoked");
       const previous = continuation.panel;
-      const sessionId = previous.launch.scope.reviewSessionId;
+      const sessionId = previous.launch.scope.documentSessionId;
       let check: TaskBindingAuthorityCheck | undefined;
       let replacement: Panel | undefined;
       try {
@@ -754,9 +755,9 @@ export class CodexRuntimeManager {
       panel, issuedGeneration: active.generation, authority: this.#broker.taskBindings.captureAuthoritySnapshot(this.#binding(panel)),
       expiresAtMs: this.#now().getTime() + CONTINUATION_IDLE_MS,
     });
-    this.#qualification?.record("promotion-accepted", { runtimeId: panel.meta.runtimeId, attemptId: panel.meta.attemptId, receiptId: panel.meta.receiptId, generation: panel.meta.generation, taskSessionId: panel.launch.owner, reviewSessionId: panel.launch.scope.reviewSessionId });
+    this.#qualification?.record("promotion-accepted", { runtimeId: panel.meta.runtimeId, attemptId: panel.meta.attemptId, receiptId: panel.meta.receiptId, generation: panel.meta.generation, taskSessionId: panel.launch.owner, documentSessionId: panel.launch.scope.documentSessionId });
     panel.leaseExpiresAtMs = this.#now().getTime() + this.#panelLeaseMs;
-    this.#backend?.attach({ sessionId: panel.launch.scope.reviewSessionId, taskSessionId: panel.launch.owner!,
+    this.#backend?.attach({ sessionId: panel.launch.scope.documentSessionId, taskSessionId: panel.launch.owner!,
       runtimeId: active.runtimeId, attemptId: active.attemptId, generation: active.generation,
       ...(panel.launch.requestedLocation === undefined ? {} : { requestedLocation: panel.launch.requestedLocation }),
     });
@@ -809,12 +810,12 @@ export class CodexRuntimeManager {
     return this.#serialize(async () => {
       this.#broker.taskBindings.revokeSession(sessionId);
       for (const [id, panel] of this.#panels) {
-        if (panel.launch.scope.reviewSessionId === sessionId) {
+        if (panel.launch.scope.documentSessionId === sessionId) {
           this.#removePanel(id);
         }
       }
       for (const [key, launch] of this.#launches) {
-        if (launch.scope.reviewSessionId === sessionId) {
+        if (launch.scope.documentSessionId === sessionId) {
           this.#launches.delete(key);
         }
       }
@@ -904,7 +905,7 @@ export class CodexRuntimeManager {
   }
 
   #current(launch: Launch): boolean {
-    const live = this.#broker.nativeAdmissionScope(launch.scope.reviewSessionId);
+    const live = this.#broker.nativeAdmissionScope(launch.scope.documentSessionId);
     return !this.#disposed &&
       live?.documentGeneration === launch.scope.documentGeneration &&
       live.sourceDigest === launch.scope.sourceDigest &&
@@ -955,7 +956,7 @@ export class CodexRuntimeManager {
         (panel.active === undefined ? panel.launch.expiresAtMs <= now :
           panel.leaseExpiresAtMs! <= now || !this.#authorized(panel))
       ) {
-        this.#qualification?.record((panel.active === undefined ? panel.launch.expiresAtMs <= now : panel.leaseExpiresAtMs! <= now) ? "panel-expired" : "panel-ended", { runtimeId: panel.meta.runtimeId, attemptId: panel.meta.attemptId, receiptId: panel.meta.receiptId, generation: panel.meta.generation, taskSessionId: panel.launch.owner, reviewSessionId: panel.launch.scope.reviewSessionId });
+        this.#qualification?.record((panel.active === undefined ? panel.launch.expiresAtMs <= now : panel.leaseExpiresAtMs! <= now) ? "panel-expired" : "panel-ended", { runtimeId: panel.meta.runtimeId, attemptId: panel.meta.attemptId, receiptId: panel.meta.receiptId, generation: panel.meta.generation, taskSessionId: panel.launch.owner, documentSessionId: panel.launch.scope.documentSessionId });
         this.#removePanel(id, panel.active !== undefined && this.#current(panel.launch) &&
           [...this.#continuations.values()].some((value) => value.panel === panel && value.authority.isCurrent()));
       }

@@ -78,7 +78,7 @@ function payload(r: CodexAppResponse): any { expect(r.status).toBe("ok"); return
 describe("native host private control and trusted hooks", () => {
   it("opens without a URL, promotes in either order, shares edits and isolates resources; detaching returns native activity to baseline", async () => {
     const f = await fixture(); const a = await panel(f, true), b = await panel(f);
-    const sessionId = f.host.broker.taskBindings.bindingForTask("task-native")!.reviewSessionId;
+    const sessionId = f.host.broker.taskBindings.bindingForTask("task-native")!.documentSessionId;
     const bootstrap = payload(await app(f, request(a, "bootstrap")));
     expect(bootstrap.scope.launchSurface).toBe("codex"); expect(JSON.stringify(bootstrap)).not.toContain(f.root);
     const handle = bootstrap.resources.document;
@@ -95,10 +95,10 @@ describe("native host private control and trusted hooks", () => {
     await app(f, request(b, "detach"));
     expect(f.host.codexRuntime.activityCount()).toBe(0);
     expect(f.host.broker.taskBindings.nativeReconnectForTask("task-native")).toBeDefined();
-    expect(f.host.lifecycle.status().activity).toEqual({ reviewPresence: 0, codexTasks: 0, transientWork: 0 });
+    expect(f.host.lifecycle.status().activity).toEqual({ documentPresence: 0, codexTasks: 0, transientWork: 0 });
     expect(f.host.broker.interactions.retentionStatus()).toEqual({ attachments: 0, owners: 0 });
     await f.request({ kind: "revoke-task", taskSessionId: "task-native" });
-    expect(f.host.lifecycle.status().activity).toEqual({ reviewPresence: 0, codexTasks: 0, transientWork: 0 });
+    expect(f.host.lifecycle.status().activity).toEqual({ documentPresence: 0, codexTasks: 0, transientWork: 0 });
   });
   it.each<PlacekeeperLinkLocation>([
     { kind: "page", page: 2 },
@@ -126,11 +126,11 @@ describe("native host private control and trusted hooks", () => {
     expect(await app(f, request(a, "bootstrap"))).toMatchObject({ status: "ok" });
     await attest(f, d); expect(await app(f, pending(d, "status"))).toMatchObject({ status: "active" });
     const conflict = parseCodexNativeLaunchSuccess(await requestLaunch(f.socketPath, { pdfPath: f.pdf, surface: "codex-native", workflowMode: "generated-output" }))!;
-    expect(await f.request({ kind: "claim-binding", native: true, taskSessionId: "other-task", reviewSessionId: conflict.sessionId, documentGeneration: conflict.documentGeneration, bindProof: conflict.bindProof })).toEqual({ kind: "codex-binding", status: "denied" });
+    expect(await f.request({ kind: "claim-binding", native: true, taskSessionId: "other-task", documentSessionId: conflict.sessionId, documentGeneration: conflict.documentGeneration, bindProof: conflict.bindProof })).toEqual({ kind: "codex-binding", status: "denied" });
   });
   it("peer holds defer the newest replacement and native disconnect preserves its protected draft", async () => {
     const f = await fixture(), a = await panel(f), b = await panel(f);
-    const sessionId = f.host.broker.taskBindings.bindingForTask("task-native")!.reviewSessionId;
+    const sessionId = f.host.broker.taskBindings.bindingForTask("task-native")!.documentSessionId;
     const bootstrap = payload(await app(f, request(a, "bootstrap"))), draftId = randomUUID();
     expect(payload(await app(f, request(a, "beginInteraction", { interactionToken: "hold_panel_a", order: 1, generation: 1, draftId }))).status).toBe("accepted");
     expect(payload(await app(f, request(b, "beginInteraction", { interactionToken: "hold_panel_b", order: 1, generation: 1 }))).status).toBe("accepted");
@@ -192,7 +192,7 @@ describe("native host private control and trusted hooks", () => {
   });
   it.each(["task-first", "panel-first"] as const)("restores two independent native panel tickets after restart (%s)", async (order) => {
     const f = await fixture(), a = await panel(f), b = await panel(f);
-    const sessionId = f.host.broker.taskBindings.bindingForTask("task-native")!.reviewSessionId;
+    const sessionId = f.host.broker.taskBindings.bindingForTask("task-native")!.documentSessionId;
     await app(f, request(a, "command", { type: "set-annotation-name", expectedRevision: 0, annotationName: "Restart" }));
     await f.host.close(); await f.control.close();
     const next = await f.start();

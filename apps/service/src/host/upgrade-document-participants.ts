@@ -89,7 +89,7 @@ export class UpgradeDocumentParticipants {
       durable = true;
     } catch { durable = false; }
     this.coordinator.acknowledge(view.credentials, status, { revision: view.protection.revision(),
-      reviewRevisionDurable: durable, protectedDraftDurable: durable, pdfSaveSettled: durable });
+      annotationRevisionDurable: durable, protectedDraftDurable: durable, pdfSaveSettled: durable });
     return this.poll(id);
   }
 }

@@ -336,7 +336,7 @@ export class LiveSourceWorkflowService {
     const binding = this.#broker.taskBindings.bindingForTask(execution.taskSessionId);
     if (binding === undefined) throw new Error("The Codex task has no active PDF binding");
     const source = await this.#broker.projectAtomicSession(
-      binding.reviewSessionId,
+      binding.documentSessionId,
       async (snapshot) => {
         if (snapshot.documentGeneration !== binding.documentGeneration) {
           throw new Error("The PDF generation changed during rebuild verification");
@@ -507,7 +507,7 @@ export class LiveSourceWorkflowService {
   }> {
     const binding = this.#broker.taskBindings.bindingForTask(taskSessionId);
     if (binding === undefined) throw new Error("The Codex task has no active PDF binding");
-    const scope = await this.#broker.projectAtomicSession(binding.reviewSessionId, async (snapshot) => {
+    const scope = await this.#broker.projectAtomicSession(binding.documentSessionId, async (snapshot) => {
       if (
         snapshot.documentGeneration !== binding.documentGeneration ||
         snapshot.sourceRootPath === undefined
@@ -524,7 +524,7 @@ export class LiveSourceWorkflowService {
   async #currentAnnotations(taskSessionId: string, expectedDigest: string): Promise<readonly Annotation[]> {
     const binding = this.#broker.taskBindings.bindingForTask(taskSessionId);
     if (binding === undefined) throw new Error("The Codex task has no active PDF binding");
-    const items = await this.#broker.projectAtomicSession(binding.reviewSessionId, async (snapshot) => {
+    const items = await this.#broker.projectAtomicSession(binding.documentSessionId, async (snapshot) => {
       if (
         snapshot.documentGeneration !== binding.documentGeneration ||
         documentSemanticDigest(snapshot.state.items) !== expectedDigest

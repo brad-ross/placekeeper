@@ -10,6 +10,9 @@ import {
   canonicalDocumentRuntimeMethod,
   canonicalDocumentRuntimeMethodForHost,
   isAnnotatedCopyExportKind,
+  LEGACY_ANNOTATION_REVISION_KEY,
+  wireAnnotationRevision,
+  withLegacyAnnotationRevision,
   isDocumentRuntimeMethodForHost,
   isDocumentPanelKey,
   isDocumentRuntimeMethod,
@@ -514,5 +517,19 @@ describe("renamed runtime wire values", () => {
         kind, path: "/private/result.pdf", revision: 3, digest: "c".repeat(64),
       })).toEqual({ kind: "reviewed-copy", path: "Annotated Document", revision: 3, digest: "c".repeat(64) });
     }
+  });
+});
+
+describe("annotation revision wire alias", () => {
+  it("reads either spelling and sends the frozen reviewRevision key", () => {
+    expect(LEGACY_ANNOTATION_REVISION_KEY).toBe("reviewRevision");
+    expect(wireAnnotationRevision({ annotationRevision: 4 })).toBe(4);
+    expect(wireAnnotationRevision({ reviewRevision: 5 })).toBe(5);
+    expect(wireAnnotationRevision({ reviewRevision: 1.5 })).toBeUndefined();
+    expect(wireAnnotationRevision({})).toBeUndefined();
+    const sent = withLegacyAnnotationRevision({ status: "finalized", annotationRevision: 6, generation: 2 });
+    expect(sent).toEqual({ status: "finalized", generation: 2, reviewRevision: 6 });
+    expect(Object.keys(sent)).not.toContain("annotationRevision");
+    expect(wireAnnotationRevision(sent)).toBe(6);
   });
 });

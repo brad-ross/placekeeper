@@ -371,6 +371,8 @@ describe("app-owned extension presentations", () => {
   it("resumes the exact independent recent review after a service restart", async () => {
     const f = await fixture(), first = await opened(f.manager, {});
     const firstState = payload(await f.manager.handle(request(first.presentation, 'watermark')));
+    expect(firstState).toMatchObject({ reviewRevision: 0 });
+    expect(firstState).not.toHaveProperty('annotationRevision');
     const offer = await f.manager.open({pdfPath:f.pdfPath});if(offer.status!=='busy')throw Error('Expected choice');
     const fork=await f.manager.choose({action:'choose',recoveryToken:offer.recoveryToken,choice:'fork',operationId:randomUUID()});if(fork.status!=='provisional')throw Error('Expected fork');
     const second=active(await f.manager.resume(fork.grant,randomUUID(),'activate'));

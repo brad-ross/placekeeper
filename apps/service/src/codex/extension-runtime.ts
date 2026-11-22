@@ -7,7 +7,7 @@ import { randomBytes } from 'node:crypto';
 import { digestSecretHex } from '../../../../packages/core/src/session-security.js';
 import { CODEX_MAX_ENCODED_RESPONSE_BYTES, parseCodexAppRequest, type CodexAppResponse } from '../../../../packages/core/src/codex-mcp-protocol.js';
 import { parseExtensionRequest, type ExtensionResult, type ExtensionPresentation, type ExtensionRequest } from '../../../../packages/core/src/extension-protocol.js';
-import { DocumentExportConflictError } from '../../../../packages/core/src/document-runtime-protocol.js';
+import { DocumentExportConflictError, LEGACY_ANNOTATION_REVISION_KEY } from '../../../../packages/core/src/document-runtime-protocol.js';
 import type { UpgradeDocumentStatus } from '../../../../packages/core/src/upgrade-document-protocol.js';
 import type { SessionBroker } from '../sessions/session-broker.js';
 import type { OpenDocumentResult, RecoveryOfferIdentity } from '../sessions/session-contracts.js';
@@ -26,7 +26,7 @@ type RotationReceipt = {
   record: RecordState;
   result: Extract<ExtensionResult, { status: 'active' }>;
 };
-type Offer = ({ path: string; hostSessionId?: string; resumeLiveHostReview?: true; releasedLocalSessionId?: string; recoveryOffer?: RecoveryOfferIdentity } | { copyRecovery: HostCopyRecoveryMatch }) & {
+type Offer = ({ path: string; hostSessionId?: string; resumeLiveHostDocument?: true; releasedLocalSessionId?: string; recoveryOffer?: RecoveryOfferIdentity } | { copyRecovery: HostCopyRecoveryMatch }) & {
   expires: number;
   live?: LiveOffer | undefined;
   targetSessionId?: string;
@@ -136,7 +136,7 @@ export class ExtensionRuntimeManager {
         const sessionId = opened.launch.sessionId;
         const canResume = !this.#hasDocumentGrant(sessionId) && await this.#host.state(sessionId) !== undefined;
         const disconnected = this.#disconnected(sessionId);
-        this.#offers.set(digestSecretHex(token), { path: scope.canonicalSourcePath, hostSessionId: sessionId, live: this.#liveOffer(sessionId), ...(disconnected ? {disconnected} : {}), expires: this.#now() + 60000, ...(canResume ? { resumeLiveHostReview: true } : {}) });
+        this.#offers.set(digestSecretHex(token), { path: scope.canonicalSourcePath, hostSessionId: sessionId, live: this.#liveOffer(sessionId), ...(disconnected ? {disconnected} : {}), expires: this.#now() + 60000, ...(canResume ? { resumeLiveHostDocument: true } : {}) });
         return { status: 'busy', recoveryToken: token, canResume, ...(disconnected ? {canRecover:true} : {}) };
       }
       this.#hostSessions.add(opened.launch.sessionId);return this.#provisional(opened);
@@ -199,7 +199,7 @@ export class ExtensionRuntimeManager {
         ? await this.#host.fork(hostSessionId, offer.copyRecovery.sha256)
         : await this.#resumeMatchingCopy(hostSessionId, input.operationId);
     } else {
-      if (input.choice === 'resume' && !offer.recoveryOffer && !offer.resumeLiveHostReview && !offer.releasedLocalSessionId) return unavailable();
+      if (input.choice === 'resume' && !offer.recoveryOffer && !offer.resumeLiveHostDocument && !offer.releasedLocalSessionId) return unavailable();
       hostSessionId = offer.hostSessionId;
       if(input.choice==='fork'&&!hostSessionId&&!offer.recoveryOffer&&offer.targetSessionId){
         const exact=await this.broker.openDocument({pdfPath:offer.path,surface:'codex-native',recoveryTargetSessionId:offer.targetSessionId});
@@ -214,7 +214,7 @@ export class ExtensionRuntimeManager {
         result = reopened;
       } else result = hostSessionId && input.choice === 'fork'
         ? await this.#host.fork(hostSessionId)
-        : hostSessionId && offer.resumeLiveHostReview
+        : hostSessionId && offer.resumeLiveHostDocument
           ? await this.#resumeMatchingCopy(hostSessionId, input.operationId)
           : await this.broker.openDocument({pdfPath:offer.path,surface:'codex-native',recoveryDecision:input.choice,...(offer.targetSessionId?{recoveryTargetSessionId:offer.targetSessionId}:{}),...(offer.recoveryOffer?{recoveryOffer:offer.recoveryOffer,recoveryOperationId:input.operationId}:{})});
     }
@@ -242,7 +242,7 @@ export class ExtensionRuntimeManager {
       const disconnected=this.#disconnected(entry.sessionId),unowned=!this.#hasDocumentGrant(entry.sessionId);
       if(unowned&&!host)this.#releasedLocalSessions.add(entry.sessionId);
       const token=secret();this.#offers.set(digestSecretHex(token),{path,expires:this.#now()+60000,targetSessionId:entry.sessionId,live:this.#liveOffer(entry.sessionId),
-        ...(hostFile?{hostSessionId:entry.sessionId,hostFile,...(unowned?{resumeLiveHostReview:true as const}:{})}:unowned?{releasedLocalSessionId:entry.sessionId}:{}),
+        ...(hostFile?{hostSessionId:entry.sessionId,hostFile,...(unowned?{resumeLiveHostDocument:true as const}:{})}:unowned?{releasedLocalSessionId:entry.sessionId}:{}),
         ...(disconnected?{disconnected}:{})});
       return {status:'busy',recoveryToken:token,canResume:unowned,...(disconnected?{canRecover:true}:{})};
     }
@@ -260,7 +260,7 @@ export class ExtensionRuntimeManager {
   }
 
   #currentLiveOffer(offer: LiveOffer, allowRelease = false): LiveOffer | undefined {
-    const current = this.#liveOffer(offer.scope.reviewSessionId);
+    const current = this.#liveOffer(offer.scope.documentSessionId);
     if (!current || current.ownershipEpoch !== offer.ownershipEpoch ||
         current.scope.documentGeneration !== offer.scope.documentGeneration ||
         current.scope.canonicalSourcePath !== offer.scope.canonicalSourcePath ||
@@ -275,7 +275,7 @@ export class ExtensionRuntimeManager {
     const key = digestSecretHex(token), offer = this.#offers.get(key);
     if (this.#closing || !offer?.live || offer.result || !this.#currentLiveOffer(offer.live, true)) return unavailable();
     const { scope } = offer.live;
-    const sessionId = scope.reviewSessionId;
+    const sessionId = scope.documentSessionId;
     const matchingCopy = 'copyRecovery' in offer;
     if (matchingCopy) {
       if (!await this.#host.matchesCopyRecovery(offer.copyRecovery)) return unavailable();
@@ -292,7 +292,7 @@ export class ExtensionRuntimeManager {
       : this.#canResumeReleasedLocal(sessionId);
     const refreshed: Offer = { ...offer, live, disconnected };
     if (canResume && !('copyRecovery' in refreshed)) {
-      if (refreshed.hostSessionId) refreshed.resumeLiveHostReview = true;
+      if (refreshed.hostSessionId) refreshed.resumeLiveHostDocument = true;
       else refreshed.releasedLocalSessionId = sessionId;
     }
     // A lost reply can be retried with the same token until the original expiry.
@@ -424,7 +424,7 @@ export class ExtensionRuntimeManager {
     if(!current()||!r)return {status:'denied',reason:'expired'};
     if(request.method==='detach'){this.#remove(r);return {status:'ok',payload:{}};}
     if(request.method==='renew'){r.lease=this.#now()+this.#lease;r.expires=this.#now()+this.#idle;return {status:'ok',payload:{leaseExpiresAt:new Date(r.lease).toISOString()}};}
-    if(request.method==='watermark'){const state=this.broker.state(r.sessionId);return {status:'ok',payload:{watermark:r.watermark,sessionId:r.sessionId,documentGeneration:request.generation,reviewRevision:state?.revision}};}
+    if(request.method==='watermark'){const state=this.broker.state(r.sessionId);return {status:'ok',payload:{watermark:r.watermark,sessionId:r.sessionId,documentGeneration:request.generation,[LEGACY_ANNOTATION_REVISION_KEY]:state?.revision}};}
     try{const payload=await this.#backend.handle(this.#scope(r),request,current);if(!current())return {status:'denied',reason:'revoked'};const response:CodexAppResponse={status:'ok',payload};return Buffer.byteLength(JSON.stringify(response))<=CODEX_MAX_ENCODED_RESPONSE_BYTES?response:{status:'denied',reason:'unavailable'};}
     catch(error){if(current()&&error instanceof DocumentExportConflictError)return {status:'operation-error',reason:'export-conflict'};return {status:'denied',reason:'unavailable'};}
   }

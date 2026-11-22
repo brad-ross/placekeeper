@@ -3,8 +3,11 @@ import { PrivateControlError, requestPrivateControl, startPrivateControlServer }
 import { launchEditorNavigation } from "../synctex/editor-launch.js";
 import {
   MANAGEMENT_PROTOCOL_VERSION,
-  isControlRequest,
-  type DaemonAggregateActivity,
+  parseControlRequest,
+  parseControlResponse,
+  toWireControlRequest,
+  toWireControlResponse,
+  parseAggregateActivity,
   type DaemonManagementStatus,
   type DaemonLifecycleState,
   type DaemonUpgradeReason,
@@ -429,7 +432,7 @@ async function dispatch(
 }
 
 function writeResponse(socket: Socket, response: PlacekeeperControlResponse): Promise<void> {
-  const serialized = `${JSON.stringify(response)}\n`;
+  const serialized = `${JSON.stringify(toWireControlResponse(response))}\n`;
   const output = Buffer.byteLength(serialized) > MAX_MESSAGE_BYTES
     ? `${JSON.stringify({ kind: "error", reason: "unavailable" })}\n`
     : serialized;
@@ -480,9 +483,10 @@ export async function startLaunchControlServer(
 ): Promise<LaunchControlServer> {
   if (process.platform === "win32") {
     let control: LaunchControlServer;
-    control = await startPrivateControlServer(socketPath, async (parsed, signal) => {
-      if (!isControlRequest(parsed)) return { kind: "error", reason: "invalid-request" };
-      try { return await dispatch(host, parsed, management, signal, desktopLaunchArgs); }
+    control = await startPrivateControlServer(socketPath, async (decoded, signal) => {
+      const parsed = parseControlRequest(decoded);
+      if (parsed === undefined) return { kind: "error", reason: "invalid-request" };
+      try { return toWireControlResponse(await dispatch(host, parsed, management, signal, desktopLaunchArgs)); }
       catch { return { kind: "error", reason: "unavailable" }; }
     }, async (value) => {
       const response = value as PlacekeeperControlResponse;
@@ -515,14 +519,15 @@ export async function startLaunchControlServer(
       const newline = raw.indexOf("\n");
       if (newline === -1) return;
       socket.pause();
-      let parsed: unknown;
+      let decoded: unknown;
       try {
-        parsed = JSON.parse(raw.slice(0, newline)) as unknown;
+        decoded = JSON.parse(raw.slice(0, newline)) as unknown;
       } catch {
         void writeResponse(socket, { kind: "error", reason: "invalid-request" }).catch(() => undefined);
         return;
       }
-      if (!isControlRequest(parsed)) {
+      const parsed = parseControlRequest(decoded);
+      if (parsed === undefined) {
         void writeResponse(socket, { kind: "error", reason: "invalid-request" }).catch(() => undefined);
         return;
       }
@@ -604,8 +609,8 @@ export function requestControl(
     const picker = extensionPickerTimeouts(request.request);
     if (picker) options = { ...options, timeoutMs: picker.socketMs };
   }
-  if (process.platform === "win32") return requestPrivateControl(socketPath, request, options).then(
-    (response) => response as PlacekeeperControlResponse,
+  if (process.platform === "win32") return requestPrivateControl(socketPath, toWireControlRequest(request), options).then(
+    (response) => parseControlResponse(response),
     (error: unknown) => {
       if (error instanceof PrivateControlError) throw error.reason === "timeout"
         ? new PlacekeeperControlTimeoutError() : new PlacekeeperControlProtocolError(error.reason);
@@ -625,7 +630,7 @@ export function requestControl(
     socket.setEncoding("utf8");
     socket.setTimeout(options.timeoutMs ?? CONTROL_REQUEST_TIMEOUT_MS, () =>
       socket.destroy(new PlacekeeperControlTimeoutError()));
-    socket.once("connect", () => socket.write(`${JSON.stringify(request)}\n`));
+    socket.once("connect", () => socket.write(`${JSON.stringify(toWireControlRequest(request))}\n`));
     socket.on("data", (chunk: string) => {
       raw += chunk;
       if (Buffer.byteLength(raw) > (options.maxMessageBytes ?? MAX_MESSAGE_BYTES)) {
@@ -644,19 +649,12 @@ export function requestControl(
         return;
       }
       try {
-        resolve(JSON.parse(raw) as PlacekeeperControlResponse);
+        resolve(parseControlResponse(JSON.parse(raw)));
       } catch {
         reject(new PlacekeeperControlProtocolError("malformed"));
       }
     });
   });
-}
-
-function isAggregateActivity(value: unknown): value is DaemonAggregateActivity {
-  if (!isObject(value)) return false;
-  return [value.reviewPresence, value.codexTasks, value.transientWork].every(
-    (count) => Number.isSafeInteger(count) && (count as number) >= 0,
-  );
 }
 
 function managementStatus(response: PlacekeeperControlResponse): DaemonManagementStatus | undefined {
@@ -668,7 +666,7 @@ function managementStatus(response: PlacekeeperControlResponse): DaemonManagemen
     response.status.protocolVersion !== MANAGEMENT_PROTOCOL_VERSION ||
     typeof response.status.daemonIdentity !== "string" ||
     !["accepting", "draining", "shutdown-committed"].includes(String(response.status.lifecycle)) ||
-    !isAggregateActivity(response.status.activity)
+    parseAggregateActivity(response.status.activity) === undefined
   ) return undefined;
   if (!/^(?:development|[a-f0-9]{64})$/u.test(response.status.daemonIdentity)) return undefined;
   if (
@@ -683,11 +681,7 @@ function managementStatus(response: PlacekeeperControlResponse): DaemonManagemen
       : { readinessToken: response.status.readinessToken }),
     ...(response.status.upgradePreparationVersion === 1 ? { upgradePreparationVersion: 1 as const } : {}),
     lifecycle: response.status.lifecycle as DaemonLifecycleState,
-    activity: {
-      reviewPresence: response.status.activity.reviewPresence,
-      codexTasks: response.status.activity.codexTasks,
-      transientWork: response.status.activity.transientWork,
-    },
+    activity: parseAggregateActivity(response.status.activity)!,
   };
 }
 
@@ -700,17 +694,9 @@ export function managementShutdownResult(response: unknown): ConditionalShutdown
     !isObject(response.result)
   ) return undefined;
   if (response.result.status === "accepted") return { status: "accepted" };
-  if (response.result.status !== "refused" || !isAggregateActivity(response.result.activity)) {
-    return undefined;
-  }
-  return {
-    status: "refused",
-    activity: {
-      reviewPresence: response.result.activity.reviewPresence,
-      codexTasks: response.result.activity.codexTasks,
-      transientWork: response.result.activity.transientWork,
-    },
-  };
+  const activity = response.result.status === "refused" ? parseAggregateActivity(response.result.activity) : undefined;
+  if (activity === undefined) return undefined;
+  return { status: "refused", activity };
 }
 
 export async function inspectDaemonCompatibility(

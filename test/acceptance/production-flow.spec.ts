@@ -801,11 +801,11 @@ test("keeps mounted Codex context through fresh-page re-entry, then fails closed
     expect(taskBindings.claim({
       bindProof: launched.bindProof,
       taskSessionId: "mounted-clock-task",
-      reviewSessionId: launched.sessionId,
+      documentSessionId: launched.sessionId,
       documentGeneration: launched.documentGeneration,
     })).toMatchObject({ status: "pending" });
     expect(taskBindings.activateBrowser({
-      reviewSessionId: launched.sessionId,
+      documentSessionId: launched.sessionId,
       documentGeneration: launched.documentGeneration,
       browserCapability: capability,
     })).toMatchObject({ status: "active" });

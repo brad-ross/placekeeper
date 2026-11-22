@@ -94,7 +94,7 @@ export interface BrowserViewRecord {
 export interface ReconnectBindingMetadata {
   readonly taskSessionId: string;
   readonly browserToken: string;
-  readonly reviewSessionId: string;
+  readonly documentSessionId: string;
   readonly documentGeneration: number;
   readonly browserCapabilityHash: string;
   readonly canonicalSourcePath: string;
@@ -104,7 +104,7 @@ export interface ReconnectBindingMetadata {
 export interface PendingRestartReconnect {
   readonly ticket: MatchedRestartReconnectTicket;
   readonly browserToken: string;
-  readonly reviewSessionId: string;
+  readonly documentSessionId: string;
   readonly documentGeneration: number;
   readonly browserCapabilityHash: string;
   readonly canonicalSourcePath: string;

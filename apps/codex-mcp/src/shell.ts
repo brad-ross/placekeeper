@@ -2,6 +2,7 @@ import './extension-presentation.css';
 import { OpenAIExtensions } from '@openai/mcp-extensions/app';
 import { ExtensionShell } from "./extension-shell.js";
 import { EXTENSION_META_KEY } from "../../../packages/core/src/extension-protocol.js";
+import { wireAnnotationRevision } from "../../../packages/core/src/document-runtime-protocol.js";
 import { externalWebUrl } from "../../../packages/core/src/external-web-url.js";
 import { createCodexHostRuntime } from "../../web/src/host/codex-runtime.js";
 import { mountCodexProductionDocument } from "../../web/src/codex-entry.js";
@@ -151,7 +152,7 @@ async function renew(attempt: number) {
   recordDiagnostic("renewed");
 }
 async function poll(attempt: number, previous?: number) {
-    const response = await payload("watermark", {}, attempt) as { watermark: number; sessionId?: string; documentGeneration: number; reviewRevision: number; presentation?: Extract<CodexAppResponse, { status: "active" }> };
+    const response = await payload("watermark", {}, attempt) as { watermark: number; sessionId?: string; documentGeneration: number; presentation?: Extract<CodexAppResponse, { status: "active" }> };
     if (response.sessionId !== undefined) {
       if (productionSessionId !== undefined && productionSessionId !== response.sessionId) throw new NativeDiagnosticError("incarnation-mismatch");
       productionSessionId = response.sessionId;
@@ -163,7 +164,7 @@ async function poll(attempt: number, previous?: number) {
       active = successor;
     }
     if ((successor !== undefined || response.watermark !== previous && previous !== undefined) && active !== undefined && productionSessionId !== undefined) {
-      const event: HostRuntimeInvalidation = { sessionId: productionSessionId, generation: response.documentGeneration, revision: response.reviewRevision, reason: response.documentGeneration === previousGeneration ? "freshness" : "generation" };
+      const event: HostRuntimeInvalidation = { sessionId: productionSessionId, generation: response.documentGeneration, revision: wireAnnotationRevision(response)!, reason: response.documentGeneration === previousGeneration ? "freshness" : "generation" };
       for (const listener of runtimeInvalidations) listener(event);
     }
     return response.watermark;

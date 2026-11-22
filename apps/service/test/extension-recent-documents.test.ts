@@ -73,3 +73,12 @@ it('rejects malformed stored entries and extra authority fields rather than usin
   await writeFile(path, JSON.stringify(stored));
   await expect(new ExtensionRecentDocuments(f.root).list()).rejects.toThrow('Invalid recent review store');
 });
+
+it('loads a store an earlier release wrote under the frozen extension-recent-reviews.json name', async () => {
+  const f = await fixture();
+  const legacy = { id: 'a'.repeat(32), sessionId: 'legacy-session', title: 'Legacy paper', source: { kind: 'local', path: '/papers/legacy.pdf' }, page: 4, updatedAt: '2026-10-01T00:00:00.000Z' };
+  await writeFile(join(f.root, 'extension-recent-reviews.json'), JSON.stringify({ schemaVersion: 1, entries: [legacy] }), { mode: 0o600 });
+  expect(await f.store.list()).toEqual([legacy]);
+  await f.store.position('legacy-session', 5);
+  expect(JSON.parse(await readFile(join(f.root, 'extension-recent-reviews.json'), 'utf8')).entries[0]).toMatchObject({ id: legacy.id, page: 5 });
+});

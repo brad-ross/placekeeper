@@ -23,7 +23,7 @@ export interface NativeTaskLaunchReceipt {
 export interface NativeTaskLaunchClaim {
   readonly bindProof: string;
   readonly taskSessionId: string;
-  readonly reviewSessionId: string;
+  readonly documentSessionId: string;
   readonly documentGeneration: number;
 }
 /** Service-private reservation. Neither this identity nor its path enters renderer projections. */
@@ -68,13 +68,13 @@ export class NativeTaskLaunchRegistry {
     this.#ttlMs = options.pendingTtlMs ?? 60_000;
     if (!Number.isSafeInteger(this.#ttlMs) || this.#ttlMs <= 0) throw new RangeError("Invalid native launch lifetime");
     this.#unsubscribeEnd = broker.onSessionEnd((sessionId) => {
-      for (const launch of [...this.#launches.values()]) if (launch.scope.reviewSessionId === sessionId) this.#remove(launch);
+      for (const launch of [...this.#launches.values()]) if (launch.scope.documentSessionId === sessionId) this.#remove(launch);
     });
     this.#unsubscribeState = broker.onStateInvalidation((event) => {
       if (event.reason !== "generation" && event.reason !== "save") return;
       const successor = broker.nativeAdmissionScope(event.sessionId);
       for (const launch of [...this.#launches.values()]) {
-        if (launch.scope.reviewSessionId !== event.sessionId) continue;
+        if (launch.scope.documentSessionId !== event.sessionId) continue;
         if (event.reason === "generation") {
           // Canonical migration may preserve an already active task association;
           // a pending launch never borrows visibility from a predecessor PDF.
@@ -99,7 +99,7 @@ export class NativeTaskLaunchRegistry {
     const expiresAtMs = this.#now().getTime() + this.#ttlMs;
     this.#launches.set(digestSecretHex(launchId), { scope, admissionKey, bindProof, expiresAtMs, active: false,
       ...(input.requestedLocation === undefined ? {} : { location: input.requestedLocation }) });
-    return { ok: true, kind: input.kind, surface: "electron", native: true, sessionId: scope.reviewSessionId,
+    return { ok: true, kind: input.kind, surface: "electron", native: true, sessionId: scope.documentSessionId,
       documentGeneration: scope.documentGeneration, bindProof, launchId, expiresAt: new Date(expiresAtMs).toISOString() };
   }
 
@@ -107,7 +107,7 @@ export class NativeTaskLaunchRegistry {
     this.#sweep();
     const launch = this.#launches.get(digestSecretHex(launchId));
     if (launch === undefined || launch.admission !== undefined) return undefined;
-    return { sourcePath: launch.scope.canonicalSourcePath, sessionId: launch.scope.reviewSessionId,
+    return { sourcePath: launch.scope.canonicalSourcePath, sessionId: launch.scope.documentSessionId,
       documentGeneration: launch.scope.documentGeneration };
   }
 
@@ -116,7 +116,7 @@ export class NativeTaskLaunchRegistry {
     const launch = this.#launches.get(digestSecretHex(launchId));
     if (launch === undefined || launch.admission !== undefined) return undefined;
     const admission: NativeTaskLaunchAdmission = { id: secret(), sourcePath: launch.scope.canonicalSourcePath,
-      sessionId: launch.scope.reviewSessionId, documentGeneration: launch.scope.documentGeneration,
+      sessionId: launch.scope.documentSessionId, documentGeneration: launch.scope.documentGeneration,
       ...(launch.location === undefined ? {} : { location: launch.location }) };
     launch.admission = admission;
     this.#admissions.set(admission.id, launch);
@@ -126,7 +126,7 @@ export class NativeTaskLaunchRegistry {
   matches(admission: NativeTaskLaunchAdmission, sessionId: string, generation: number): boolean {
     this.#sweep();
     const launch = this.#admissions.get(admission.id);
-    return launch?.admission === admission && launch.scope.reviewSessionId === sessionId &&
+    return launch?.admission === admission && launch.scope.documentSessionId === sessionId &&
       launch.scope.documentGeneration === generation;
   }
 
@@ -200,7 +200,7 @@ export class NativeTaskLaunchRegistry {
   }
 
   #current(launch: Launch): boolean {
-    const live = this.#broker.nativeAdmissionScope(launch.scope.reviewSessionId);
+    const live = this.#broker.nativeAdmissionScope(launch.scope.documentSessionId);
     return live !== undefined && live.documentGeneration === launch.scope.documentGeneration &&
       live.sourceDigest === launch.scope.sourceDigest && live.canonicalSourcePath === launch.scope.canonicalSourcePath;
   }

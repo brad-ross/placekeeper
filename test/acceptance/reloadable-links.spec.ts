@@ -202,7 +202,7 @@ test("a pending restarted browser is promoted to Codex without remounting", asyn
     await first.broker.claimTaskBinding({
       bindProof: launched.bindProof,
       taskSessionId: "restart-owner-task",
-      reviewSessionId: launched.sessionId,
+      documentSessionId: launched.sessionId,
       documentGeneration: launched.documentGeneration,
     });
     await page.goto(launched.url);

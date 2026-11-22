@@ -272,8 +272,8 @@ export interface AppProps {
   onCopySelectionUpdate?: (update: CopySelectionUpdate) => void;
   documentTitle?: string;
   toolError?: string | null;
-  /** Production composes the viewer inside the canonical reading-first ReviewShell. */
-  embeddedInReviewShell?: boolean;
+  /** Production composes the viewer inside the canonical reading-first ReaderShell. */
+  embeddedInReaderShell?: boolean;
   ownedAnnotations?: readonly PdfWriterAnnotation[];
   authoringPreview?: readonly PdfWriterAnnotation[] | null;
   onViewerInteraction?: (event: ViewerInteractionEvent) => void;
@@ -335,7 +335,7 @@ export function App({
   onCopySelectionUpdate,
   documentTitle = 'Local PDF',
   toolError = null,
-  embeddedInReviewShell: embeddedInReaderShell = false,
+  embeddedInReaderShell = false,
   ownedAnnotations = [],
   authoringPreview = null,
   onViewerInteraction,

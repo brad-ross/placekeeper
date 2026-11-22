@@ -32,12 +32,12 @@ describe('owned mark page-space hit testing', () => {
     const projections = [
       {
         ...annotation('logical-item:projection:1', [{ x: 10, y: 10, width: 30, height: 8 }]),
-        reviewItemId: 'logical-item',
+        annotationItemId: 'logical-item',
         pageIndex: 1,
       },
       {
         ...annotation('logical-item:projection:2', [{ x: 10, y: 20, width: 45, height: 8 }]),
-        reviewItemId: 'logical-item',
+        annotationItemId: 'logical-item',
         pageIndex: 2,
       },
     ] as readonly PdfWriterAnnotation[];

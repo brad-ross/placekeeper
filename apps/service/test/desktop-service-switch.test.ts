@@ -22,7 +22,7 @@ async function fixture() {
   await writeFile(join(resources, "runtime-manifest.json"), JSON.stringify({ daemonIdentity: "a".repeat(64), installArtifactIdentity: "b".repeat(64), recovery: { readableDraftSchemaVersions: [1, 2, 3], writtenDraftSchemaVersion: 3 } }));
   return { resources, backup: join(root, "backup"), receipt: join(root, "receipt"), paths: { appSupportRoot: root, recoveryRoot, socketPath: join(root, "control.sock"), webAssetsRoot: join(root, "web") } };
 }
-const status = (documentPresence = 0) => ({ upgradePreparationVersion: 1 as const, protocolVersion: 1, daemonIdentity: "c".repeat(64), lifecycle: "accepting", activity: { reviewPresence: documentPresence, codexTasks: 0, transientWork: 0 } });
+const status = (documentPresence = 0) => ({ upgradePreparationVersion: 1 as const, protocolVersion: 1, daemonIdentity: "c".repeat(64), lifecycle: "accepting", activity: { documentPresence: documentPresence, codexTasks: 0, transientWork: 0 } });
 beforeEach(() => vi.clearAllMocks());
 describe("explicit candidate service switching and rollback", () => {
   it("does not retire an incumbent with a live review", async () => {

@@ -58,7 +58,7 @@ describe('browser interaction reconnect barrier', () => {
           ...authenticated,
           outcome: body.outcome as 'applied' | 'discarded',
           draftId: body.draftId as string,
-          reviewRevision: 1,
+          annotationRevision: 1,
         }));
       }
       throw new Error(`Unexpected request: ${path}`);

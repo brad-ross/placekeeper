@@ -638,7 +638,7 @@ interface CompactEditFrame {
   readonly composerPaint: string;
   readonly allRows: readonly {
     readonly origin: string;
-    readonly reviewItemId: string;
+    readonly annotationItemId: string;
     readonly reconciliationEntry: string;
     readonly reconciliationDraftId: string;
     readonly text: string;
@@ -721,7 +721,7 @@ async function beginCompactEditFrameAudit(page: Page): Promise<void> {
         composerPaint: paint(composer),
         allRows: allRows.map((row) => ({
           origin: row.dataset.annotationOrigin ?? '',
-          reviewItemId: row.dataset.annotationItem ?? '',
+          annotationItemId: row.dataset.annotationItem ?? '',
           reconciliationEntry: row.dataset.reconciliationEntry ?? '',
           reconciliationDraftId: row.dataset.reconciliationDraft ?? '',
           text: row.innerText,
@@ -1163,7 +1163,7 @@ test('keeps live protected drafts out of every attachment and reveals exact aban
           reconciliationDraftId === abandonedDraftId && painted
         )))).toBe(true);
       expect(frames.every(({ allRows }) => allRows
-        .some(({ reviewItemId: annotationId }) => annotationId === siblingId))).toBe(true);
+        .some(({ annotationItemId: annotationId }) => annotationId === siblingId))).toBe(true);
     }
   }
   expect(peerActiveBeforeRelease).toBe(0);

@@ -77,7 +77,7 @@ interface RegisteredProposal {
 
 interface ExecutionRecord {
   readonly taskSessionId: string;
-  readonly reviewSessionId: string;
+  readonly documentSessionId: string;
   readonly documentGeneration: number;
   readonly sourceRoot: string;
   readonly baseline: LiveExecutionBaselineV1;
@@ -351,7 +351,7 @@ export class SourceReconciliationService {
       if (binding === undefined) throw new Error("The Codex task has no active PDF binding");
       const capturedAt = this.#now().toISOString();
       const executionId = this.#executionId();
-      const captured = await this.#broker.projectAtomicSession(binding.reviewSessionId, async (snapshot) => {
+      const captured = await this.#broker.projectAtomicSession(binding.documentSessionId, async (snapshot) => {
         if (snapshot.documentGeneration !== binding.documentGeneration) {
           throw new Error("The PDF generation changed before source-work baseline capture");
         }
@@ -396,12 +396,12 @@ export class SourceReconciliationService {
       });
       if (captured === undefined) throw new Error("The bound PDF session is no longer active");
       if (!sameDocumentIdentity(
-        await this.#broker.snapshotAtomicSession(binding.reviewSessionId),
+        await this.#broker.snapshotAtomicSession(binding.documentSessionId),
         captured.baseline.identity,
       )) throw new Error("Review State changed during source-work baseline capture");
       const record: ExecutionRecord = {
         taskSessionId: input.taskSessionId,
-        reviewSessionId: binding.reviewSessionId,
+        documentSessionId: binding.documentSessionId,
         documentGeneration: binding.documentGeneration,
         sourceRoot: captured.root,
         baseline: captured.baseline,
@@ -468,11 +468,11 @@ export class SourceReconciliationService {
       const record = this.#record(input.taskSessionId, input.executionId);
       const binding = this.#broker.taskBindings.bindingForTask(input.taskSessionId);
       if (
-        binding === undefined || binding.reviewSessionId !== record.reviewSessionId ||
+        binding === undefined || binding.documentSessionId !== record.documentSessionId ||
         binding.documentGeneration !== record.documentGeneration
       ) throw new Error("The execution no longer belongs to the task's active PDF generation");
       const checkedAt = this.#now().toISOString();
-      const report = await this.#broker.projectAtomicSession(record.reviewSessionId, async (snapshot) => {
+      const report = await this.#broker.projectAtomicSession(record.documentSessionId, async (snapshot) => {
         if (snapshot.documentGeneration !== record.documentGeneration) {
           throw new Error("The PDF generation changed during reconciliation");
         }
@@ -587,7 +587,7 @@ export class SourceReconciliationService {
       });
       if (report === undefined) throw new Error("The bound PDF session ended during reconciliation");
       if (!sameDocumentIdentity(
-        await this.#broker.snapshotAtomicSession(record.reviewSessionId),
+        await this.#broker.snapshotAtomicSession(record.documentSessionId),
         report.identity,
       )) throw new Error("Review State changed during reconciliation");
       return {
