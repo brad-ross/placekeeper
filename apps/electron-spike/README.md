@@ -2,7 +2,7 @@
 
 This is a disposable decision probe, not an adopted Placekeeper host. It tests whether a
 sandboxed Electron window can make the existing Finder launch path feel like a dedicated
-macOS document app while the packaged Node daemon remains the sole review authority.
+macOS document app while the packaged Node daemon remains the sole document authority.
 
 The renderer receives no preload script, Node integration, filesystem path, launcher handle,
 or Electron API. The main process admits one PDF through the installed Placekeeper launcher,
@@ -33,7 +33,7 @@ pnpm spike:electron -- --probe-json --exit-after-probe /absolute/path/to/paper.p
 ```
 
 The JSON record includes Electron/Chromium/Node versions, launch-to-load time, main-process
-resident memory, renderer PID, final review URL, and the effective renderer isolation flags.
+resident memory, renderer PID, final document URL, and the effective renderer isolation flags.
 
 Build a temporary, ad-hoc-signed `.app` with PDF and spike-only URL registrations by running:
 
@@ -60,4 +60,4 @@ ordinary launches ignore them.
 
 Protected Recovery choices are intentionally not reimplemented in this spike. Encountering one
 fails closed; a production shell would reuse the service's complete recovery contract rather
-than invent Electron-owned review state.
+than invent Electron-owned annotation state.

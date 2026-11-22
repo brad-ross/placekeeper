@@ -14,14 +14,14 @@ The following commands and scenarios remain available for deeper testing. They a
 | --- | --- |
 | Fresh install | Actual supported installer entrypoint; bundled runtime and shell/PDF readiness; no development toolchain; default PDF association unchanged |
 | Identical reinstall | Same downloaded bytes, usable existing installation and unchanged work |
-| Accepted upgrade | Informed consent with active reviews in each host; acknowledged closure after durable writes; new shell usable |
+| Accepted upgrade | Informed consent with open documents in each host; acknowledged closure after durable writes; new shell usable |
 | Declined upgrade | Decline the actual installer dialog; incumbent stays usable and work remains |
 | Pending and failed writes | Delayed acknowledged write settles before replacement; failed protection prevents replacement |
 | Startup failure and recovery | Exact candidate activation failure; controlled retirement; prior installation and newer user data recoverable |
 | Uninstall and reinstall | Ordinary platform uninstall removes owned resources/registrations, preserves documents/recovery/unknown state, and reinstall reads retained work |
 | Integration repair | Previously opted-in registrations repaired; edited/foreign registrations preserved; host actions reported accurately |
 | Downloaded OS approval | Browser-download staged exact bytes, retain quarantine/Mark of the Web, exercise normal OS approval without disabling protections |
-| Real-host integrations | Native VS Code, Chrome and Codex on isolated profiles where supported, required trust/restart/permission actions and actual review work |
+| Real-host integrations | Native VS Code, Chrome and Codex on isolated profiles where supported, required trust/restart/permission actions and actual annotation work |
 | Linux multiple users | Two logged-in users, separate state roots, immutable prior runtime retained while either user still uses it |
 | Debian removal and purge | Real apt/dpkg install/upgrade/remove/purge; no root GUI; retained potentially active runtimes and user work; sandbox still enforced |
 | Public legacy service migration (Apple Silicon) | Actual published AppKit service creates accepted annotation and Protected Draft; exact DMG refuses unsafe retirement while retaining the old process and draft. User explicitly saves the draft in the old UI, then both annotations survive safe migration |

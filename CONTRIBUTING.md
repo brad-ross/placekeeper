@@ -6,13 +6,13 @@ Read [Concepts](docs/concepts.md) for domain vocabulary and the [documentation i
 
 | Area | Responsibility |
 | --- | --- |
-| `apps/web` | Shared production review client, PDF interaction adapters, host runtimes, static entry, and desktop web entry. |
-| `apps/service` | Local review authority: file capabilities, session lifecycle, durable recovery, PDF saves, source reconciliation, and host transports. |
+| `apps/web` | Shared production reader client, PDF interaction adapters, host runtimes, static entry, and desktop web entry. |
+| `apps/service` | Local document authority: file capabilities, session lifecycle, durable recovery, PDF saves, source reconciliation, and host transports. |
 | `apps/electron` | Production desktop windows, lifecycle, menus, sandboxed preload bridge, and platform packaging. |
-| `apps/vscode` | Trusted-workspace review panel, rebuild observation, editor navigation, and packaged web assets. |
+| `apps/vscode` | Trusted-workspace document panel, rebuild observation, editor navigation, and packaged web assets. |
 | `apps/chrome-extension` | PDF interception, browser source acquisition, and the Chrome runtime bridge. |
 | `apps/electron-spike` | Preserved decision probe; not an adopted production host. See its [README](apps/electron-spike/README.md). |
-| `packages/core` | Review state, commands, reducers, geometry, portable annotation contracts, and host protocol vocabulary. |
+| `packages/core` | Document state, commands, reducers, geometry, portable annotation contracts, and host protocol vocabulary. |
 | `packages/pdf-backends` | PDF inspection, annotation import, and verified writing through the selected backend. |
 | `scripts/build` | Pinned PDFium worker extraction and shared asset loading/emission. Host Vite configs retain host policy. |
 | `scripts/testing` | Explicit suite membership and ordered stages, thin command adapter, and shared browser/static configuration. |
@@ -20,27 +20,27 @@ Read [Concepts](docs/concepts.md) for domain vocabulary and the [documentation i
 | `packaging/desktop` | Bundled independent Node runtime, native launchers, manifest validation, and transactional source installation. |
 | `test` | Cross-package conformance, browser acceptance, fixtures, and shared test support. |
 
-## Ownership within the review client
+## Ownership within the reader client
 
-`ProductionReviewApp` composes the host runtime and mounted document. Focused hooks own search demand and cancellation (`pdf/use-pdf-search.ts`), save-destination attempts (`save/use-save-destination.ts`), SyncTeX request currentness (`host/use-host-synctex.ts`), and live context polling (`host/use-codex-context.ts`). Pure host projections live beside those hooks. Shared transport/result types belong in neutral modules rather than a component that consumes them.
+`ProductionReaderApp` composes the host runtime and mounted document. Focused hooks own search demand and cancellation (`pdf/use-pdf-search.ts`), save-destination attempts (`save/use-save-destination.ts`), SyncTeX request currentness (`host/use-host-synctex.ts`), and live context polling (`host/use-codex-context.ts`). Pure host projections live beside those hooks. Shared transport/result types belong in neutral modules rather than a component that consumes them.
 
-`ReviewShell` composes layout, input routing, and its domain models. `review/use-authoring-session.ts` owns frozen authoring authority, draft protection, command ordering, and settlement; `review/use-annotation-reader.ts` owns detail identity, measured-overflow resumption, and cancellable focus/scroll restoration. Geometry placement and navigation remain distinct from those transient lifecycles.
+`ReaderShell` composes layout, input routing, and its domain models. `reader/use-authoring-session.ts` owns frozen authoring authority, draft protection, command ordering, and settlement; `reader/use-annotation-reader.ts` owns detail identity, measured-overflow resumption, and cancellable focus/scroll restoration. Geometry placement and navigation remain distinct from those transient lifecycles.
 
 `SessionBroker` is the service facade and sole session authority. Its preparation helpers build candidates; they do not independently publish, persist, end sessions, or schedule a competing write tail. `RecoveryDecisions` and `PresentationRecords` own bounded bookkeeping, while the broker authorizes and applies their records. SyncTeX preparation remains in `synctex/generation-binding.ts`; the broker serializes attachment and operation-token publication.
 
 ## Style ownership
 
-`apps/web/src/app/review-layout.css` and `neutral-chrome.css` are ordered entrypoints. The neutral overrides load after base layout. Do not regroup late rules merely because their selectors name the same component: their position is part of the cascade.
+`apps/web/src/app/reader-layout.css` and `neutral-chrome.css` are ordered entrypoints. The neutral overrides load after base layout. Do not regroup late rules merely because their selectors name the same component: their position is part of the cascade.
 
 | Stylesheet group | Owner |
 | --- | --- |
-| `review-shell-chrome.css`, `review-viewer-framing.css` | Production root, titlebar, reading frame, workspace hosts, and native clipping boundary. |
-| `review-workspace-surfaces.css`, `review-search-references.css`, `review-outline-row-actions.css` | Trays, Search/References, Outline, and row actions. |
-| `review-annotation-rows-reader.css`, `review-annotation-marks-reconciliation.css` | Annotation content, full reader, marks, and reconciliation surfaces. |
-| `review-recovery.css`, `review-document-actions.css` | Recovery and document/save actions, including body-portaled menus. |
+| `reader-shell-chrome.css`, `reader-viewer-framing.css` | Production root, titlebar, reading frame, workspace hosts, and native clipping boundary. |
+| `reader-workspace-surfaces.css`, `reader-search-references.css`, `reader-outline-row-actions.css` | Trays, Search/References, Outline, and row actions. |
+| `reader-annotation-rows-reader.css`, `reader-annotation-marks-reconciliation.css` | Annotation content, full reader, marks, and reconciliation surfaces. |
+| `reader-recovery.css`, `reader-document-actions.css` | Recovery and document/save actions, including body-portaled menus. |
 | `neutral-controls.css`, `neutral-editor-surfaces.css`, `neutral-workspace-navigation.css` | Neutral controls, editors, and workspace navigation overrides. |
 | `neutral-context-status.css`, `neutral-annotation-rows-reader.css`, `neutral-workspace-interactions.css` | Status, annotation hierarchy, and deliberately late interaction refinements. |
-| `review-design-tokens.css`, `review-modal-surface.css` | Scoped shared tokens and modal/control grammar, including recovery, static launcher, and Chrome handler consumers. |
+| `reader-design-tokens.css`, `reader-modal-surface.css` | Scoped shared tokens and modal/control grammar, including recovery, static launcher, and Chrome handler consumers. |
 
 Global `--pk-*` and scoped `--reader-*` properties are not interchangeable aliases. Keep portal and non-production-root consumers in view. Desktop layout changes require evidence from the packaged Electron app; browser layout bounds alone cannot prove native-window behavior.
 
@@ -67,7 +67,7 @@ Use canonical aliases for the affected boundary:
 | Alias | Purpose |
 | --- | --- |
 | `pnpm test:service`, `pnpm test:security` | Service authority and security contracts. |
-| `pnpm test:web`, `pnpm test:review` | Web and review-model suites. |
+| `pnpm test:web`, `pnpm test:review` | Web and document-model suites. |
 | `pnpm test:save-export` | Save and export behavior; historical alias `test:u5`. |
 | `pnpm test:source-rebuild` | Source/rebuild workflows; historical alias `test:u6`. |
 | `pnpm test:host-integration` | Host integration; historical alias `test:u7-host`. |

@@ -32,11 +32,11 @@ The selected writer is EmbedPDF. Both current Acrobat and Apple Preview rows pas
 
 ## Standard annotation interoperability (2026-09-07)
 
-Standard reviewer annotations are imported into the editable annotation tray. Comment edits and deletion preserve the original drawing dictionaries and appearance streams; they do not reconstruct geometry. Unsupported or unparseable annotations remain in “From the PDF.” PDF annotation locks still apply. Form widgets and navigation links retain their existing specialized handling.
+Standard PDF annotations made in other tools are imported into the editable annotation tray. Comment edits and deletion preserve the original drawing dictionaries and appearance streams; they do not reconstruct geometry. Unsupported or unparseable annotations remain in “From the PDF.” PDF annotation locks still apply. Form widgets and navigation links retain their existing specialized handling.
 
 | Case | Result | Evidence |
 | --- | --- | --- |
-| Import, edit, save, reopen, and delete standard annotations | PASS | `reviewed-pdf.test.ts`, `native-annotations.test.ts`, and the imported-annotation production-flow browser test |
+| Import, edit, save, reopen, and delete standard annotations | PASS | `annotated-pdf.test.ts`, `native-annotations.test.ts`, and the imported-annotation production-flow browser test |
 | External changes override stale Placekeeper metadata | PASS | Regression edits standard `/Contents` and `/T`, then imports and saves again |
 | Original appearance, color, opacity, and author survive comment edits | PASS | Original `/AP` stream equality and annotation dictionary assertions |
 | Deleting a note removes its auxiliary popup and preserves replies | PASS | Saved PDF inventory and surviving reply dictionary assertions |
@@ -52,7 +52,7 @@ Google Drive desktop sync delayed the test on September 7; the local file was av
 
 ## Editable annotation appearance (2026-09-08)
 
-Newly created marks now use shared reader colors and text-ink centering with custom normal PDF appearance streams in both service and browser exports. Highlights distinguish plain and commented washes, corrections have muted red strikes (and replacement underlines), insertions have a slate caret, and page notes have a folded-note outline. The semantic Highlight, StrikeOut, and Text dictionaries, comments, author, geometry, and portable review metadata remain editable; page contents are not flattened. PDFium's expanded Text-icon bounds are used for painting so narrow insertion anchors do not magnify line widths.
+Newly created marks now use shared reader colors and text-ink centering with custom normal PDF appearance streams in both service and browser exports. Highlights distinguish plain and commented washes, corrections have muted red strikes (and replacement underlines), insertions have a slate caret, and page notes have a folded-note outline. The semantic Highlight, StrikeOut, and Text dictionaries, comments, author, geometry, and portable annotation metadata remain editable; page contents are not flattened. PDFium's expanded Text-icon bounds are used for painting so narrow insertion anchors do not magnify line widths.
 
 Imported and unchanged owned annotations keep their existing appearances. Adding or removing attached text redraws only a validated Placekeeper-owned highlight/replacement with the current appearance marker; ordinary comment changes preserve the original drawing. Existing exports are not globally restyled on a no-op save.
 
