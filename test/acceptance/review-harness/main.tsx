@@ -1215,7 +1215,7 @@ function Harness() {
         <div role="application" aria-label="PDF review canvas" tabIndex={0}>PDF page</div>
         <label>
           Native input
-          <input aria-label="Native input" defaultValue="native input" />
+          <input aria-label="Native input" defaultValue="native input" style={{ maxWidth: '100%', boxSizing: 'border-box' }} />
         </label>
         <label>
           Native textarea

@@ -6617,8 +6617,13 @@ test('keeps PDF drag selection available while the Annotation Tray is open', asy
   await expect(page.locator('#review-tools-workspace')).toHaveAttribute('data-authoring-takeover', 'true');
   await expect(page.locator('#review-tools-workspace')).toHaveAttribute('inert', '');
   await expect(page.locator('#review-tools-workspace')).toHaveAttribute('data-tools-workspace-open', 'true');
-  await expect(workspaceControl).toBeVisible();
-  expect(await workspaceControl.evaluate((control) => {
+  // During authoring the toolbar tray toggle targets References only, so a
+  // narrow review without References has none. The open tray keeps its own
+  // Hide Workspace control outside the inert tools surface.
+  await expect(workspaceControl).toHaveCount(0);
+  const trayHide = page.locator('#review-workspace').getByRole('button', { name: 'Hide Workspace', exact: true });
+  await expect(trayHide).toBeVisible();
+  expect(await trayHide.evaluate((control) => {
     const workspace = control.closest<HTMLElement>('#review-workspace, #review-tools-workspace');
     (control as HTMLElement).focus();
     return {
