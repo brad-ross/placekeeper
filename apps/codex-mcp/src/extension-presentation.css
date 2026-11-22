@@ -47,20 +47,23 @@ html[data-placekeeper-extension="true"][data-theme="dark"] :is(#root[data-produc
 
 /* An inline host sizes the iframe from its contents. Reserve room for the modal. */
 .extension-controls:has(.extension-recovery[open]) { min-height: 360px; }
-/* Use the desktop recovery surface; only modal geometry belongs to the host. */
+/* The desktop recovery surface at the width of the app's compact choice dialogs; only modal geometry belongs to the host. */
 dialog.extension-recovery {
-  width: min(34rem, calc(100% - 2rem));
+  width: min(26rem, calc(100% - 2rem));
   padding: 0;
   overscroll-behavior: contain;
 }
 .extension-recovery:not([open]) { display: none; }
 .extension-recovery::backdrop { background: var(--review-backdrop); }
 .extension-recovery__feedback:empty { display: none; }
-/* The secondary choice sits on the subtle row surface; give it the panel fill so it reads as a button.
-   `#root` only lifts specificity over the shared ID-weighted button rule; hover there still wins. */
-dialog.extension-recovery .terminal-recovery__choice > :is(#root, .terminal-recovery__secondary) { background: var(--review-surface-panel); }
+.extension-recovery .terminal-recovery__body { gap: 12px; }
+.extension-recovery__choices { display: grid; gap: 4px; }
+.extension-recovery__choice { margin: 0; color: var(--review-ink-muted); font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+.extension-recovery__choice-label { color: var(--review-ink-primary); font-weight: 500; }
 @media (max-width: 420px) {
-  .extension-recovery .terminal-recovery__choice { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+  .extension-recovery .terminal-recovery__header { padding: 19px 18px 9px; }
+  .extension-recovery .terminal-recovery__body { padding: 0 18px 16px; }
+  .extension-recovery .terminal-recovery__footer { padding: 0 18px 18px; }
 }
 html[data-placekeeper-extension="true"] body:has(.extension-controls[data-mode="chooser"]) {
   display: flex;
@@ -105,7 +108,6 @@ html[data-placekeeper-extension="true"] body:has(.extension-controls[data-mode="
 .extension-recent-card__actions { display: flex; align-items: center; gap: 2px; }
 .extension-recent-card__feedback { grid-column: 1 / -1; }
 .extension-recent-card__feedback:empty { display: none; }
-.extension-recovery .terminal-recovery__actions { justify-content: flex-start; }
 @media (max-width: 480px) {
   .extension-controls .extension-recent-list > .extension-recent-card { grid-template-columns: minmax(0, 1fr); }
   .extension-recent-card__actions { justify-content: flex-end; }

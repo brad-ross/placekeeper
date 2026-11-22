@@ -62,6 +62,8 @@ export class ExtensionShell {
     #title: string | undefined;
     #displayMode: string | undefined;
     #message = '';
+    /** A declined expand request; shown only while the reader is still hidden, never as #message. */
+    #expandDeclined = false;
     #host: HostResourceAdapter | undefined;
     #hostNotice = '';
     #exportNotice = '';
@@ -144,8 +146,10 @@ export class ExtensionShell {
         if (this.#closed) return;
         this.#message = text;
         const compact = this.#active && this.#displayMode !== 'fullscreen';
-        const summary = compact ? `${this.#snapshot?.title ?? this.#title ?? 'Placekeeper PDF'}${this.#snapshot ? ` · Page ${this.#snapshot.page} of ${this.#snapshot.pageCount}` : ''}. Open the reader to edit.` : '';
-        this.status.textContent = [summary, text, this.#exportNotice].filter(Boolean).join(' ');
+        // A declined expand request only adjusts the compact line; it is never shown over a visible reader.
+        const hint = compact && this.#expandDeclined ? this.#forHost('This host could not expand the reader. Open Placekeeper in the conversation panel to edit.', 'Use the expand control to open the reader.') : '';
+        const summary = compact ? `${this.#snapshot?.title ?? this.#title ?? 'Placekeeper PDF'}${this.#snapshot ? ` · Page ${this.#snapshot.page} of ${this.#snapshot.pageCount}` : ''}.${hint ? '' : ' Open the reader to edit.'}` : '';
+        this.status.textContent = [summary, text, hint, this.#exportNotice].filter(Boolean).join(' ');
         this.controls.dataset.displayMode = compact ? 'inline' : 'fullscreen';
         this.status.hidden = !this.status.textContent || (this.#loading !== undefined && !compact);
     }
@@ -185,6 +189,7 @@ export class ExtensionShell {
     }
     hostContextChanged(context: NonNullable<ReturnType<App['getHostContext']>>, reconcileContext = true) {
         if (context.displayMode !== undefined) this.#displayMode = context.displayMode;
+        if (this.#displayMode === 'fullscreen') this.#expandDeclined = false;
         if (this.#received) {
             const html = document.documentElement;
             if (html) {
@@ -289,10 +294,10 @@ export class ExtensionShell {
             this.controls.className = 'extension-controls';
             this.controls.dataset.mode = 'review';
             this.status.dataset.extensionMode = 'review';
+            this.#expandDeclined = false;
             this.#openReader = this.#button('Open reader', async () => {
-                const declined = () => this.#show(this.#forHost('This host could not expand the reader. Open Placekeeper in the conversation panel to edit.', 'This app could not expand the reader.'));
-                try { const result = await this.app.requestDisplayMode({ mode: 'fullscreen' }); this.hostContextChanged({ displayMode: result.mode }); if (result.mode !== 'fullscreen') declined(); }
-                catch { declined(); }
+                const mode = await this.#requestFullscreen().catch(() => undefined);
+                if (mode !== 'fullscreen' && this.#displayMode !== 'fullscreen') { this.#expandDeclined = true; this.#show(this.#message); }
             });
             this.hostContextChanged(this.app.getHostContext?.() ?? {}, false);
             this.#mount();
@@ -339,6 +344,17 @@ export class ExtensionShell {
                 }
             }, onUpdate: () => { this.#hostRefreshPending = true; this.#hostUpdateRevision++; if (this.#active) void this.#refreshHost(); } });
     }
+    /**
+     * Requests fullscreen and applies the answer. The host may announce fullscreen through host context before (or after)
+     * the request resolves with an older mode, so a fullscreen context is never overridden by the request's answer.
+     */
+    async #requestFullscreen(current: () => boolean = () => true) {
+        const result = await this.app.requestDisplayMode({ mode: 'fullscreen' });
+        if (!current()) return result.mode;
+        const mode = result.mode === 'fullscreen' || this.app.getHostContext?.()?.displayMode === 'fullscreen' ? 'fullscreen' : result.mode;
+        this.hostContextChanged({ displayMode: mode });
+        return mode;
+    }
     #closeRecovery() {
         this.#recoveryDialog?.close();
         this.#recoveryDialog?.remove();
@@ -353,6 +369,7 @@ export class ExtensionShell {
         const current = () => !this.#closed && epoch === this.#choiceEpoch;
         const dialog = document.createElement('dialog');
         this.#recoveryDialog = dialog;
+        // Same surface and order as the app's compact dialogs: title, one-line reason, then one action row.
         dialog.className = 'extension-recovery terminal-recovery';
         dialog.setAttribute('aria-labelledby', 'extension-recovery-title');
         const header = document.createElement('header');
@@ -361,6 +378,9 @@ export class ExtensionShell {
         body.className = 'terminal-recovery__body';
         const title = document.createElement('h1');
         title.id = 'extension-recovery-title';
+        // Like the desktop recovery page, start on the title so no action looks preselected; Tab reaches the actions.
+        title.tabIndex = -1;
+        title.autofocus = true;
         const available = offer.canRecover || offer.canResume;
         title.textContent = 'Reopen Document';
         const description = document.createElement('p');
@@ -376,7 +396,7 @@ export class ExtensionShell {
         feedback.className = 'extension-recovery__feedback terminal-recovery__status';
         feedback.setAttribute('role', 'status');
         const choices = document.createElement('div');
-        choices.className = 'terminal-recovery__actions';
+        choices.className = 'extension-recovery__choices';
         const footer = document.createElement('div');
         footer.className = 'terminal-recovery__footer';
         const footerActions = document.createElement('div');
@@ -428,35 +448,39 @@ export class ExtensionShell {
             parent.append(button);
             return button;
         };
-        // Same row as the desktop recovery surface: the button beside its visible consequence.
-        const addChoice = (choice: 'recover' | 'resume' | 'fork', label: string, consequence: string) => {
-            const row = document.createElement('div');
-            row.className = 'terminal-recovery__choice';
-            const operationId = crypto.randomUUID();
-            const request = { action: 'choose', recoveryToken: offer.recoveryToken, choice, operationId } as const;
-            const button = action(label, row, () => { void run(request, 'Opening review…'); });
-            button.className = choice === 'fork' ? 'terminal-recovery__secondary' : 'terminal-recovery__primary';
-            const detail = document.createElement('p');
-            detail.id = `extension-recovery-${choice}`;
-            detail.textContent = consequence;
-            button.setAttribute('aria-describedby', detail.id);
-            row.append(detail);
-            choices.append(row);
-        };
-        if (offer.canRecover) addChoice('recover', 'Continue', 'Transfer this review here and prevent the previous reader from making further changes.');
-        else if (offer.canResume) addChoice('resume', 'Continue', 'Continue with your existing annotations and protected draft.');
-        addChoice('fork', 'Open Copy', 'Start a separate review and keep the existing work in place.');
-        if (!available) action('Check again', footerActions, () => {
-            void run({ action: 'recheck', recoveryToken: offer.recoveryToken }, 'Checking the previous connection…');
-        });
         const cancel = () => {
             if (!current() || pending) return;
             this.#closeRecovery();
             if (this.#active && this.#grant) void this.#apply({ status: 'active', grant: this.#grant, presentation: this.#active });
             else this.#chooser(undefined, undefined, false, true);
         };
-        const cancelButton = action('Cancel', footerActions, cancel);
-        cancelButton.autofocus = true;
+        // One action row (Cancel, alternatives, primary last); a short line above each names its consequence.
+        action('Cancel', footerActions, cancel);
+        const choice = (kind: 'recover' | 'resume' | 'fork', label: string, consequence: string) => {
+            const line = document.createElement('p');
+            line.className = 'extension-recovery__choice';
+            const name = document.createElement('span');
+            name.className = 'extension-recovery__choice-label';
+            name.textContent = label;
+            const detail = document.createElement('span');
+            detail.id = `extension-recovery-${kind}`;
+            detail.textContent = consequence;
+            line.append(name, ' ', detail);
+            choices.append(line);
+            const request = { action: 'choose', recoveryToken: offer.recoveryToken, choice: kind, operationId: crypto.randomUUID() } as const;
+            return () => {
+                const button = action(label, footerActions, () => { void run(request, 'Opening review…'); });
+                button.className = kind === 'fork' ? 'terminal-recovery__secondary' : 'terminal-recovery__primary';
+                button.setAttribute('aria-describedby', detail.id);
+            };
+        };
+        const proceed = offer.canRecover ? choice('recover', 'Continue', 'moves this review here and stops the other reader from making changes.')
+            : offer.canResume ? choice('resume', 'Continue', 'picks up your existing annotations and protected draft.') : undefined;
+        choice('fork', 'Open Copy', 'starts a separate review and keeps the existing work in place.')();
+        if (proceed) proceed();
+        else action('Check again', footerActions, () => {
+            void run({ action: 'recheck', recoveryToken: offer.recoveryToken }, 'Checking the previous connection…');
+        }).className = 'terminal-recovery__primary';
         dialog.oncancel = event => { event.preventDefault(); cancel(); };
         this.controls.append(dialog);
         dialog.showModal();
@@ -748,7 +772,7 @@ export class ExtensionShell {
             ensureVisible: async () => {
                 if (epoch !== this.#epoch || !this.#connected || this.#closed) return false;
                 if (this.#displayMode !== 'fullscreen' || document.hidden || this.root.hidden) {
-                    try { const result = await this.app.requestDisplayMode({ mode: 'fullscreen' }); if (epoch !== this.#epoch) return false; this.hostContextChanged({ displayMode: result.mode }); }
+                    try { await this.#requestFullscreen(() => epoch === this.#epoch); if (epoch !== this.#epoch) return false; }
                     catch { return false; }
                 }
                 const visible = () => epoch === this.#epoch && this.#connected && !this.#closed && !document.hidden && !this.root.hidden && !this.root.inert;

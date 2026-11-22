@@ -296,7 +296,7 @@ it.each([false, true])('reopens the selected host PDF after recovery bytes chang
     }, () => resources);
     await f.shell.receive({ status: 'host-resource', file, ticket: 'p'.repeat(43) });
     expect(descendants(f.controls).map(node => node.textContent).join(' ')).toContain('a similar filename');
-    const resume = descendants(f.controls).find(button => button.textContent === 'Continue');
+    const resume = descendants(f.controls).find(button => button.tagName === 'BUTTON' && button.textContent === 'Continue');
     resume.onclick();
     if (lostResponse) {
         await vi.waitFor(() => expect(descendants(f.controls).map(node => node.textContent).join(' ')).toContain('protected work is retained'));
@@ -329,7 +329,7 @@ it('disposes the host route when a busy resource is canceled before choosing a l
         return reply({ status: 'ok', payload: {} });
     }, () => resources);
     await f.shell.receive({ status: 'host-resource', file: { name: 'host.pdf', resourceUri: 'opaque:host' }, ticket: 'p'.repeat(43) });
-    const button = (text: string) => descendants(f.controls).find(button => button.textContent === text);
+    const button = (text: string) => descendants(f.controls).find(button => button.tagName === 'BUTTON' && button.textContent === text);
     button('Cancel').onclick(); await vi.advanceTimersByTimeAsync(0);
     button('New Document').onclick();
     await vi.waitFor(() => expect(host.mounts).toHaveLength(1));
@@ -352,7 +352,7 @@ it.each(['provisional', 'busy'] as const)('uses the local source route after an 
         if (request.action === 'activate') return reply(active(nextGrant));
         return reply({ status: 'ok', payload: {} });
     }, () => resources);
-    const button = (text: string) => descendants(f.controls).filter(button => button.textContent === text).at(-1);
+    const button = (text: string) => descendants(f.controls).filter(button => button.tagName === 'BUTTON' && button.textContent === text).at(-1);
     await f.shell.receive({ status: 'host-resource', file: { name: 'host.pdf', resourceUri: 'opaque:host' }, ticket: 'p'.repeat(43) });
     await vi.advanceTimersByTimeAsync(95_000);
     button('Open Copy').onclick(); await vi.advanceTimersByTimeAsync(0);
@@ -389,7 +389,7 @@ it('keeps a transport-paused host reader paused when explicit refresh cannot val
     resources.read.mockRejectedValueOnce(Error('resource unavailable'));
     onUpdate({ params: { uri: 'opaque:host' } });
     await vi.waitFor(() => expect(f.status.textContent).toContain('could not be refreshed'));
-    const retry = descendants(f.controls).find(button => button.textContent === 'Retry refresh');
+    const retry = descendants(f.controls).find(button => button.tagName === 'BUTTON' && button.textContent === 'Retry refresh');
     const reads = resources.read.mock.calls.length;
     resources.read.mockRejectedValueOnce(Error('resource still unavailable'));
     retry.onclick(); await vi.advanceTimersByTimeAsync(0);
@@ -408,7 +408,7 @@ it('shows a compact open-reader view, applies host theme and safe areas, and exp
     expect(f.root.hidden).toBe(true); expect(f.status.textContent).toContain('Open the reader to edit');
     host.mounts[0][6]('Paper.pdf', 1); expect(f.status.textContent).toContain('Paper.pdf');
     expect(html.dataset.theme).toBe('dark'); expect(html.style.setProperty).toHaveBeenCalledWith('--placekeeper-safe-top', '12px');
-    const button = descendants(f.controls).find(button => button.textContent === 'Open reader');
+    const button = descendants(f.controls).find(button => button.tagName === 'BUTTON' && button.textContent === 'Open reader');
     button.onclick(); await vi.advanceTimersByTimeAsync(0);
     expect(expand).toHaveBeenCalledWith({ mode: 'fullscreen' }); expect(f.root.hidden).toBe(false);
     await f.shell.teardown();
@@ -565,10 +565,10 @@ it.each(['Open Copy', 'Cancel'])('keeps %s fenced while a recovery resume is pen
     const dialog = descendants(f.controls).find(node => node.tagName === 'DIALOG');
     expect(dialog?.showModal).toHaveBeenCalledOnce();
     const buttons = descendants(dialog).filter(node => node.tagName === 'BUTTON');
-    const resume = buttons.find(button => button.textContent === 'Continue');
+    const resume = buttons.find(button => button.tagName === 'BUTTON' && button.textContent === 'Continue');
     resume.onclick();
     expect(buttons.every(button => button.disabled)).toBe(true);
-    buttons.find(button => button.textContent === competing).onclick();
+    buttons.find(button => button.tagName === 'BUTTON' && button.textContent === competing).onclick();
     expect(f.calls.filter(c => c.action === 'choose')).toHaveLength(1);
     pending.resolve(reply(active(nextGrant))); await vi.advanceTimersByTimeAsync(0);
     expect(host.mounts).toHaveLength(1);
@@ -582,15 +582,15 @@ it('offers fresh source selection after an expired recovery choice without endin
     await f.shell.receive({ status: 'busy', recoveryToken: 'r'.repeat(43), canResume: true });
     const oldButtons = descendants(f.controls);
     await vi.advanceTimersByTimeAsync(95_000);
-    oldButtons.find(button => button.textContent === 'Open Copy').onclick();
+    oldButtons.find(button => button.tagName === 'BUTTON' && button.textContent === 'Open Copy').onclick();
     await vi.advanceTimersByTimeAsync(0);
     expect(f.status.textContent).toContain('Choose the PDF again');
     expect(f.status.textContent).not.toContain('connection ended');
     expect(host.mounts).toHaveLength(0);
-    oldButtons.find(button => button.textContent === 'Continue').onclick();
+    oldButtons.find(button => button.tagName === 'BUTTON' && button.textContent === 'Continue').onclick();
     await vi.advanceTimersByTimeAsync(0);
     expect(f.calls.filter(c => c.action === 'choose')).toHaveLength(1);
-    descendants(f.controls).find(button => button.textContent === 'Choose PDF again').onclick();
+    descendants(f.controls).find(button => button.tagName === 'BUTTON' && button.textContent === 'Choose PDF again').onclick();
     await vi.advanceTimersByTimeAsync(0);
     expect(f.calls.filter(c => c.action === 'open')).toEqual([{ action: 'open' }]);
     expect(descendants(f.controls).map(node => node.textContent).join(' ')).toContain('Reopen Document');
@@ -602,8 +602,8 @@ it('fences retained recovery callbacks after cancel', async () => {
     const f = fixture(async () => reply({ status: 'cancelled' }));
     await f.shell.receive({ status: 'busy', recoveryToken: 'r'.repeat(43), canResume: true });
     const buttons = descendants(f.controls);
-    buttons.find(button => button.textContent === 'Cancel').onclick(); await vi.advanceTimersByTimeAsync(0);
-    buttons.find(button => button.textContent === 'Continue').onclick(); await vi.advanceTimersByTimeAsync(0);
+    buttons.find(button => button.tagName === 'BUTTON' && button.textContent === 'Cancel').onclick(); await vi.advanceTimersByTimeAsync(0);
+    buttons.find(button => button.tagName === 'BUTTON' && button.textContent === 'Continue').onclick(); await vi.advanceTimersByTimeAsync(0);
     expect(f.calls.filter(c => c.action === 'choose')).toHaveLength(0);
     expect(host.mounts).toHaveLength(0);
     await f.shell.teardown();
@@ -613,12 +613,12 @@ it('fences an expired-choice picker and revokes its late grant after cancel', as
     const pending = deferred();
     const f = fixture(async request => request.action === 'open' ? pending.promise : reply(request.action === 'choose' ? { status: 'unavailable' } : { status: 'closed' }));
     await f.shell.receive({ status: 'busy', recoveryToken: 'r'.repeat(43), canResume: true });
-    descendants(f.controls).find(button => button.textContent === 'Open Copy').onclick();
+    descendants(f.controls).find(button => button.tagName === 'BUTTON' && button.textContent === 'Open Copy').onclick();
     await vi.advanceTimersByTimeAsync(0);
     const buttons = descendants(f.controls);
-    const choose = buttons.find(button => button.textContent === 'Choose PDF again');
+    const choose = buttons.find(button => button.tagName === 'BUTTON' && button.textContent === 'Choose PDF again');
     choose.onclick();
-    buttons.filter(button => button.textContent === 'Cancel').at(-1).onclick();
+    buttons.filter(button => button.tagName === 'BUTTON' && button.textContent === 'Cancel').at(-1).onclick();
     await vi.advanceTimersByTimeAsync(0);
     pending.resolve(reply(active(nextGrant))); await vi.advanceTimersByTimeAsync(0);
     choose.onclick(); await vi.advanceTimersByTimeAsync(0);
@@ -641,7 +641,7 @@ it('revokes a late recovery choice grant after teardown', async () => {
     const pending = deferred();
     const f = fixture(async request => request.action === 'choose' ? pending.promise : reply({ status: 'closed' }));
     await f.shell.receive({ status: 'busy', recoveryToken: 'r'.repeat(43), canResume: true });
-    descendants(f.controls).find(button => button.textContent === 'Continue').onclick();
+    descendants(f.controls).find(button => button.tagName === 'BUTTON' && button.textContent === 'Continue').onclick();
     await f.shell.teardown(); pending.resolve(reply(active(nextGrant))); await vi.advanceTimersByTimeAsync(0);
     expect(f.calls.filter(c => c.action === 'revoke').map(c => c.grant)).toEqual([nextGrant]);
     expect(host.mounts).toHaveLength(0);
@@ -651,7 +651,7 @@ it('restores the recovery button group after a failed choice and retries its ope
     let attempts = 0;
     const f = fixture(async request => { if (request.action === 'choose') { if (++attempts === 1) throw Error('offline'); return reply(active(nextGrant)); } return reply({ status: 'closed' }); });
     await f.shell.receive({ status: 'busy', recoveryToken: 'r'.repeat(43), canResume: true });
-    const buttons = descendants(f.controls).filter(node => node.tagName === 'BUTTON'), resume = buttons.find(button => button.textContent === 'Continue');
+    const buttons = descendants(f.controls).filter(node => node.tagName === 'BUTTON'), resume = buttons.find(button => button.tagName === 'BUTTON' && button.textContent === 'Continue');
     resume.onclick(); await vi.advanceTimersByTimeAsync(0);
     expect(buttons.every(button => button.disabled === false)).toBe(true);
     resume.onclick(); await vi.advanceTimersByTimeAsync(0);
@@ -663,7 +663,7 @@ it('revokes a late chooser result after teardown and fences the retained picker 
     const pending = deferred();
     const f = fixture(async request => request.action === 'open' ? pending.promise : reply({ status: 'closed' }));
     await f.shell.receive({ status: 'chooser' });
-    const choose = descendants(f.controls).find(button => button.textContent === 'New Document');
+    const choose = descendants(f.controls).find(button => button.tagName === 'BUTTON' && button.textContent === 'New Document');
     choose.onclick(); await f.shell.teardown();
     pending.resolve(reply(active(nextGrant))); await vi.advanceTimersByTimeAsync(0);
     choose.onclick(); await vi.advanceTimersByTimeAsync(0);
@@ -768,12 +768,12 @@ it('rechecks a live review and waits for a separate user choice before resuming'
     });
     await f.shell.receive({ status: 'busy', recoveryToken: liveToken, canResume: false });
     const nodes = () => descendants(f.controls);
-    expect(nodes().some(node => node.textContent === 'Continue')).toBe(false);
-    nodes().find(node => node.textContent === 'Check again').onclick();
+    expect(nodes().some(node => node.tagName === 'BUTTON' && node.textContent === 'Continue')).toBe(false);
+    nodes().find(node => node.tagName === 'BUTTON' && node.textContent === 'Check again').onclick();
     await vi.advanceTimersByTimeAsync(0);
     expect(f.calls).toEqual([{ action: 'recheck', recoveryToken: liveToken }]);
     expect(host.mounts).toHaveLength(0);
-    nodes().find(node => node.textContent === 'Continue').onclick();
+    nodes().find(node => node.tagName === 'BUTTON' && node.textContent === 'Continue').onclick();
     await vi.advanceTimersByTimeAsync(0);
     expect(f.calls.find(c => c.action === 'choose')).toMatchObject({ choice: 'recover', recoveryToken: recoveredToken });
     expect(host.mounts).toHaveLength(1);
@@ -783,7 +783,7 @@ it('offers explicit disconnected recovery without silently choosing it', async (
  const f=fixture(async r=>reply(r.action==='choose'?{status:'provisional',grant}:r.action==='activate'?active():{status:'ok',payload:{}}));
  await f.shell.receive({status:'busy',recoveryToken:'r'.repeat(43),canResume:false,canRecover:true});
  expect(f.calls.some(r=>r.action==='choose')).toBe(false);
- const recover=descendants(f.controls).find(b=>b.textContent==='Continue');
+ const recover=descendants(f.controls).find(b => b.tagName === 'BUTTON' && b.textContent ==='Continue');
  expect(recover).toBeDefined();recover.onclick();await vi.advanceTimersByTimeAsync(0);
  expect(f.calls.find(r=>r.action==='choose')).toMatchObject({choice:'recover'});
  expect(host.mounts).toHaveLength(1);await f.shell.teardown();
@@ -793,7 +793,7 @@ it('lists recent reviews in the conversation chooser and opens only the selected
  const f=fixture(async r=>reply(r.action==='recent-list'?{status:'recent-reviews',items:[{id,title:'Recent.pdf',updatedAt:'2026-11-05T12:00:00.000Z',page:3}]}:r.action==='recent-open'?{status:'busy',recoveryToken:'r'.repeat(43),canResume:true}:{status:'closed'}));
  await f.shell.receive({status:'chooser'});await vi.advanceTimersByTimeAsync(0);
  expect(f.calls.some(r=>r.action==='recent-open')).toBe(false);
- const resume=descendants(f.controls).find(b=>b.textContent==='Resume');
+ const resume=descendants(f.controls).find(b => b.tagName === 'BUTTON' && b.textContent ==='Resume');
  expect(resume).toBeDefined();resume.onclick();await vi.advanceTimersByTimeAsync(0);
  expect(f.calls.find(r=>r.action==='recent-open')).toEqual({action:'recent-open',id});
  expect(f.calls.find(r=>r.action==='choose')).toMatchObject({choice:'resume'});
@@ -814,7 +814,7 @@ it.each(['picker', 'recent'] as const)('serializes %s opening against the other 
  const f=fixture(async r=>r.action==='recent-list'?reply({status:'recent-reviews',items:[{id,title:'Recent.pdf',updatedAt:'2026-11-05T12:00:00.000Z'}]}):r.action==='open'||r.action==='recent-open'?opening.promise:r.action==='activate'?activation.promise:reply({status:'closed'}));
  await f.shell.receive({status:'chooser'});await vi.advanceTimersByTimeAsync(0);
  const buttons=descendants(f.controls);
- const picker=buttons.find(b=>b.textContent==='New Document'), recent=buttons.find(b=>b.textContent==='Resume');
+ const picker=buttons.find(b => b.tagName === 'BUTTON' && b.textContent ==='New Document'), recent=buttons.find(b => b.tagName === 'BUTTON' && b.textContent ==='Resume');
  const chosen=first==='picker'?picker:recent, other=first==='picker'?recent:picker;
  chosen.onclick();other.onclick();await vi.advanceTimersByTimeAsync(0);
  expect(f.calls.filter(r=>r.action==='open'||r.action==='recent-open')).toHaveLength(1);
@@ -834,7 +834,7 @@ it.each(['resume', 'fork'] as const)('runs recent %s directly and retries a lost
   return reply({status:'closed'});
  });
  await f.shell.receive({status:'chooser'});await vi.advanceTimersByTimeAsync(0);
- const button=descendants(f.controls).find(b=>b.textContent===(choice==='resume'?'Resume':'Open Copy'));
+ const button=descendants(f.controls).find(b => b.tagName === 'BUTTON' && b.textContent ===(choice==='resume'?'Resume':'Open Copy'));
  button.onclick();await vi.advanceTimersByTimeAsync(0);
  expect(descendants(f.controls).some(b=>b.tagName==='DIALOG')).toBe(false);
  button.onclick();await vi.advanceTimersByTimeAsync(0);
@@ -846,7 +846,7 @@ it.each(['resume', 'fork'] as const)('runs recent %s directly and retries a lost
 it('leaves a still-owned recent document in its card without taking over or opening a dialog', async () => {
  const f=fixture(async r=>reply(r.action==='recent-list'?{status:'recent-reviews',items:[{id:'z'.repeat(32),title:'Recent.pdf',updatedAt:'2026-11-05T12:00:00Z'}]}:r.action==='recent-open'?{status:'busy',recoveryToken:'r'.repeat(43),canResume:false}:{status:'closed'}));
  await f.shell.receive({status:'chooser'});await vi.advanceTimersByTimeAsync(0);
- descendants(f.controls).find(b=>b.textContent==='Resume').onclick();await vi.advanceTimersByTimeAsync(0);
+ descendants(f.controls).find(b => b.tagName === 'BUTTON' && b.textContent ==='Resume').onclick();await vi.advanceTimersByTimeAsync(0);
  expect(f.calls.some(r=>r.action==='choose')).toBe(false);
  expect(descendants(f.controls).some(b=>b.tagName==='DIALOG')).toBe(false);
  expect(descendants(f.controls).map(b=>b.textContent).join(' ')).toContain('Still open elsewhere');
@@ -1217,7 +1217,7 @@ describe('plain MCP Apps host (Claude Desktop)', () => {
         Object.assign(f.app, { getHostCapabilities: () => ({}), getHostContext: () => context, downloadFile: undefined });
         return f;
     }
-    const button = (f: ReturnType<typeof fixture>, label: string) => descendants(f.controls).filter(node => node.textContent === label).at(-1);
+    const button = (f: ReturnType<typeof fixture>, label: string) => descendants(f.controls).filter(node => node.tagName === 'BUTTON' && node.textContent === label).at(-1);
 
     it.each([[{ displayMode: 'inline' }], [{}]])('opens from the chooser to a mounted compact reader with no OpenAI APIs (context %j)', async context => {
         const f = plainHost(context);
@@ -1267,16 +1267,54 @@ describe('plain MCP Apps host (Claude Desktop)', () => {
     it.each([
         ['rejects', vi.fn(async () => { throw Error('unsupported'); })],
         ['answers inline', vi.fn(async () => ({ mode: 'inline' }))],
-    ])('shows the fallback message when the host %s the fullscreen request', async (_name, expand) => {
+    ])('shows a calm expand hint when the host %s the fullscreen request', async (_name, expand) => {
         const f = plainHost();
         Object.assign(f.app, { requestDisplayMode: expand });
         await f.shell.receive({ status: 'provisional', grant });
         const open = button(f, 'Open reader');
         expect(() => open.onclick()).not.toThrow(); await vi.advanceTimersByTimeAsync(0);
         expect(f.root.hidden).toBe(true);
-        expect(f.status.textContent).toContain('This app could not expand the reader.');
-        expect(f.status.textContent).not.toContain('conversation panel');
+        expect(open.hidden).toBe(false);
+        expect(f.status.textContent).toContain('Use the expand control to open the reader.');
+        expect(f.status.textContent).not.toMatch(/could not expand|conversation panel|Open the reader to edit/);
         expect(open.disabled).toBe(false);
+        await f.shell.teardown();
+    });
+
+    it('clears a declined expand once the host later shows the reader fullscreen', async () => {
+        const f = plainHost();
+        Object.assign(f.app, { requestDisplayMode: vi.fn(async () => ({ mode: 'inline' })) });
+        await f.shell.receive({ status: 'provisional', grant });
+        button(f, 'Open reader').onclick(); await vi.advanceTimersByTimeAsync(0);
+        expect(f.status.textContent).toContain('Use the expand control');
+        // Claude moves the view to its side panel and reports fullscreen afterwards.
+        f.shell.hostContextChanged({ displayMode: 'fullscreen' });
+        expect(f.root.hidden).toBe(false);
+        expect(f.status.textContent).not.toMatch(/expand/);
+        host.mounts[0][5]({ documentGeneration: 1, reviewRevision: 1, title: 'Paper', source: { digest: 'd', fileId: 'f' }, page: 1, pageCount: 2, selection: null, annotations: [] });
+        expect(f.status.textContent).not.toMatch(/expand/);
+        // Back inline, the earlier decline is not resurrected.
+        f.shell.hostContextChanged({ displayMode: 'inline' });
+        expect(f.status.textContent).not.toMatch(/expand/);
+        expect(f.status.textContent).toContain('Open the reader to edit');
+        await f.shell.teardown();
+    });
+
+    it('shows the reader and no decline when the request answers inline but host context already says fullscreen', async () => {
+        const context: Record<string, unknown> = { displayMode: 'inline' };
+        const f = plainHost(context);
+        Object.assign(f.app, { requestDisplayMode: vi.fn(async () => {
+            // The host-context notification lands before the request's (stale) answer.
+            context.displayMode = 'fullscreen';
+            f.shell.hostContextChanged({ displayMode: 'fullscreen' });
+            return { mode: 'inline' };
+        }) });
+        await f.shell.receive({ status: 'provisional', grant });
+        const open = button(f, 'Open reader');
+        open.onclick(); await vi.advanceTimersByTimeAsync(0);
+        expect(f.root.hidden).toBe(false);
+        expect(open.hidden).toBe(true);
+        expect(f.status.textContent).not.toMatch(/expand/);
         await f.shell.teardown();
     });
 
@@ -1303,7 +1341,7 @@ describe('plain MCP Apps host (Claude Desktop)', () => {
         await f.shell.receive({ status: 'busy', recoveryToken: 'r'.repeat(43), canResume: true });
         const oldButtons = descendants(f.controls);
         await vi.advanceTimersByTimeAsync(95_000);
-        oldButtons.find(node => node.textContent === 'Open Copy').onclick();
+        oldButtons.find(node => node.tagName === 'BUTTON' && node.textContent === 'Open Copy').onclick();
         await vi.advanceTimersByTimeAsync(0);
         expect(f.status.textContent).toContain('This review choice is no longer available. Choose the PDF again or ask to open it in Placekeeper again. Protected work is retained.');
         expect(f.status.textContent).not.toMatch(/file menu|conversation panel/);
@@ -1382,7 +1420,7 @@ describe('plain MCP Apps host (Claude Desktop)', () => {
             Object.assign(f.app, { requestDisplayMode: vi.fn(async () => ({ mode: 'inline' })) });
             await f.shell.receive({ status: 'provisional', grant });
             button(f, 'Open reader').onclick(); await vi.advanceTimersByTimeAsync(0);
-            expect(f.status.textContent).toContain('This app could not expand the reader.');
+            expect(f.status.textContent).toContain('Use the expand control to open the reader.');
             expect(f.status.textContent).not.toContain('conversation panel');
             await f.shell.teardown();
         });
@@ -1518,33 +1556,45 @@ describe('plain MCP Apps host (Claude Desktop)', () => {
 });
 
 it.each([
-    ['recover', { canResume: false, canRecover: true }, 'This PDF is open in another Placekeeper reader that is no longer connected.', 'Transfer this review here'],
-    ['resume', { canResume: true }, 'You have earlier work on this PDF.', 'Continue with your existing annotations'],
-] as const)('explains the %s recovery dialog and shows each choice beside its consequence', async (choice, flags, explanation, consequence) => {
+    ['recover', { canResume: false, canRecover: true }, 'This PDF is open in another Placekeeper reader that is no longer connected.', 'moves this review here'],
+    ['resume', { canResume: true }, 'You have earlier work on this PDF.', 'picks up your existing annotations'],
+] as const)('explains the %s recovery dialog with one action row and a described consequence per choice', async (choice, flags, explanation, consequence) => {
     const f = fixture(async () => reply({ status: 'closed' }));
     await f.shell.receive({ status: 'busy', recoveryToken: 'r'.repeat(43), ...flags });
     const dialog = descendants(f.controls).find(node => node.tagName === 'DIALOG');
     const nodes = descendants(dialog);
+    const title = nodes.find(node => node.id === 'extension-recovery-title');
+    expect(dialog.setAttribute).toHaveBeenCalledWith('aria-labelledby', title.id);
+    // Initial focus rests on the title, as on the desktop recovery page, so no action looks preselected.
+    expect(title).toMatchObject({ tagName: 'H1', textContent: 'Reopen Document', tabIndex: -1, autofocus: true });
     const description = nodes.find(node => node.id === 'extension-recovery-description');
     expect(description.textContent).toBe(explanation);
     expect(dialog.setAttribute).toHaveBeenCalledWith('aria-describedby', description.id);
-    const rows = nodes.filter(node => node.className === 'terminal-recovery__choice');
-    expect(rows).toHaveLength(2);
-    const [primary, copy] = rows.map((row): { button: any; detail: any } => {
-        const [button, detail] = descendants(row);
-        expect(button.tagName).toBe('BUTTON');
-        expect(detail.tagName).toBe('P');
-        expect(button.setAttribute).toHaveBeenCalledWith('aria-describedby', detail.id);
-        return { button, detail };
-    });
-    if (!primary || !copy) throw Error("missing choice rows");
-    expect(primary.button).toMatchObject({ textContent: 'Continue', className: 'terminal-recovery__primary' });
-    expect(primary.detail.id).toBe(`extension-recovery-${choice}`);
-    expect(primary.detail.textContent).toContain(consequence);
-    expect(copy.button).toMatchObject({ textContent: 'Open Copy', className: 'terminal-recovery__secondary' });
-    expect(copy.detail.textContent).toBe('Start a separate review and keep the existing work in place.');
     const footer = nodes.find(node => node.className === 'terminal-recovery__footer-actions');
-    expect(descendants(footer).map(node => node.textContent)).toEqual(['Cancel']);
+    const buttons = descendants(footer);
+    expect(buttons.map(node => [node.tagName, node.textContent])).toEqual([['BUTTON', 'Cancel'], ['BUTTON', 'Open Copy'], ['BUTTON', 'Continue']]);
+    const [cancel, copy, primary] = buttons;
+    expect(cancel.className).toBeUndefined();
+    expect(cancel.autofocus).toBeUndefined();
+    expect(copy.className).toBe('terminal-recovery__secondary');
+    expect(primary.className).toBe('terminal-recovery__primary');
+    const lines = nodes.filter(node => node.className === 'extension-recovery__choice');
+    expect(lines.map(line => descendants(line)[0].textContent)).toEqual(['Continue', 'Open Copy']);
+    const detail = (id: string) => nodes.find(node => node.id === id);
+    expect(primary.setAttribute).toHaveBeenCalledWith('aria-describedby', `extension-recovery-${choice}`);
+    expect(detail(`extension-recovery-${choice}`).textContent).toContain(consequence);
+    expect(copy.setAttribute).toHaveBeenCalledWith('aria-describedby', 'extension-recovery-fork');
+    expect(detail('extension-recovery-fork').textContent).toBe('starts a separate review and keeps the existing work in place.');
+    expect(nodes.some(node => node.className === 'terminal-recovery__choice')).toBe(false);
+    await f.shell.teardown();
+});
+
+it('offers Check again as the primary action while the review is still open elsewhere', async () => {
+    const f = fixture(async () => reply({ status: 'closed' }));
+    await f.shell.receive({ status: 'busy', recoveryToken: 'r'.repeat(43), canResume: false });
+    const dialog = descendants(f.controls).find(node => node.tagName === 'DIALOG');
+    const footer = descendants(dialog).find(node => node.className === 'terminal-recovery__footer-actions');
+    expect(descendants(footer).map(node => [node.textContent, node.className])).toEqual([['Cancel', undefined], ['Open Copy', 'terminal-recovery__secondary'], ['Check again', 'terminal-recovery__primary']]);
     await f.shell.teardown();
 });
 
