@@ -4,12 +4,12 @@
   padding: 0 12px 12px;
 }
 
-#review-annotation-list:has(> .annotation-drawer__owned > [data-reconciliation-reader]) {
+#reader-annotation-list:has(> .annotation-drawer__owned > [data-reconciliation-reader]) {
   height: 100%;
   min-height: 0;
 }
 
-#review-annotation-list > .annotation-drawer__owned:has(> [data-reconciliation-reader]) {
+#reader-annotation-list > .annotation-drawer__owned:has(> [data-reconciliation-reader]) {
   display: flex;
   height: 100%;
   min-height: 0;
@@ -20,7 +20,7 @@
 .annotation-drawer__owned,
 .existing-annotations,
 .pdf-search__results {
-  padding-right: max(0px, calc(12px - var(--review-workspace-scrollbar-width, 0px)));
+  padding-right: max(0px, calc(12px - var(--reader-workspace-scrollbar-width, 0px)));
 }
 
 .annotation-drawer__owned ol,
@@ -42,7 +42,7 @@
   clip-path: inset(50%);
 }
 
-:is(.review-workspace, .review-tools-workspace) li[data-annotation-origin] {
+:is(.reader-workspace, .reader-tools-workspace) li[data-annotation-origin] {
   display: block;
   margin: 2px 0;
   padding: 0;
@@ -53,44 +53,44 @@
   box-shadow: none;
 }
 
-:is(.review-workspace, .review-tools-workspace) li[data-annotation-origin]:first-child {
+:is(.reader-workspace, .reader-tools-workspace) li[data-annotation-origin]:first-child {
   margin-top: 0;
 }
 
-:is(.review-workspace, .review-tools-workspace) li[data-annotation-origin]:hover,
-:is(.review-workspace, .review-tools-workspace) li[data-annotation-origin]:has(:focus-visible):not(:has(.copy-link-control:focus-within)) {
+:is(.reader-workspace, .reader-tools-workspace) li[data-annotation-origin]:hover,
+:is(.reader-workspace, .reader-tools-workspace) li[data-annotation-origin]:has(:focus-visible):not(:has(.copy-link-control:focus-within)) {
   border: 0;
   background: var(--pk-hover);
   box-shadow: none;
 }
 
-:is(.review-workspace, .review-tools-workspace) li[data-annotation-origin]:active:not(:has(.copy-link-control__trigger:active)) {
+:is(.reader-workspace, .reader-tools-workspace) li[data-annotation-origin]:active:not(:has(.copy-link-control__trigger:active)) {
   border: 0;
   background: #e7e7e7;
   box-shadow: none;
 }
 
-:is(.review-workspace, .review-tools-workspace) li[data-annotation-origin][data-active="true"] {
+:is(.reader-workspace, .reader-tools-workspace) li[data-annotation-origin][data-active="true"] {
   border: 0;
   background: var(--pk-raised);
   box-shadow: 0 2px 6px rgb(0 0 0 / 2%), 0 8px 24px rgb(0 0 0 / 1.6%);
 }
 
-:is(.review-workspace, .review-tools-workspace) li[data-annotation-origin][data-active="true"]:hover,
-:is(.review-workspace, .review-tools-workspace) li[data-annotation-origin][data-active="true"]:has(:focus-visible),
-:is(.review-workspace, .review-tools-workspace) li[data-annotation-origin][data-active="true"]:active {
+:is(.reader-workspace, .reader-tools-workspace) li[data-annotation-origin][data-active="true"]:hover,
+:is(.reader-workspace, .reader-tools-workspace) li[data-annotation-origin][data-active="true"]:has(:focus-visible),
+:is(.reader-workspace, .reader-tools-workspace) li[data-annotation-origin][data-active="true"]:active {
   background: var(--pk-raised);
   box-shadow: 0 2px 6px rgb(0 0 0 / 2%), 0 8px 24px rgb(0 0 0 / 1.6%);
 }
 
 /* On the grey hover background the quotation rule would vanish; darken it
    there, but not on the selected (white) row. */
-:is(.review-workspace, .review-tools-workspace) li[data-annotation-origin]:not([data-active="true"]):is(:hover, :has(:focus-visible))
+:is(.reader-workspace, .reader-tools-workspace) li[data-annotation-origin]:not([data-active="true"]):is(:hover, :has(:focus-visible))
   :is(.annotation-item__quote, .annotation-item__source) {
   border-left-color: #c8c8c8;
 }
 
-:is(.review-workspace, .review-tools-workspace) li[data-corresponding="true"]::before {
+:is(.reader-workspace, .reader-tools-workspace) li[data-corresponding="true"]::before {
   content: none;
 }
 
@@ -203,7 +203,7 @@
 }
 
 .annotation-item__title-row > .annotation-item__meta[data-annotation-metadata-layout="row-head"] > .annotation-item__status-icon {
-  color: var(--review-danger);
+  color: var(--reader-danger);
 }
 
 /* The section follows the kind icon on the page's line; row actions take the
@@ -350,12 +350,12 @@
   pointer-events: none;
 }
 
-.review-shell .annotation-item__navigation:focus-visible {
+.reader-shell .annotation-item__navigation:focus-visible {
   outline: 2px solid var(--pk-focus);
   outline-offset: 3px;
 }
 
-:is(.review-workspace, .review-tools-workspace) li[data-annotation-origin]:has(:focus-visible):not(:has(.copy-link-control:focus-within)) {
+:is(.reader-workspace, .reader-tools-workspace) li[data-annotation-origin]:has(:focus-visible):not(:has(.copy-link-control:focus-within)) {
   outline: 0;
 }
 

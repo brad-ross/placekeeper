@@ -204,10 +204,10 @@ describe('review shell layout and accessibility contract', () => {
     expect(html).toContain('Save options');
     expect(html).toContain('>Export</span>');
     expect(html).toContain('lucide-file-text');
-    expect(html).toContain('class="review-chrome__filename"');
+    expect(html).toContain('class="reader-chrome__filename"');
     expect(html).not.toContain('<strong>paper.pdf</strong>');
     expect(html).toContain('aria-label="paper.pdf, Saved. Open document actions"');
-    expect(html).not.toContain('review-chrome__save-dot');
+    expect(html).not.toContain('reader-chrome__save-dot');
   });
 
   it('includes inputs in menu focus order without roving editable key presses', () => {
@@ -257,23 +257,23 @@ describe('review shell layout and accessibility contract', () => {
       </ReaderShell>,
     );
 
-    expect(html).toContain('data-review-toast-stack');
+    expect(html).toContain('data-reader-toast-stack');
     expect(html).toContain('data-viewer-status');
     expect(html).toContain('data-generation-status="reconciling"');
     expect(html).not.toContain('reconciliation-workspace__notice');
     expect(html.match(/A rebuilt PDF is loading and annotations are reconciling\./gu)).toHaveLength(1);
-    expect(html.indexOf('data-review-stage')).toBeLessThan(html.indexOf('data-review-toast-stack'));
-    expect(html.indexOf('data-review-toast-stack')).toBeLessThan(html.indexOf('Document canvas'));
-    expect(html).not.toContain('review-shell--generation-status');
+    expect(html.indexOf('data-reader-stage')).toBeLessThan(html.indexOf('data-reader-toast-stack'));
+    expect(html.indexOf('data-reader-toast-stack')).toBeLessThan(html.indexOf('Document canvas'));
+    expect(html).not.toContain('reader-shell--generation-status');
     expect(foundationStyles).toMatch(
-      /\.review-toast-stack\s*\{[^}]*position:\s*absolute;[^}]*top:\s*\.75rem;[^}]*left:\s*\.75rem;/u,
+      /\.reader-toast-stack\s*\{[^}]*position:\s*absolute;[^}]*top:\s*\.75rem;[^}]*left:\s*\.75rem;/u,
     );
     expect(foundationStyles).toMatch(
       /\.pdf-workspace__status\s*\{[^}]*left:\s*\.75rem;/u,
     );
     expect(foundationStyles).not.toMatch(/\.pdf-workspace__status\s*\{[^}]*right:/u);
     expect(responsiveStyles).toMatch(
-      /\.review-toast\[data-generation-busy="true"\] \.review-icon\s*\{[^}]*animation:\s*none;/u,
+      /\.reader-toast\[data-generation-busy="true"\] \.reader-icon\s*\{[^}]*animation:\s*none;/u,
     );
   });
 
@@ -313,7 +313,7 @@ describe('review shell layout and accessibility contract', () => {
       generationRefreshStatus={refresh} locationRestoreStatus="idle"
       save={{}} selection={{ selectionUpdate: { kind: 'cleared', generation: 0 } }}
       authoring={{ onCommand: async () => state }} viewer={{}} workspace={{}} />);
-    expect(html).toContain('data-review-toast-stack');
+    expect(html).toContain('data-reader-toast-stack');
     expect(html).toContain(`data-generation-status="${refresh}"`);
     expect(html).toContain(`role="${role}"`);
     expect(html).toContain(text);
@@ -434,14 +434,14 @@ describe('review shell layout and accessibility contract', () => {
     expect(html).toContain('aria-pressed="false"');
     expect(html).toContain('lucide-fold-vertical');
     expect(html).toContain(
-      'class="review-workspace__move review-workspace__move--activity review-workspace__move--header-action review-workspace__outline-toggle"',
+      'class="reader-workspace__move reader-workspace__move--activity reader-workspace__move--header-action reader-workspace__outline-toggle"',
     );
-    expect(html).not.toContain('review-workspace__activity-strip--action');
+    expect(html).not.toContain('reader-workspace__activity-strip--action');
     expect(annotationStyles).toMatch(
-      /\.review-workspace__outline-toggle\s*\{[^}]*margin-left:\s*auto;/u,
+      /\.reader-workspace__outline-toggle\s*\{[^}]*margin-left:\s*auto;/u,
     );
     expect(annotationStyles).not.toMatch(
-      /\.review-workspace__outline-toggle\s*\{[^}]*(?:width|height|border|background|box-shadow):/u,
+      /\.reader-workspace__outline-toggle\s*\{[^}]*(?:width|height|border|background|box-shadow):/u,
     );
   });
 
@@ -698,18 +698,18 @@ describe('review shell layout and accessibility contract', () => {
     expect(html).not.toContain('Detached row');
     expect(html).not.toContain('Refreshing annotations.');
     expect(html).not.toContain('List message.');
-    expect(html).not.toContain('data-review-item="owned-highlight"');
+    expect(html).not.toContain('data-annotation-item="owned-highlight"');
     expect(neutralStyles).toMatch(
-      /#review-annotation-list:has\(> \.annotation-drawer__owned > \[data-reconciliation-reader\]\)\s*\{[^}]*height:\s*100%;[^}]*min-height:\s*0;/u,
+      /#reader-annotation-list:has\(> \.annotation-drawer__owned > \[data-reconciliation-reader\]\)\s*\{[^}]*height:\s*100%;[^}]*min-height:\s*0;/u,
     );
     expect(neutralStyles).toMatch(
-      /#review-annotation-list > \.annotation-drawer__owned:has\(> \[data-reconciliation-reader\]\)\s*\{[^}]*display:\s*flex;[^}]*height:\s*100%;[^}]*min-height:\s*0;/u,
+      /#reader-annotation-list > \.annotation-drawer__owned:has\(> \[data-reconciliation-reader\]\)\s*\{[^}]*display:\s*flex;[^}]*height:\s*100%;[^}]*min-height:\s*0;/u,
     );
     expect(annotationStyles).toMatch(
       /@media \(max-height:\s*560px\)[\s\S]*\.reconciliation-workspace--detail\.full-annotation-reader\s*\{[^}]*padding-block:\s*6px;[\s\S]*\.reconciliation-workspace--detail \.full-annotation-reader__metadata-bar\s*\{[^}]*padding-bottom:\s*0;[\s\S]*\.reconciliation-workspace--detail \.reconciliation-workspace__resolution\s*\{[^}]*gap:\s*2px;[^}]*padding-top:\s*4px;/u,
     );
     expect(neutralStyles).toMatch(
-      /@media \(pointer:\s*coarse\)[\s\S]*:is\([\s\S]*\.reconciliation-workspace__editor-actions[\s\S]*\) \.review-button\s*\{[^}]*min-height:\s*44px;/u,
+      /@media \(pointer:\s*coarse\)[\s\S]*:is\([\s\S]*\.reconciliation-workspace__editor-actions[\s\S]*\) \.reader-button\s*\{[^}]*min-height:\s*44px;/u,
     );
   });
 
@@ -735,7 +735,7 @@ describe('review shell layout and accessibility contract', () => {
     expect(coarsePointerRules).toMatch(/\.row-action-group__direct\s*\{[^}]*display:\s*none;/u);
     expect(coarsePointerRules).toMatch(/\.row-action-group__secondary\s*\{[^}]*display:\s*block;/u);
     expect(annotationStyles).toMatch(
-      /\.row-action-group__trigger\s*\{[^}]*width:\s*var\(--review-control-touch\);[^}]*min-height:\s*var\(--review-control-touch\);/u,
+      /\.row-action-group__trigger\s*\{[^}]*width:\s*var\(--reader-control-touch\);[^}]*min-height:\s*var\(--reader-control-touch\);/u,
     );
   });
 
@@ -824,14 +824,14 @@ describe('review shell layout and accessibility contract', () => {
       </ReaderShell>,
     );
 
-    expect(html).toContain('data-review-insertion-caret="true"');
+    expect(html).toContain('data-reader-insertion-caret="true"');
     expect(html).toContain('aria-hidden="true"');
     expect(html).toContain('left:250px;top:180px;width:2px;height:16px');
     expect(html).not.toContain('Insertion review action');
     expect(html).not.toContain('>Insert</button>');
-    expect(foundationStyles).toContain('review-insertion-caret-blink');
+    expect(foundationStyles).toContain('reader-insertion-caret-blink');
     expect(responsiveStyles).toMatch(
-      /@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.review-insertion-caret,[\s\S]*?animation:\s*none/u,
+      /@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.reader-insertion-caret,[\s\S]*?animation:\s*none/u,
     );
   });
 
@@ -864,7 +864,7 @@ describe('review shell layout and accessibility contract', () => {
     );
 
     expect(html).toContain('data-tools-workspace-open="true"');
-    expect(html).toContain('data-review-insertion-caret="true"');
+    expect(html).toContain('data-reader-insertion-caret="true"');
   });
 
   it('yields the modal layer to save options without unmounting nested review state', () => {
@@ -887,7 +887,7 @@ describe('review shell layout and accessibility contract', () => {
       </ReaderShell>,
     );
 
-    expect(html).toMatch(/data-review-nested-host="true" hidden="" inert=""/u);
+    expect(html).toMatch(/data-reader-nested-host="true" hidden="" inert=""/u);
   });
   const viewerControls: ViewerControls = {
     snapshot: () => ({
@@ -946,19 +946,19 @@ describe('review shell layout and accessibility contract', () => {
         onRedo={vi.fn()}
       />,
     );
-    const identityStart = html.indexOf('class="review-chrome__identity"');
-    const copyLink = html.indexOf('data-review-copy-link');
-    const viewerControlsIndex = html.indexOf('class="review-chrome__viewer-controls"');
+    const identityStart = html.indexOf('class="reader-chrome__identity"');
+    const copyLink = html.indexOf('data-reader-copy-link');
+    const viewerControlsIndex = html.indexOf('class="reader-chrome__viewer-controls"');
 
     expect(identityStart).toBeGreaterThanOrEqual(0);
     expect(viewerControlsIndex).toBeGreaterThan(identityStart);
     expect(copyLink).toBeGreaterThan(identityStart);
-    expect(copyLink).toBeGreaterThan(html.indexOf('data-review-page-position'));
+    expect(copyLink).toBeGreaterThan(html.indexOf('data-reader-page-position'));
     expect(copyLink).toBeLessThan(viewerControlsIndex);
-    expect(html).not.toContain('class="review-chrome__actions"');
+    expect(html).not.toContain('class="reader-chrome__actions"');
     const identityMarkup = html.slice(identityStart, viewerControlsIndex);
     expect(identityMarkup).toContain('lucide-file-text');
-    expect(identityMarkup).not.toContain('review-chrome__save-dot');
+    expect(identityMarkup).not.toContain('reader-chrome__save-dot');
   });
 
   it('keeps review icons decorative and button labels authoritative', () => {
@@ -971,7 +971,7 @@ describe('review shell layout and accessibility contract', () => {
     expect(html).toContain('aria-label="Previous page"');
     expect(html).toContain('aria-hidden="true"');
     expect(html).toContain('focusable="false"');
-    expect(html).toMatch(/class="[^"]*review-icon[^"]*"/);
+    expect(html).toMatch(/class="[^"]*reader-icon[^"]*"/);
   });
 
   it('keeps document navigation on the left and edit history with zoom on the right', () => {
@@ -999,10 +999,10 @@ describe('review shell layout and accessibility contract', () => {
     expect(navigationGroup).toBeLessThan(centerStart);
     expect(editGroup).toBeGreaterThan(centerStart);
     expect(zoomGroup).toBeGreaterThan(editGroup);
-    expect(html.indexOf('data-review-page-position')).toBeLessThan(html.indexOf('data-main-history="forward"'));
+    expect(html.indexOf('data-reader-page-position')).toBeLessThan(html.indexOf('data-main-history="forward"'));
     expect(html.indexOf('data-main-history="back"')).toBeLessThan(html.indexOf('data-main-history="forward"'));
     expect(html).not.toContain('aria-label="Actions"');
-    expect(html).toContain('data-review-chrome-presentation="navigationCompact"');
+    expect(html).toContain('data-reader-chrome-presentation="navigationCompact"');
   });
 
   it('keeps document-history controls mounted but inert while navigation is pending', () => {
@@ -1030,10 +1030,10 @@ describe('review shell layout and accessibility contract', () => {
   it('starts with a compact measured presentation and an inert sizing rack', () => {
     const html = renderChrome(true, true);
 
-    expect(html).toContain('data-review-chrome-presentation="navigationCompact"');
-    expect(html).toMatch(/data-review-chrome-sizing-rack[^>]*aria-hidden="true"[^>]*inert=""/u);
+    expect(html).toContain('data-reader-chrome-presentation="navigationCompact"');
+    expect(html).toMatch(/data-reader-chrome-sizing-rack[^>]*aria-hidden="true"[^>]*inert=""/u);
     for (const presentation of ['expanded', 'zoomCompact', 'historyCompact', 'navigationCompact']) {
-      expect(html).toContain(`data-review-chrome-candidate="${presentation}"`);
+      expect(html).toContain(`data-reader-chrome-candidate="${presentation}"`);
     }
     expect(html).toContain('aria-label="Document navigation"');
     expect(html).toContain('aria-label="Current page 3 of 12. Enter a page number"');
@@ -1061,57 +1061,57 @@ describe('review shell layout and accessibility contract', () => {
       />,
     );
 
-    const rack = html.slice(html.indexOf('data-review-chrome-sizing-rack'));
+    const rack = html.slice(html.indexOf('data-reader-chrome-sizing-rack'));
     expect(rack).not.toContain('Protected Recovery');
     expect(rack.match(/codex-context-status/gu)?.length).toBeGreaterThanOrEqual(4);
-    expect(rack).toContain('review-chrome__icon-control');
-    expect(rack).toContain('review-chrome__link');
-    expect(rack).toContain('review-chrome__filename');
+    expect(rack).toContain('reader-chrome__icon-control');
+    expect(rack).toContain('reader-chrome__link');
+    expect(rack).toContain('reader-chrome__filename');
   });
 
   it('keeps responsive review chrome in one fixed-height row', () => {
-    expect(designTokens).toMatch(/--review-chrome-height:\s*54px;/u);
-    expect(designTokens).toMatch(/--review-chrome-center-y:\s*27px;/u);
+    expect(designTokens).toMatch(/--reader-chrome-height:\s*54px;/u);
+    expect(designTokens).toMatch(/--reader-chrome-center-y:\s*27px;/u);
     expect(foundationStyles).toMatch(
-      /\.review-chrome\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\) max-content;[^}]*height:\s*var\(--review-chrome-height\);[^}]*overflow:\s*visible;/u,
+      /\.reader-chrome\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\) max-content;[^}]*height:\s*var\(--reader-chrome-height\);[^}]*overflow:\s*visible;/u,
     );
     expect(foundationStyles).toMatch(
-      /\.review-chrome__identity\s*\{[^}]*min-width:\s*0;/u,
+      /\.reader-chrome__identity\s*\{[^}]*min-width:\s*0;/u,
     );
-    expect(foundationStyles).toMatch(/\.review-chrome__link\s*\{[^}]*flex:\s*none;/u);
+    expect(foundationStyles).toMatch(/\.reader-chrome__link\s*\{[^}]*flex:\s*none;/u);
     expect(foundationStyles).toMatch(
-      /\.review-chrome__viewer-controls\s*\{[^}]*min-width:\s*max-content;[^}]*flex-wrap:\s*nowrap;/u,
-    );
-    expect(foundationStyles).toMatch(
-      /\.review-chrome__sizing-candidate \.review-chrome__identity\s*\{[^}]*width:\s*max-content;/u,
+      /\.reader-chrome__viewer-controls\s*\{[^}]*min-width:\s*max-content;[^}]*flex-wrap:\s*nowrap;/u,
     );
     expect(foundationStyles).toMatch(
-      /\.review-chrome__sizing-candidate \.review-chrome__filename\s*\{[^}]*width:\s*var\(--review-document-title-cap\);[^}]*min-width:\s*var\(--review-document-title-cap\);[^}]*max-width:\s*var\(--review-document-title-cap\);[^}]*flex:\s*none;/u,
+      /\.reader-chrome__sizing-candidate \.reader-chrome__identity\s*\{[^}]*width:\s*max-content;/u,
     );
-    expect(designTokens).toMatch(/--review-document-title-cap:\s*9rem;/u);
+    expect(foundationStyles).toMatch(
+      /\.reader-chrome__sizing-candidate \.reader-chrome__filename\s*\{[^}]*width:\s*var\(--reader-document-title-cap\);[^}]*min-width:\s*var\(--reader-document-title-cap\);[^}]*max-width:\s*var\(--reader-document-title-cap\);[^}]*flex:\s*none;/u,
+    );
+    expect(designTokens).toMatch(/--reader-document-title-cap:\s*9rem;/u);
     expect(layoutStyles).toMatch(
-      /\.review-chrome__filename\s*\{[^}]*min-width:\s*0;[^}]*max-width:\s*var\(--review-document-title-cap\);[^}]*flex:\s*0 1 auto;/u,
+      /\.reader-chrome__filename\s*\{[^}]*min-width:\s*0;[^}]*max-width:\s*var\(--reader-document-title-cap\);[^}]*flex:\s*0 1 auto;/u,
     );
     expect(layoutStyles).toMatch(
-      /\.review-chrome__identity \.document-actions__trigger\s*\{[^}]*width:\s*fit-content;[^}]*max-width:\s*100%;/u,
+      /\.reader-chrome__identity \.document-actions__trigger\s*\{[^}]*width:\s*fit-content;[^}]*max-width:\s*100%;/u,
     );
     expect(responsiveStyles).toMatch(
-      /@media \(max-width: 520px\)[\s\S]*?\.review-chrome__context\s*\{[^}]*display:\s*none;/u,
+      /@media \(max-width: 520px\)[\s\S]*?\.reader-chrome__context\s*\{[^}]*display:\s*none;/u,
     );
     expect(responsiveStyles).toMatch(
-      /@media \(max-width: 480px\)[\s\S]*?--review-document-title-cap:\s*6rem;/u,
+      /@media \(max-width: 480px\)[\s\S]*?--reader-document-title-cap:\s*6rem;/u,
     );
     expect(responsiveStyles).toMatch(
-      /@media \(max-width: 360px\)[\s\S]*?--review-document-title-cap:\s*4\.5rem;/u,
+      /@media \(max-width: 360px\)[\s\S]*?--reader-document-title-cap:\s*4\.5rem;/u,
     );
     expect(responsiveStyles).toMatch(
-      /@media \(max-width: 640px\)[\s\S]*?\.review-chrome__save-recovery\s*\{[^}]*display:\s*none;/u,
+      /@media \(max-width: 640px\)[\s\S]*?\.reader-chrome__save-recovery\s*\{[^}]*display:\s*none;/u,
     );
     expect(responsiveStyles).not.toMatch(
-      /@media \(max-width: 820px\)[\s\S]*?\.review-chrome\s*\{[^}]*height:\s*auto;/u,
+      /@media \(max-width: 820px\)[\s\S]*?\.reader-chrome\s*\{[^}]*height:\s*auto;/u,
     );
     expect(responsiveStyles).not.toMatch(
-      /\.review-chrome__viewer-controls\s*\{[^}]*grid-row:\s*2;[^}]*flex-wrap:\s*wrap;/u,
+      /\.reader-chrome__viewer-controls\s*\{[^}]*grid-row:\s*2;[^}]*flex-wrap:\s*wrap;/u,
     );
   });
 
@@ -1225,7 +1225,7 @@ describe('review shell layout and accessibility contract', () => {
       <FullAnnotationReader record={reader} onBack={() => undefined} />,
     );
 
-    expect(html.match(/data-review-item=/gu)).toHaveLength(1);
+    expect(html.match(/data-annotation-item=/gu)).toHaveLength(1);
     expect(html).toContain('<span class="annotation-item__page">3–5</span>');
     expect(html).toContain('aria-label="Highlight · Pages 3–5');
     expect(html).toContain('title="Go to Highlight annotation on pages 3–5"');
@@ -1311,7 +1311,7 @@ describe('review shell layout and accessibility contract', () => {
 
   it('reveals mounted annotation actions only at mouse intent and keeps them visible for touch', () => {
     expect(annotationStyles).toMatch(
-      /\.annotation-item__title-actions \.annotation-item__action,\s*\.pdf-search__clear\s*\{[^}]*width:\s*1\.4rem;[^}]*min-width:\s*1\.4rem;[^}]*max-width:\s*1\.4rem;[^}]*height:\s*1\.4rem;[^}]*min-height:\s*1\.4rem;[^}]*max-height:\s*1\.4rem;[^}]*border-radius:\s*var\(--review-radius-control\);/u,
+      /\.annotation-item__title-actions \.annotation-item__action,\s*\.pdf-search__clear\s*\{[^}]*width:\s*1\.4rem;[^}]*min-width:\s*1\.4rem;[^}]*max-width:\s*1\.4rem;[^}]*height:\s*1\.4rem;[^}]*min-height:\s*1\.4rem;[^}]*max-height:\s*1\.4rem;[^}]*border-radius:\s*var\(--reader-radius-control\);/u,
     );
     expect(annotationStyles).toMatch(
       /\.annotation-item__action\s*\{[^}]*opacity:\s*0;/u,
@@ -1320,7 +1320,7 @@ describe('review shell layout and accessibility contract', () => {
       /\.annotation-item__title-actions \.annotation-item__action\s*\{[^}]*opacity:\s*1;/u,
     );
     expect(annotationStyles).toMatch(
-      /li:hover \.annotation-item__action,\s*:is\(\.review-workspace, \.review-tools-workspace\) li:has\(:focus-visible\) \.annotation-item__action,\s*:is\(\.review-workspace, \.review-tools-workspace\) li\[data-active="true"\] \.annotation-item__action\s*\{[^}]*opacity:\s*1;/u,
+      /li:hover \.annotation-item__action,\s*:is\(\.reader-workspace, \.reader-tools-workspace\) li:has\(:focus-visible\) \.annotation-item__action,\s*:is\(\.reader-workspace, \.reader-tools-workspace\) li\[data-active="true"\] \.annotation-item__action\s*\{[^}]*opacity:\s*1;/u,
     );
     const coarsePointerRules = responsiveStyles.match(
       /@media \(hover: none\), \(pointer: coarse\) \{([\s\S]*?)\n\}/u,
@@ -1329,7 +1329,7 @@ describe('review shell layout and accessibility contract', () => {
       /\.annotation-item__action\s*\{[^}]*opacity:\s*1;/u,
     );
     expect(coarsePointerRules).toMatch(
-      /\.annotation-item__title-actions \.annotation-item__action\s*\{[^}]*width:\s*var\(--review-control-touch\);[^}]*min-width:\s*var\(--review-control-touch\);[^}]*max-width:\s*var\(--review-control-touch\);[^}]*max-height:\s*var\(--review-control-touch\);/u,
+      /\.annotation-item__title-actions \.annotation-item__action\s*\{[^}]*width:\s*var\(--reader-control-touch\);[^}]*min-width:\s*var\(--reader-control-touch\);[^}]*max-width:\s*var\(--reader-control-touch\);[^}]*max-height:\s*var\(--reader-control-touch\);/u,
     );
     expect(coarsePointerRules).not.toMatch(
       /\.annotation-item__title-actions\s*\{[^}]*(?:height|min-height|padding)/u,
@@ -1375,17 +1375,17 @@ describe('review shell layout and accessibility contract', () => {
     expect(html).toContain('aria-label="All annotations"');
     expect(html).toContain('aria-live="polite"');
     expect(html).toContain('data-workspace-open="false"');
-    expect(html).toContain('data-review-chrome');
-    expect(html).toContain('review-chrome__save-identity');
-    expect(html).toContain('data-review-saved-status');
-    expect(html).toContain('data-review-stat');
-    expect(html).not.toContain('data-review-count');
+    expect(html).toContain('data-reader-chrome');
+    expect(html).toContain('reader-chrome__save-identity');
+    expect(html).toContain('data-reader-saved-status');
+    expect(html).toContain('data-reader-stat');
+    expect(html).not.toContain('data-reader-count');
     expect(html).toContain('paper.pdf');
-    expect(html).toContain('data-review-contextual-host');
-    expect(html).toContain('data-review-drawer-host');
+    expect(html).toContain('data-reader-contextual-host');
+    expect(html).toContain('data-reader-drawer-host');
     expect(html).toContain('data-workspace-presentation="right"');
     expect(html).toContain('--workspace-side-width:0px');
-    expect(html).toContain('data-review-nested-host');
+    expect(html).toContain('data-reader-nested-host');
     expect(html.match(/Document canvas/g)).toHaveLength(1);
     expect(html).not.toContain('Codex');
     expect(html).toMatch(/<button[^>]*disabled=""[^>]*aria-label="Undo"/u);
@@ -1396,14 +1396,14 @@ describe('review shell layout and accessibility contract', () => {
     expect(html).not.toContain('aria-label="Workspace (0 annotations)"');
     expect(html).toContain('data-workspace-tray-toggle="right"');
     expect(html).not.toContain('data-workspace-tray-toggle="bottom"');
-    expect(html).toContain('class="review-workspace__activity-strip"');
+    expect(html).toContain('class="reader-workspace__activity-strip"');
     expect(html).toContain('data-workspace-mode-count="3"');
     expect(html).not.toContain('data-workspace-mode-label="references"');
     expect(html).not.toContain('aria-label="Move References to right"');
     expect(html).not.toContain('id="workspace-panel-references"');
     expect(html).toContain('id="workspace-panel-annotations"');
-    expect(html).toContain('id="review-annotation-list"');
-    expect(html).toContain('data-review-workspace');
+    expect(html).toContain('id="reader-annotation-list"');
+    expect(html).toContain('data-reader-workspace');
     expect(html).toContain('data-annotation-drawer');
     expect(html).not.toContain('aria-label="Close annotations"');
     expect(html).not.toContain('aria-label="Close workspace"');
@@ -1417,11 +1417,11 @@ describe('review shell layout and accessibility contract', () => {
       expect(html).not.toContain(`title="${tool}"`);
     }
     expect(html).toContain('aria-keyshortcuts="Meta+C Control+C"');
-    expect(html.match(/review-action-button--icon/g)).toHaveLength(4);
+    expect(html.match(/reader-action-button--icon/g)).toHaveLength(4);
     expect(html.indexOf('aria-label="Copy"'))
       .toBeGreaterThan(html.indexOf('aria-label="Highlight"'));
     expect(html).not.toMatch(/<\/svg>(?:Copy|Replace|Delete|Highlight)<\/button>/u);
-    expect(html.match(/class="[^"]*review-action-button[^"]*"/g)).toHaveLength(4);
+    expect(html.match(/class="[^"]*reader-action-button[^"]*"/g)).toHaveLength(4);
     expect(html).not.toMatch(/>(?:‹|›|−|\+|↶|↷)<\/button>/u);
     expect(html).not.toContain('>Insert</button>');
     expect(html).not.toContain('>Page Note</button>');
@@ -1543,10 +1543,10 @@ describe('review shell layout and accessibility contract', () => {
       /\.reference-panel\s*\{[^}]*position:\s*relative;[^}]*isolation:\s*isolate;/u,
     );
     expect(annotationStyles).toMatch(
-      /\.reference-panel__return\s*\{[^}]*display:\s*grid;[^}]*width:\s*var\(--review-control-compact\);[^}]*flex:\s*0 0 var\(--review-control-compact\);/u,
+      /\.reference-panel__return\s*\{[^}]*display:\s*grid;[^}]*width:\s*var\(--reader-control-compact\);[^}]*flex:\s*0 0 var\(--reader-control-compact\);/u,
     );
     expect(annotationStyles).toMatch(
-      /\.reference-panel__return:focus-visible\s*\{[^}]*outline:\s*3px solid var\(--review-focus\);/u,
+      /\.reference-panel__return:focus-visible\s*\{[^}]*outline:\s*3px solid var\(--reader-focus\);/u,
     );
     expect(annotationStyles).toMatch(
       /\.reference-panel__return:hover:not\(\[aria-disabled="true"\]\)/u,
@@ -1567,13 +1567,13 @@ describe('review shell layout and accessibility contract', () => {
       /@media \(hover: none\), \(pointer: coarse\) \{([\s\S]*?)\n\}/u,
     )?.[1];
     expect(coarsePointerRules).toMatch(
-      /\.reference-panel__return\s*\{[^}]*inline-size:\s*var\(--review-control-touch\);[^}]*min-height:\s*var\(--review-control-touch\);/u,
+      /\.reference-panel__return\s*\{[^}]*inline-size:\s*var\(--reader-control-touch\);[^}]*min-height:\s*var\(--reader-control-touch\);/u,
     );
   });
 
   it('shares simple annotation section headers and lets the activity strip fill its navbar', () => {
     expect(annotationStyles).toMatch(
-      /\.review-workspace__header\s*\{[^}]*height:\s*var\(--review-workspace-header-height, 44px\);[^}]*align-items:\s*center;[^}]*padding:\s*8px 7\.5px 2px;/u,
+      /\.reader-workspace__header\s*\{[^}]*height:\s*var\(--reader-workspace-header-height, 44px\);[^}]*align-items:\s*center;[^}]*padding:\s*8px 7\.5px 2px;/u,
     );
     expect(annotationStyles).toMatch(
       /\.annotation-drawer__header h2,\s*\.existing-annotations__header h2\s*\{[^}]*font-size:\s*15px;[^}]*font-weight:\s*500;/u,
@@ -1585,61 +1585,61 @@ describe('review shell layout and accessibility contract', () => {
     expect(annotationStyles).not.toMatch(/\.annotation-drawer__header\s*\{[^}]*position:\s*sticky;/u);
     expect(annotationStyles).not.toContain('grid-auto-columns');
     expect(annotationStyles).not.toContain('grid-auto-flow');
-    expect(annotationStyles).not.toContain('.review-tools-workspace .review-workspace__tabs');
+    expect(annotationStyles).not.toContain('.reader-tools-workspace .reader-workspace__tabs');
     expect(annotationStyles).toMatch(
-      /\.review-workspace__activity-strip\s*\{[^}]*width:\s*auto;[^}]*max-width:\s*100%;[^}]*flex:\s*1 1 auto;/u,
+      /\.reader-workspace__activity-strip\s*\{[^}]*width:\s*auto;[^}]*max-width:\s*100%;[^}]*flex:\s*1 1 auto;/u,
     );
     expect(annotationStyles).toMatch(
-      /\.review-workspace__move--activity\s*\{[^}]*margin-left:\s*auto;/u,
+      /\.reader-workspace__move--activity\s*\{[^}]*margin-left:\s*auto;/u,
     );
     expect(annotationStyles).toMatch(
-      /\.review-workspace__activity-strip--title\s*\{[^}]*padding:\s*0;[^}]*background:\s*transparent;/u,
+      /\.reader-workspace__activity-strip--title\s*\{[^}]*padding:\s*0;[^}]*background:\s*transparent;/u,
     );
     expect(annotationStyles).toMatch(
-      /\.review-workspace__activity-strip--title[\s\S]*\.review-workspace__mode-segment--compound::before\s*\{[^}]*content:\s*none;/u,
+      /\.reader-workspace__activity-strip--title[\s\S]*\.reader-workspace__mode-segment--compound::before\s*\{[^}]*content:\s*none;/u,
     );
     expect(annotationStyles).toMatch(
-      /\.review-workspace__panel--references\[data-reference-tabs-orientation="vertical"\]\[data-reference-panel-layout="split"\][\s\S]*>\s*\.reference-panel\s*\{[^}]*border-top:\s*1px solid var\(--review-border-subtle\);[^}]*border-left:\s*1px solid var\(--review-border-subtle\);[^}]*border-radius:\s*var\(--review-radius-row\) 0 0;[^}]*box-shadow:\s*inset 6px 6px 14px/u,
+      /\.reader-workspace__panel--references\[data-reference-tabs-orientation="vertical"\]\[data-reference-panel-layout="split"\][\s\S]*>\s*\.reference-panel\s*\{[^}]*border-top:\s*1px solid var\(--reader-border-subtle\);[^}]*border-left:\s*1px solid var\(--reader-border-subtle\);[^}]*border-radius:\s*var\(--reader-radius-row\) 0 0;[^}]*box-shadow:\s*inset 6px 6px 14px/u,
     );
     expect(annotationStyles).toMatch(
-      /\.review-workspace__mode-tab\s*\{[^}]*width:\s*var\(--review-control-compact\);[^}]*flex:\s*0 0 var\(--review-control-compact\);/u,
+      /\.reader-workspace__mode-tab\s*\{[^}]*width:\s*var\(--reader-control-compact\);[^}]*flex:\s*0 0 var\(--reader-control-compact\);/u,
     );
     expect(annotationStyles).toMatch(
-      /\.review-workspace__mode-label\s*\{[^}]*min-width:\s*0;[^}]*text-overflow:\s*ellipsis;/u,
+      /\.reader-workspace__mode-label\s*\{[^}]*min-width:\s*0;[^}]*text-overflow:\s*ellipsis;/u,
     );
     expect(annotationStyles).toMatch(
-      /\.review-workspace__mode-segment--compound::before\s*\{[^}]*border:\s*1px\s+solid\s+var\(--review-border\);[^}]*border-radius:\s*var\(--review-radius-control\);[^}]*background:\s*var\(--review-surface-panel\);/u,
+      /\.reader-workspace__mode-segment--compound::before\s*\{[^}]*border:\s*1px\s+solid\s+var\(--reader-border\);[^}]*border-radius:\s*var\(--reader-radius-control\);[^}]*background:\s*var\(--reader-surface-panel\);/u,
     );
     expect(annotationStyles).toMatch(
-      /\.review-workspace__mode-segment--compound\s*>\s*\.review-workspace__mode-tab\[aria-selected="true"\]\s*\{[^}]*padding-right:\s*2px;[^}]*border-color:\s*transparent;[^}]*background:\s*transparent;[^}]*box-shadow:\s*none;/u,
+      /\.reader-workspace__mode-segment--compound\s*>\s*\.reader-workspace__mode-tab\[aria-selected="true"\]\s*\{[^}]*padding-right:\s*2px;[^}]*border-color:\s*transparent;[^}]*background:\s*transparent;[^}]*box-shadow:\s*none;/u,
     );
     expect(annotationStyles).toMatch(
-      /\.review-workspace__move--header-action\s*\{[^}]*border-color:\s*transparent;[^}]*border-radius:\s*var\(--review-radius-control\);[^}]*background:\s*transparent;[^}]*box-shadow:\s*none;/u,
+      /\.reader-workspace__move--header-action\s*\{[^}]*border-color:\s*transparent;[^}]*border-radius:\s*var\(--reader-radius-control\);[^}]*background:\s*transparent;[^}]*box-shadow:\s*none;/u,
     );
     expect(annotationStyles).toMatch(
-      /\.review-workspace__move--header-action:hover\s*\{[^}]*border-color:\s*var\(--review-border-strong\);[^}]*background:\s*var\(--review-surface-interactive\);/u,
+      /\.reader-workspace__move--header-action:hover\s*\{[^}]*border-color:\s*var\(--reader-border-strong\);[^}]*background:\s*var\(--reader-surface-interactive\);/u,
     );
-    expect(annotationStyles).toContain('height: var(--review-workspace-header-height, 44px)');
-    expect(annotationStyles).toContain('margin-top: var(--review-workspace-header-height, 44px)');
+    expect(annotationStyles).toContain('height: var(--reader-workspace-header-height, 44px)');
+    expect(annotationStyles).toContain('margin-top: var(--reader-workspace-header-height, 44px)');
     expect(annotationStyles).toContain(
-      'transition: transform var(--review-motion-surface) ease-out',
+      'transition: transform var(--reader-motion-surface) ease-out',
     );
     expect(annotationStyles).not.toContain(
       'translateX(calc(-1 * var(--tools-right-width)))',
     );
     expect(annotationStyles).not.toContain(
-      'translateY(calc(-50% + (var(--review-workspace-header-height, 44px) / 2) + 3px))',
+      'translateY(calc(-50% + (var(--reader-workspace-header-height, 44px) / 2) + 3px))',
     );
     expect(annotationStyles).not.toContain(
       'transform: translateY(calc(-1 * var(--reference-bottom-height)))',
     );
     expect(annotationStyles).toMatch(
-      /\.review-tools-workspace\[data-workspace-presentation="bottom"\]\[data-tools-workspace-open="false"\]\s*\{[^}]*transform:\s*translateY\(102%\);/u,
+      /\.reader-tools-workspace\[data-workspace-presentation="bottom"\]\[data-tools-workspace-open="false"\]\s*\{[^}]*transform:\s*translateY\(102%\);/u,
     );
     expect(annotationStyles).not.toContain('[data-edge-rail-open="true"]::before');
     expect(annotationStyles).not.toContain('border-image');
     expect(annotationStyles).not.toContain('margin-top: 53px');
-    expect(annotationStyles).not.toContain('review-workspace__tab-segment--compound');
+    expect(annotationStyles).not.toContain('reader-workspace__tab-segment--compound');
     expect(annotationStyles).not.toContain('.existing-annotations__readonly');
   });
 
@@ -1648,19 +1648,19 @@ describe('review shell layout and accessibility contract', () => {
       /\.pdf-search \.row-action-group\s*\{[^}]*align-self:\s*center;/u,
     );
     expect(annotationStyles).toMatch(
-      /\.pdf-search \.row-action-group__action,\s*\.pdf-search \.copy-link-control__trigger--row,\s*\.pdf-search \.row-action-group__trigger\s*\{[^}]*height:\s*var\(--review-control-compact\);[^}]*min-height:\s*var\(--review-control-compact\);/u,
+      /\.pdf-search \.row-action-group__action,\s*\.pdf-search \.copy-link-control__trigger--row,\s*\.pdf-search \.row-action-group__trigger\s*\{[^}]*height:\s*var\(--reader-control-compact\);[^}]*min-height:\s*var\(--reader-control-compact\);/u,
     );
     expect(annotationStyles).toMatch(
-      /\.pdf-search \.row-action-group__trigger\s*\{[^}]*width:\s*var\(--review-control-compact\);[^}]*min-width:\s*var\(--review-control-compact\);/u,
+      /\.pdf-search \.row-action-group__trigger\s*\{[^}]*width:\s*var\(--reader-control-compact\);[^}]*min-width:\s*var\(--reader-control-compact\);/u,
     );
     const coarsePointerRules = responsiveStyles.match(
       /@media \(hover: none\), \(pointer: coarse\) \{([\s\S]*?)\n\}/u,
     )?.[1];
     expect(coarsePointerRules).toMatch(
-      /\.pdf-search \.row-action-group__action,\s*\.pdf-search \.copy-link-control__trigger--row,\s*\.pdf-search \.row-action-group__trigger\s*\{[^}]*height:\s*var\(--review-control-touch\);[^}]*min-height:\s*var\(--review-control-touch\);/u,
+      /\.pdf-search \.row-action-group__action,\s*\.pdf-search \.copy-link-control__trigger--row,\s*\.pdf-search \.row-action-group__trigger\s*\{[^}]*height:\s*var\(--reader-control-touch\);[^}]*min-height:\s*var\(--reader-control-touch\);/u,
     );
     expect(coarsePointerRules).toMatch(
-      /\.pdf-search \.row-action-group__trigger\s*\{[^}]*width:\s*var\(--review-control-touch\);[^}]*min-width:\s*var\(--review-control-touch\);/u,
+      /\.pdf-search \.row-action-group__trigger\s*\{[^}]*width:\s*var\(--reader-control-touch\);[^}]*min-width:\s*var\(--reader-control-touch\);/u,
     );
   });
 
@@ -1698,7 +1698,7 @@ describe('review shell layout and accessibility contract', () => {
       /\.outline-navigator__row\[data-current="true"\]\s*\{[^}]*box-shadow:\s*0 2px 7px rgb\(0 0 0 \/ 2\.4%\);/u,
     );
     expect(neutralStyles).toContain(
-      '.outline-navigator__disclosure .review-icon { width: 16px; height: 16px; }',
+      '.outline-navigator__disclosure .reader-icon { width: 16px; height: 16px; }',
     );
     expect(neutralStyles).toContain(
       '):focus-visible {\n  outline: 2px solid var(--pk-focus);\n  outline-offset: 3px;',
@@ -1710,27 +1710,27 @@ describe('review shell layout and accessibility contract', () => {
       name: 'a split layout with the right tray closed',
       layout: 'wide-bottom',
       trayButtons: [
-        ['bottom', 'true', 'review-workspace', 'Hide References'],
-        ['right', 'false', 'review-tools-workspace', 'Show Workspace'],
+        ['bottom', 'true', 'reader-workspace', 'Hide References'],
+        ['right', 'false', 'reader-tools-workspace', 'Show Workspace'],
       ],
     },
     {
       name: 'a split layout with both trays open',
       layout: 'wide-split',
       trayButtons: [
-        ['bottom', 'true', 'review-workspace', 'Hide References'],
-        ['right', 'true', 'review-tools-workspace', 'Hide Workspace'],
+        ['bottom', 'true', 'reader-workspace', 'Hide References'],
+        ['right', 'true', 'reader-tools-workspace', 'Hide Workspace'],
       ],
     },
     {
       name: 'the right-docked layout',
       layout: 'wide-right',
-      trayButtons: [['right', 'true', 'review-workspace review-tools-workspace', 'Hide Workspace']],
+      trayButtons: [['right', 'true', 'reader-workspace reader-tools-workspace', 'Hide Workspace']],
     },
     {
       name: 'the narrow layout',
       layout: 'narrow-unified',
-      trayButtons: [['bottom', 'true', 'review-workspace review-tools-workspace', 'Hide Workspace']],
+      trayButtons: [['bottom', 'true', 'reader-workspace reader-tools-workspace', 'Hide Workspace']],
     },
   ])('exposes the toolbar tray controls for $name', ({ layout: kind, trayButtons }) => {
     let layout = createReferenceWorkspaceLayout({ width: 1440, height: 900 });
@@ -1914,7 +1914,7 @@ describe('review shell layout and accessibility contract', () => {
       const annotationList = html.indexOf('<ol', annotations);
       const unresolved = html.indexOf('data-reconciliation-item="unresolved-highlight"');
       const source = html.indexOf('data-existing-annotation="source-highlight"');
-      const owned = html.indexOf('data-review-item="owned-highlight"');
+      const owned = html.indexOf('data-annotation-item="owned-highlight"');
       expect(annotations).toBeGreaterThan(-1);
       expect(annotationList).toBeGreaterThan(annotations);
       expect(unresolved).toBeGreaterThan(annotationList);
@@ -1923,9 +1923,9 @@ describe('review shell layout and accessibility contract', () => {
       expect(html.match(/data-reconciliation-item="unresolved-highlight"/gu)).toHaveLength(1);
       expect(html.match(/data-reconciliation-draft="frozen-draft"/gu)).toHaveLength(1);
       expect(html).toContain('Keep this authored replacement draft visible.');
-      expect(html).not.toContain('data-review-item="unresolved-highlight"');
+      expect(html).not.toContain('data-annotation-item="unresolved-highlight"');
       expect(html).not.toContain('data-existing-annotation="unresolved-highlight"');
-      expect(html).toContain('data-review-item="owned-highlight"');
+      expect(html).toContain('data-annotation-item="owned-highlight"');
       expect(html).not.toContain('<h2>Needs attention</h2>');
       const unresolvedRow = html.slice(unresolved, source);
       expect(unresolvedRow).toContain('data-annotation-status-icon="warning"');
@@ -2107,9 +2107,9 @@ describe('review shell layout and accessibility contract', () => {
 
     expect(html).toContain('aria-label="Current zoom 100 percent. Enter a zoom percentage"');
     expect(html).toContain('value="100"');
-    expect(html).toContain('<span aria-hidden="true" class="review-chrome__zoom-suffix">%</span>');
+    expect(html).toContain('<span aria-hidden="true" class="reader-chrome__zoom-suffix">%</span>');
     expect(html).not.toContain('aria-label="Zoom percentage"');
-    expect(html).toContain('data-review-chrome-presentation="navigationCompact"');
+    expect(html).toContain('data-reader-chrome-presentation="navigationCompact"');
   });
 
   it('accepts only whole zoom percentages within the configured viewer limits', () => {
@@ -2154,10 +2154,10 @@ describe('review shell layout and accessibility contract', () => {
     )?.[1];
 
     expect(coarsePointerRules).toMatch(
-      /\.review-chrome__page-editor,\s*\.review-chrome__zoom-editor \{\s*min-height: var\(--review-control-touch\);\s*\}/u,
+      /\.reader-chrome__page-editor,\s*\.reader-chrome__zoom-editor \{\s*min-height: var\(--reader-control-touch\);\s*\}/u,
     );
     expect(coarsePointerRules).toMatch(
-      /\.review-chrome__page-input,\s*\.review-chrome__zoom-input \{\s*height: var\(--review-control-touch\);\s*\}/u,
+      /\.reader-chrome__page-input,\s*\.reader-chrome__zoom-input \{\s*height: var\(--reader-control-touch\);\s*\}/u,
     );
   });
 });

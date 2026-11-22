@@ -252,8 +252,8 @@ export function useAnnotationReader({
       const row = staleAuthority
         ? undefined
         : identity.origin === 'owned'
-          ? [...shell.querySelectorAll<HTMLElement>('[data-review-item]')]
-            .find((element) => element.dataset.reviewItem === identity.itemId)
+          ? [...shell.querySelectorAll<HTMLElement>('[data-annotation-item]')]
+            .find((element) => element.dataset.annotationItem === identity.itemId)
           : [...shell.querySelectorAll<HTMLElement>('[data-existing-annotation-key]')]
             .find((element) => element.dataset.existingAnnotationKey === identity.annotationKey);
       const openingMore = row?.querySelector<HTMLElement>('[data-read-full-annotation="true"]');

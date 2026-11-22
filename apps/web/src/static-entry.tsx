@@ -157,8 +157,8 @@ export function StaticLauncher(props: {
   return <main className="static-launcher" onKeyDown={(event) => {
     if (event.key === "Escape" && pending) operationRef.current?.abort();
   }}>
-    {error === undefined ? null : <div className="review-toast-stack static-launcher__toasts">
-      <aside className="review-toast review-toast--error" role="alert"><ReaderIcon name="alert" /><span>{error}</span></aside>
+    {error === undefined ? null : <div className="reader-toast-stack static-launcher__toasts">
+      <aside className="reader-toast reader-toast--error" role="alert"><ReaderIcon name="alert" /><span>{error}</span></aside>
     </div>}
     <div className="landing-hero" id="top">
       <section className="landing-hero__copy" aria-labelledby="landing-title">
@@ -198,7 +198,7 @@ export function StaticLauncher(props: {
           disabled={pending && openingSource !== "file"}
           onClick={() => pending ? operationRef.current?.abort() : inputRef.current?.click()}
         >
-          <ReaderIcon name={pending && openingSource === "file" ? "loading" : "upload"} size={14} className={pending && openingSource === "file" ? "review-icon static-launcher__spinner" : "review-icon"} />
+          <ReaderIcon name={pending && openingSource === "file" ? "loading" : "upload"} size={14} className={pending && openingSource === "file" ? "reader-icon static-launcher__spinner" : "reader-icon"} />
           Upload PDF
         </button>
         <p className="landing-drop-hint">or drop a PDF here</p>
@@ -223,7 +223,7 @@ export function StaticLauncher(props: {
               onChange={(event) => setRemoteUrl(event.currentTarget.value)}
             />
             <button type="submit" title={pending && openingSource === "url" ? "Cancel opening" : "Open document URL"} disabled={pending ? openingSource !== "url" : remoteUrl.trim() === ""}>
-              <ReaderIcon name={pending && openingSource === "url" ? "loading" : "link"} size={14} className={pending && openingSource === "url" ? "review-icon static-launcher__spinner" : "review-icon"} />
+              <ReaderIcon name={pending && openingSource === "url" ? "loading" : "link"} size={14} className={pending && openingSource === "url" ? "reader-icon static-launcher__spinner" : "reader-icon"} />
               Open
             </button>
           </div>
@@ -324,7 +324,7 @@ export async function mountStaticBrowserApp(): Promise<void> {
     operation.onPhase("activating");
 
     const readerRoot = document.createElement("div");
-    readerRoot.className = "static-review-root static-review-root--activating";
+    readerRoot.className = "static-reader-root static-reader-root--activating";
     document.body.append(readerRoot);
     const ready = Promise.withResolvers<void>();
     let unmount: (() => void) | undefined;
@@ -352,7 +352,7 @@ export async function mountStaticBrowserApp(): Promise<void> {
     launcher.unmount();
     rootElement.remove();
     readerRoot.id = "root";
-    readerRoot.classList.remove("static-review-root--activating");
+    readerRoot.classList.remove("static-reader-root--activating");
     const onPageHide = (event: PageTransitionEvent) => {
       if (event.persisted) return;
       globalThis.removeEventListener("pagehide", onPageHide);

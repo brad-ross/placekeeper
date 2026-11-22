@@ -19,7 +19,7 @@ export function OutlineExpansionToggle({
     <ReaderTooltipButton
       label={label}
       type="button"
-      className="review-workspace__move review-workspace__move--activity review-workspace__move--header-action review-workspace__outline-toggle"
+      className="reader-workspace__move reader-workspace__move--activity reader-workspace__move--header-action reader-workspace__outline-toggle"
       data-outline-expansion-toggle={restorePending ? 'restore' : 'collapse'}
       aria-label={label}
       aria-pressed={restorePending}

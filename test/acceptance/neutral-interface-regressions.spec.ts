@@ -130,8 +130,8 @@ test('reference tray has one 12px inset around its viewer at wide and narrow wid
     await expect(page.getByRole('tablist', { name: 'Open references' })).toHaveAttribute('aria-orientation', width > 760 ? 'vertical' : 'horizontal');
     await expect(page.getByRole('tab', { name: 'Primary result, Page 2', exact: true })).toBeVisible();
     await expect.poll(async () => page.locator('.reference-panel__viewport').evaluate((viewport) => {
-      const tray = viewport.closest('.review-workspace')!.getBoundingClientRect();
-      const panel = viewport.closest('.review-workspace__panel--references')!;
+      const tray = viewport.closest('.reader-workspace')!.getBoundingClientRect();
+      const panel = viewport.closest('.reader-workspace__panel--references')!;
       const tabs = panel.querySelector('.reference-tabs')!.getBoundingClientRect();
       const box = viewport.getBoundingClientRect();
       const vertical = panel.getAttribute('data-reference-tabs-orientation') === 'vertical';
@@ -216,8 +216,8 @@ test('reference labels, actions, return control, and dock controls follow the ca
     rowHeight: 32, actionWidth: 26, actionHeight: 26, overflow: false });
   expect((await inspect()).titleAlign).toBeLessThan(1);
   const dockBottom = page.getByRole('button', { name: 'Move References to bottom', exact: true });
-  await expect(page.locator('.review-tools-workspace[data-tools-workspace-shared="true"]')).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
-  const headerBox = (await page.locator('.review-workspace > .review-workspace__header').boundingBox())!;
+  await expect(page.locator('.reader-tools-workspace[data-tools-workspace-shared="true"]')).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+  const headerBox = (await page.locator('.reader-workspace > .reader-workspace__header').boundingBox())!;
   const bottomButtonBox = (await dockBottom.boundingBox())!;
   expect(headerBox.x + headerBox.width - bottomButtonBox.x - bottomButtonBox.width).toBeCloseTo(12, 0);
   await page.screenshot({ animations: 'disabled', path: test.info().outputPath('reference-tab-right.png') });
@@ -240,7 +240,7 @@ test('save failure offers copy recovery and handles retry pending, failure, and 
     else { clean = true; await route.fulfill({ json: saveStatus() }); }
   });
   await openPdf(page, 'text-native.pdf');
-  const notice = page.locator('.review-save-notice');
+  const notice = page.locator('.reader-save-notice');
   await expect(notice).toContainText('Couldn’t save your latest annotations.');
   await notice.getByRole('button', { name: 'Save a copy…', exact: true }).click();
   await expect(page.getByRole('dialog')).toBeVisible();
@@ -257,7 +257,7 @@ test('save failure offers copy recovery and handles retry pending, failure, and 
   await expect.poll(() => retries).toBe(2);
   releaseRetry!();
   await expect(notice).toHaveCount(0);
-  await expect(page.locator('.review-chrome__save-dot')).toHaveCount(0);
+  await expect(page.locator('.reader-chrome__save-dot')).toHaveCount(0);
 });
 
 test('terminal recovery keeps the shared dialog treatment and reachable narrow actions', async ({ page }) => {

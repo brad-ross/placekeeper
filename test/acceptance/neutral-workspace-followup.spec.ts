@@ -49,15 +49,15 @@ test('unified bottom workspace keeps the horizontal tray surface', async ({ page
   await page.setViewportSize({ width: 620, height: 900 });
   await openPdf(page);
   await openReference(page);
-  await expect(page.locator('[data-review-stage]')).toHaveAttribute(
+  await expect(page.locator('[data-reader-stage]')).toHaveAttribute(
     'data-reference-layout',
     'narrow-unified',
   );
   await page.getByRole('tab', { name: 'Outline', exact: true }).click();
 
-  const colors = await page.locator('.review-tools-workspace').evaluate((workspace) => {
-    const panel = workspace.querySelector<HTMLElement>('.review-workspace__panel:not([hidden])');
-    const references = workspace.ownerDocument.querySelector<HTMLElement>('.review-workspace');
+  const colors = await page.locator('.reader-tools-workspace').evaluate((workspace) => {
+    const panel = workspace.querySelector<HTMLElement>('.reader-workspace__panel:not([hidden])');
+    const references = workspace.ownerDocument.querySelector<HTMLElement>('.reader-workspace');
     if (!panel || !references) throw new Error('Unified workspace surfaces are missing');
     return {
       panel: getComputedStyle(panel).backgroundColor,
@@ -104,7 +104,7 @@ test('bottom and right Reference tabs share compact geometry and intent actions'
   await expect(page.getByRole('tablist', { name: 'Open references' }))
     .toHaveAttribute('aria-orientation', 'vertical');
   await expect(page.locator('.reference-tabs')).toHaveCSS('width', '184px');
-  await page.locator('.review-chrome__page-input').focus();
+  await page.locator('.reader-chrome__page-input').focus();
   await page.mouse.move(0, 0);
   await expect.poll(inspect).toMatchObject({
     rowHeight: 32,
@@ -154,7 +154,7 @@ test('workspace rows use Outline selection, hover, focus, and resize treatments'
   await openPdf(page);
   await openReference(page);
 
-  const bottomTray = page.locator('.review-workspace');
+  const bottomTray = page.locator('.reader-workspace');
   const bottomHandle = page.locator('[data-reference-resize-handle="bottom"]');
   // Resize feedback follows the full rounded tray edge.
   const bottomCorners = await Promise.all([bottomTray.boundingBox(), bottomHandle.boundingBox()]);
@@ -169,7 +169,7 @@ test('workspace rows use Outline selection, hover, focus, and resize treatments'
   await page.keyboard.press(forwardTab);
   await expect(moveRight).toBeFocused();
   await moveRight.press('Enter');
-  const rightTray = page.locator('.review-workspace');
+  const rightTray = page.locator('.reader-workspace');
   const rightHandle = page.locator('[data-reference-resize-handle="right"]');
   const rightCorners = await Promise.all([rightTray.boundingBox(), rightHandle.boundingBox()]);
   expect(rightCorners[0]).not.toBeNull();

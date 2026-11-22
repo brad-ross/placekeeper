@@ -40,7 +40,7 @@ test('test MCP bridge composes protected work, delayed save, peer replacement, r
       createdAt: timestamp, updatedAt: timestamp, payload: { quote: anchor.quote, prefix: '', suffix: '', rect: anchor.rect, segmentRects: anchor.segmentRects, reliable: true, comment: 'Before refresh' } } });
     await reached.promise;
     await peer.call('command', { type: 'edit', expectedRevision: initialRevision + 1, id: itemId, updatedAt: timestamp, payload: { comment: 'Accepted while saving' } });
-    await expect(peerPage.locator(`[data-review-item="${itemId}"]`)).toContainText('Accepted while saving');
+    await expect(peerPage.locator(`[data-annotation-item="${itemId}"]`)).toContainText('Accepted while saving');
     const savingState = observe('accepted-edit-saving');
     expect(savingState.items[0]?.id).toBe(itemId);
     expect(bridge.broker.saveStatus(bridge.sessionId)?.sync).toMatchObject({ phase: 'saving', desiredRevision: initialRevision + 2, savedRevision: initialRevision });

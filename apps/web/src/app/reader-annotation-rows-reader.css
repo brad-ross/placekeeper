@@ -21,77 +21,77 @@
   list-style: none;
 }
 
-:is(.review-workspace, .review-tools-workspace) li[data-annotation-origin] {
+:is(.reader-workspace, .reader-tools-workspace) li[data-annotation-origin] {
   grid-template-columns: minmax(0, 1fr);
   container-name: row-actions;
   container-type: inline-size;
 }
 
-:is(.review-workspace, .review-tools-workspace) li[data-item-copy-link="true"]:focus-within {
+:is(.reader-workspace, .reader-tools-workspace) li[data-item-copy-link="true"]:focus-within {
   z-index: 2;
   overflow: visible;
 }
 
-:is(.review-workspace, .review-tools-workspace) li[data-search-result] {
+:is(.reader-workspace, .reader-tools-workspace) li[data-search-result] {
   grid-template-columns: minmax(0, 1fr) auto;
   container-name: row-actions;
   container-type: inline-size;
 }
 
-:is(.review-workspace, .review-tools-workspace) li[data-annotation-origin],
-:is(.review-workspace, .review-tools-workspace) li[data-search-result] {
+:is(.reader-workspace, .reader-tools-workspace) li[data-annotation-origin],
+:is(.reader-workspace, .reader-tools-workspace) li[data-search-result] {
   position: relative;
   display: grid;
   min-width: 0;
-  gap: var(--review-control-group-gap);
+  gap: var(--reader-control-group-gap);
   padding: 4px;
   overflow: hidden;
-  border: 1px solid var(--review-border-subtle);
-  border-radius: var(--review-radius-row);
-  background: var(--review-workspace-card-surface);
-  transition: border-color var(--review-motion-fast) ease, background-color var(--review-motion-fast) ease, box-shadow var(--review-motion-fast) ease;
+  border: 1px solid var(--reader-border-subtle);
+  border-radius: var(--reader-radius-row);
+  background: var(--reader-workspace-card-surface);
+  transition: border-color var(--reader-motion-fast) ease, background-color var(--reader-motion-fast) ease, box-shadow var(--reader-motion-fast) ease;
 }
 
-:is(.review-workspace, .review-tools-workspace) li[data-annotation-origin]:not([data-active="true"]):hover,
-:is(.review-workspace, .review-tools-workspace) li[data-annotation-origin]:not([data-active="true"]):has(:focus-visible):not(:has(.copy-link-control:focus-within)),
-:is(.review-workspace, .review-tools-workspace) li[data-search-result]:hover,
-:is(.review-workspace, .review-tools-workspace) li[data-search-result]:has(:focus-visible):not(:has(.copy-link-control:focus-within)) {
-  border-color: var(--review-border-strong);
-  background: var(--review-workspace-card-hover);
+:is(.reader-workspace, .reader-tools-workspace) li[data-annotation-origin]:not([data-active="true"]):hover,
+:is(.reader-workspace, .reader-tools-workspace) li[data-annotation-origin]:not([data-active="true"]):has(:focus-visible):not(:has(.copy-link-control:focus-within)),
+:is(.reader-workspace, .reader-tools-workspace) li[data-search-result]:hover,
+:is(.reader-workspace, .reader-tools-workspace) li[data-search-result]:has(:focus-visible):not(:has(.copy-link-control:focus-within)) {
+  border-color: var(--reader-border-strong);
+  background: var(--reader-workspace-card-hover);
 }
 
-:is(.review-workspace, .review-tools-workspace) li[data-annotation-origin]:active:not(:has(.copy-link-control__trigger:active)),
-:is(.review-workspace, .review-tools-workspace) li[data-search-result]:active:not(:has(.copy-link-control__trigger:active)) {
-  --annotation-more-surface: var(--review-surface-interactive);
+:is(.reader-workspace, .reader-tools-workspace) li[data-annotation-origin]:active:not(:has(.copy-link-control__trigger:active)),
+:is(.reader-workspace, .reader-tools-workspace) li[data-search-result]:active:not(:has(.copy-link-control__trigger:active)) {
+  --annotation-more-surface: var(--reader-surface-interactive);
 
-  background: var(--review-surface-interactive);
+  background: var(--reader-surface-interactive);
   box-shadow: inset 0 1px 2px rgb(24 26 23 / 16%);
 }
 
-:is(.review-workspace, .review-tools-workspace) li[data-active="true"] {
-  border-color: var(--review-border-strong);
-  background: var(--review-selection-bg);
-  box-shadow: inset 0 0 0 1px var(--review-selection-ink);
+:is(.reader-workspace, .reader-tools-workspace) li[data-active="true"] {
+  border-color: var(--reader-border-strong);
+  background: var(--reader-selection-bg);
+  box-shadow: inset 0 0 0 1px var(--reader-selection-ink);
 }
 
-:is(.review-workspace, .review-tools-workspace) li[data-annotation-origin] {
+:is(.reader-workspace, .reader-tools-workspace) li[data-annotation-origin] {
   padding: 3px;
   border: 0;
   background: transparent;
 }
 
-:is(.review-workspace, .review-tools-workspace) li[data-annotation-origin]:hover,
-:is(.review-workspace, .review-tools-workspace) li[data-annotation-origin]:has(:focus-visible) {
+:is(.reader-workspace, .reader-tools-workspace) li[data-annotation-origin]:hover,
+:is(.reader-workspace, .reader-tools-workspace) li[data-annotation-origin]:has(:focus-visible) {
   border: 0;
 }
 
-:is(.review-workspace, .review-tools-workspace) li[data-annotation-origin][data-active="true"] {
+:is(.reader-workspace, .reader-tools-workspace) li[data-annotation-origin][data-active="true"] {
   border: 0;
-  background: var(--review-surface-panel);
-  box-shadow: var(--review-shadow-soft, 0 2px 7px rgb(0 0 0 / 5%));
+  background: var(--reader-surface-panel);
+  box-shadow: var(--reader-shadow-soft, 0 2px 7px rgb(0 0 0 / 5%));
 }
 
-:is(.review-workspace, .review-tools-workspace) li[data-corresponding="true"]::before {
+:is(.reader-workspace, .reader-tools-workspace) li[data-corresponding="true"]::before {
   position: absolute;
   z-index: 1;
   top: 9px;
@@ -99,14 +99,14 @@
   left: 0;
   width: 3px;
   border-radius: 0 3px 3px 0;
-  background: var(--review-selection-ink);
+  background: var(--reader-selection-ink);
   content: "";
 }
 
-:is(.review-workspace, .review-tools-workspace) li[data-corresponding="true"]:not([data-active="true"]) {
-  --annotation-more-surface: color-mix(in srgb, var(--review-selection-bg) 62%, var(--review-surface-subtle));
+:is(.reader-workspace, .reader-tools-workspace) li[data-corresponding="true"]:not([data-active="true"]) {
+  --annotation-more-surface: color-mix(in srgb, var(--reader-selection-bg) 62%, var(--reader-surface-subtle));
 
-  background: color-mix(in srgb, var(--review-selection-bg) 62%, var(--review-surface-subtle));
+  background: color-mix(in srgb, var(--reader-selection-bg) 62%, var(--reader-surface-subtle));
 }
 
 .annotation-item__content,
@@ -118,7 +118,7 @@
   padding: 7px 8px 7px 12px;
   gap: 5px;
   border: 0;
-  border-radius: var(--review-radius-control);
+  border-radius: var(--reader-radius-control);
   color: inherit;
   background: transparent;
   text-align: left;
@@ -135,7 +135,7 @@
 
 .annotation-item__title-row {
   align-items: center;
-  gap: var(--review-metadata-separator-gap);
+  gap: var(--reader-metadata-separator-gap);
 }
 
 .annotation-item__title-row > .row-action-group {
@@ -163,7 +163,7 @@
 
 .annotation-item__body-row {
   align-items: end;
-  gap: var(--review-control-group-gap);
+  gap: var(--reader-control-group-gap);
 }
 
 .annotation-item__body-row > .annotation-item__excerpt {
@@ -176,7 +176,7 @@
   inset: 0;
   width: 100%;
   border: 0;
-  border-radius: var(--review-radius-control);
+  border-radius: var(--reader-radius-control);
   background: transparent;
   cursor: pointer;
 }
@@ -194,15 +194,15 @@
   display: flex;
   align-items: baseline;
   justify-content: flex-start;
-  gap: var(--review-metadata-separator-gap);
-  color: var(--review-ink-muted);
+  gap: var(--reader-metadata-separator-gap);
+  color: var(--reader-ink-muted);
   font-size: 11px;
   line-height: 1.25;
 }
 
 .annotation-item__meta strong {
   overflow: hidden;
-  color: var(--review-ink-primary);
+  color: var(--reader-ink-primary);
   font-size: 11px;
   font-weight: 500;
   letter-spacing: 0;
@@ -213,13 +213,13 @@
 
 .annotation-item__meta > span {
   flex: none;
-  color: var(--review-ink-muted);
+  color: var(--reader-ink-muted);
   font-size: 11px;
   font-variant-numeric: tabular-nums;
 }
 
 .annotation-item__separator {
-  color: var(--review-ink-quiet);
+  color: var(--reader-ink-quiet);
 }
 
 .annotation-item__page {
@@ -241,7 +241,7 @@
   min-width: 0;
   max-height: 4.35em;
   overflow: hidden;
-  color: var(--review-ink-primary);
+  color: var(--reader-ink-primary);
   font-size: 12px;
   line-height: 1.45;
   overflow-wrap: anywhere;
@@ -266,12 +266,12 @@
   mask-image: linear-gradient(to bottom, #000 0, #000 calc(100% - 11px), transparent 100%);
 }
 
-.review-shell .annotation-item__excerpt-trigger:focus-visible {
-  outline: 2px solid var(--review-focus);
+.reader-shell .annotation-item__excerpt-trigger:focus-visible {
+  outline: 2px solid var(--reader-focus);
   outline-offset: 2px;
 }
 
-.annotation-item__source { color: var(--review-ink-muted); }
+.annotation-item__source { color: var(--reader-ink-muted); }
 .annotation-item__source[data-source-treatment="struck"] { text-decoration: line-through; }
 
 .full-annotation-reader {
@@ -292,14 +292,14 @@
   align-items: center;
   gap: 8px;
   padding-bottom: 10px;
-  border-bottom: 1px solid var(--review-border-subtle);
+  border-bottom: 1px solid var(--reader-border-subtle);
 }
 
 .full-annotation-reader__actions {
   display: flex;
   flex: none;
   align-items: center;
-  gap: var(--review-control-group-gap);
+  gap: var(--reader-control-group-gap);
 }
 
 .full-annotation-reader__back,
@@ -309,16 +309,16 @@
 .full-annotation-reader__add-context,
 .full-annotation-reader__locate {
   display: inline-flex;
-  min-width: var(--review-control-compact);
-  height: var(--review-control-compact);
+  min-width: var(--reader-control-compact);
+  height: var(--reader-control-compact);
   align-items: center;
   justify-content: center;
   gap: 5px;
   padding: 0;
   place-items: center;
   border: 1px solid transparent;
-  border-radius: var(--review-radius-control);
-  color: var(--review-ink-muted);
+  border-radius: var(--reader-radius-control);
+  color: var(--reader-ink-muted);
   background: transparent;
 }
 
@@ -328,15 +328,15 @@
 .full-annotation-reader__open-reference:hover,
 .full-annotation-reader__add-context:hover,
 .full-annotation-reader__locate:hover {
-  border-color: var(--review-border-strong);
-  background: var(--review-workspace-card-hover);
+  border-color: var(--reader-border-strong);
+  background: var(--reader-workspace-card-hover);
 }
 
-.review-shell .full-annotation-reader__back:focus-visible {
+.reader-shell .full-annotation-reader__back:focus-visible {
   outline: none;
   box-shadow: none;
-  border-color: var(--review-border-strong);
-  background: var(--review-workspace-card-hover);
+  border-color: var(--reader-border-strong);
+  background: var(--reader-workspace-card-hover);
 }
 
 .full-annotation-reader__metadata {
@@ -347,7 +347,7 @@
 
 .full-annotation-reader__readonly { margin-inline-start: 5px; }
 .full-annotation-reader__header-actions { display: flex; flex: none; gap: 2px; margin-inline-start: auto; }
-.full-annotation-reader__locate:disabled .review-icon { animation: review-loader-spin .8s linear infinite; }
+.full-annotation-reader__locate:disabled .reader-icon { animation: reader-loader-spin .8s linear infinite; }
 
 .full-annotation-reader__metadata > strong {
   flex: none;
@@ -361,15 +361,15 @@
 .full-annotation-reader__provenance {
   display: flex;
   align-items: baseline;
-  gap: var(--review-metadata-separator-gap);
-  color: var(--review-ink-muted);
+  gap: var(--reader-metadata-separator-gap);
+  color: var(--reader-ink-muted);
   font-size: 11px;
   line-height: 1.25;
 }
 
 .full-annotation-reader__provenance > span:not(:first-child)::before {
-  margin-inline-end: var(--review-metadata-separator-gap);
-  color: var(--review-ink-quiet);
+  margin-inline-end: var(--reader-metadata-separator-gap);
+  color: var(--reader-ink-quiet);
   content: "·";
 }
 
@@ -383,7 +383,7 @@
 
 .full-annotation-reader__body h3 {
   margin: 0;
-  color: var(--review-ink-muted);
+  color: var(--reader-ink-muted);
   font-size: 11px;
   font-weight: 500;
   letter-spacing: 0;
@@ -392,7 +392,7 @@
 
 .full-annotation-reader__body p {
   margin: 0;
-  color: var(--review-ink-primary);
+  color: var(--reader-ink-primary);
   font-size: 13px;
   line-height: 1.55;
   overflow-wrap: anywhere;
@@ -401,7 +401,7 @@
 
 .annotation-item__action,
 .pdf-search__clear {
-  transition: color var(--review-motion-fast) ease, border-color var(--review-motion-fast) ease, background-color var(--review-motion-fast) ease, opacity var(--review-motion-fast) ease, box-shadow var(--review-motion-fast) ease;
+  transition: color var(--reader-motion-fast) ease, border-color var(--reader-motion-fast) ease, background-color var(--reader-motion-fast) ease, opacity var(--reader-motion-fast) ease, box-shadow var(--reader-motion-fast) ease;
 }
 
 .annotation-item__action {
@@ -416,7 +416,7 @@
   height: 1.4rem;
   min-height: 1.4rem;
   max-height: 1.4rem;
-  border-radius: var(--review-radius-control);
+  border-radius: var(--reader-radius-control);
 }
 
 .annotation-item__title-actions .copy-link-control--annotation {
@@ -424,33 +424,33 @@
   pointer-events: auto;
 }
 
-.annotation-item__title-actions .copy-link-control__trigger--icon-only .review-icon {
+.annotation-item__title-actions .copy-link-control__trigger--icon-only .reader-icon {
   width: 13px;
   height: 13px;
 }
 
-.review-shell .annotation-item__navigation:focus-visible {
+.reader-shell .annotation-item__navigation:focus-visible {
   outline: none;
 }
 
-:is(.review-workspace, .review-tools-workspace) li[data-annotation-origin]:has(:focus-visible):not(:has(.copy-link-control:focus-within)),
-:is(.review-workspace, .review-tools-workspace) li[data-search-result]:has(:focus-visible):not(:has(.copy-link-control:focus-within)) {
-  outline: 3px solid var(--review-focus);
+:is(.reader-workspace, .reader-tools-workspace) li[data-annotation-origin]:has(:focus-visible):not(:has(.copy-link-control:focus-within)),
+:is(.reader-workspace, .reader-tools-workspace) li[data-search-result]:has(:focus-visible):not(:has(.copy-link-control:focus-within)) {
+  outline: 3px solid var(--reader-focus);
   outline-offset: 2px;
 }
 
-:is(.review-workspace, .review-tools-workspace) li:hover .annotation-item__action,
-:is(.review-workspace, .review-tools-workspace) li:has(:focus-visible) .annotation-item__action,
-:is(.review-workspace, .review-tools-workspace) li[data-active="true"] .annotation-item__action {
+:is(.reader-workspace, .reader-tools-workspace) li:hover .annotation-item__action,
+:is(.reader-workspace, .reader-tools-workspace) li:has(:focus-visible) .annotation-item__action,
+:is(.reader-workspace, .reader-tools-workspace) li[data-active="true"] .annotation-item__action {
   opacity: 1;
 }
 
 .annotation-item__delete {
-  color: var(--review-danger, #9a3d34);
+  color: var(--reader-danger, #9a3d34);
 }
 
 .annotation-item__delete:hover {
-  color: var(--review-danger, #9a3d34);
+  color: var(--reader-danger, #9a3d34);
 }
 
 .annotation-item__kind-icon {
@@ -460,11 +460,11 @@
   flex: none;
   align-self: center;
   place-items: center;
-  color: var(--review-ink-muted);
+  color: var(--reader-ink-muted);
 }
 
 .annotation-item__status-icon {
-  color: var(--review-danger);
+  color: var(--reader-danger);
 }
 
 .annotation-direction-cue {
@@ -475,10 +475,10 @@
   gap: 6px;
   margin: 4px 0;
   padding: 7px 9px;
-  border: 1px dashed var(--review-selection-ink);
-  border-radius: var(--review-radius-control);
-  color: var(--review-selection-ink);
-  background: var(--review-selection-bg);
+  border: 1px dashed var(--reader-selection-ink);
+  border-radius: var(--reader-radius-control);
+  color: var(--reader-selection-ink);
+  background: var(--reader-selection-bg);
   font-size: 11px;
   font-weight: 500;
 }
@@ -491,7 +491,7 @@
 .annotation-direction-cue[data-correspondence-direction="below"] { bottom: 0; }
 
 .existing-annotations {
-  border-top: 1px solid var(--review-border-subtle);
+  border-top: 1px solid var(--reader-border-subtle);
 }
 
 .annotation-drawer__header,
@@ -512,10 +512,10 @@
 .annotation-status {
   margin: 0;
   padding: 10px 12px;
-  border: 1px dashed var(--review-border);
-  border-radius: var(--review-radius-row);
-  color: var(--review-ink-muted);
-  background: var(--review-surface-subtle);
+  border: 1px dashed var(--reader-border);
+  border-radius: var(--reader-radius-row);
+  color: var(--reader-ink-muted);
+  background: var(--reader-surface-subtle);
   font-size: 12px;
   overflow-wrap: anywhere;
 }
@@ -527,7 +527,7 @@
 }
 
 .annotation-status__icon {
-  color: var(--review-ink-muted);
+  color: var(--reader-ink-muted);
 }
 
 .annotation-status[data-annotation-status="loading"] .annotation-status__icon {

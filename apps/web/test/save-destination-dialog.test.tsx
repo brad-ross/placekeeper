@@ -36,7 +36,7 @@ it('associates a rejected name with the existing modal error treatment', () => {
 it('uses the same field and modal classes for export without global preference text', () => {
   const html = renderToStaticMarkup(<ExportAnnotationDialog annotationName="Brad Ross"
     pending={false} error="Choose a shorter name." onConfirm={vi.fn()} onCancel={vi.fn()} />);
-  expect(html).toContain('save-destination-dialog review-choice-dialog compact-editorial-modal');
+  expect(html).toContain('save-destination-dialog reader-choice-dialog compact-editorial-modal');
   expect(html).toContain('class="save-destination-filename"');
   expect(html).toContain('Name on annotations');
   expect(html).toContain('value="Brad Ross"');

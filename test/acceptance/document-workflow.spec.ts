@@ -8,12 +8,12 @@ async function clickHoverRevealedReferenceDockAction(action: Locator) {
 }
 
 async function openAnnotationsWorkspace(page: Page) {
-  const stage = page.locator('[data-review-stage]');
+  const stage = page.locator('[data-reader-stage]');
   const expectedPresentation = (page.viewportSize()?.width ?? 1280) < 900 ? 'bottom' : 'right';
   await expect(stage).toHaveAttribute('data-workspace-presentation', expectedPresentation);
   const workspace = expectedPresentation === 'right'
-    ? page.locator('#review-tools-workspace')
-    : page.locator('#review-workspace');
+    ? page.locator('#reader-tools-workspace')
+    : page.locator('#reader-workspace');
   const openAttribute = expectedPresentation === 'right'
     ? 'data-tools-workspace-open'
     : 'data-workspace-open';
@@ -39,13 +39,13 @@ async function openAnnotationsWorkspace(page: Page) {
 
 async function closeWorkspace(page: Page) {
   const expectedPresentation = (page.viewportSize()?.width ?? 1280) < 900 ? 'bottom' : 'right';
-  await expect(page.locator('[data-review-stage]')).toHaveAttribute(
+  await expect(page.locator('[data-reader-stage]')).toHaveAttribute(
     'data-workspace-presentation',
     expectedPresentation,
   );
   const surface = expectedPresentation === 'right'
-    ? page.locator('#review-tools-workspace')
-    : page.locator('#review-workspace');
+    ? page.locator('#reader-tools-workspace')
+    : page.locator('#reader-workspace');
   const openAttribute = expectedPresentation === 'right'
     ? 'data-tools-workspace-open'
     : 'data-workspace-open';
@@ -62,7 +62,7 @@ async function closeWorkspace(page: Page) {
 
 async function currentWorkspaceToggle(page: Page) {
   const expectedPresentation = (page.viewportSize()?.width ?? 1280) < 900 ? 'bottom' : 'right';
-  await expect(page.locator('[data-review-stage]')).toHaveAttribute(
+  await expect(page.locator('[data-reader-stage]')).toHaveAttribute(
     'data-workspace-presentation',
     expectedPresentation,
   );
@@ -76,7 +76,7 @@ function outlineDisclosure(page: Page, itemId: string) {
 }
 
 async function installMainScrollport(page: Page, scrollbarWidth = 0) {
-  await page.locator('.review-document').evaluate((host, width) => {
+  await page.locator('.reader-document').evaluate((host, width) => {
     const viewport = document.createElement('div');
     viewport.dataset.viewerFramingViewport = '';
     viewport.dataset.testMainScrollport = '';
@@ -115,7 +115,7 @@ async function installRuntimeClassicScrollport(page: Page, scrollbarWidth = 20) 
       height: var(--test-scrollbar-size, ${scrollbarWidth}px);
     }
   ` });
-  await page.locator('.review-document').evaluate((host) => {
+  await page.locator('.reader-document').evaluate((host) => {
     const viewport = document.createElement('div');
     viewport.dataset.viewerFramingViewport = '';
     viewport.dataset.testRuntimeScrollport = '';
@@ -180,11 +180,11 @@ test.describe('canonical review workflow', () => {
     await openAnnotationsWorkspace(page);
 
     const candidate = page.locator(
-      '[data-review-item][data-active="false"]:has([data-row-action="edit"])',
+      '[data-annotation-item][data-active="false"]:has([data-row-action="edit"])',
     ).first();
-    const itemId = await candidate.getAttribute('data-review-item');
+    const itemId = await candidate.getAttribute('data-annotation-item');
     if (itemId === null) throw new Error('No inactive editable annotation row is available.');
-    const row = page.locator(`[data-review-item="${itemId}"]`);
+    const row = page.locator(`[data-annotation-item="${itemId}"]`);
     const navigation = row.locator('.annotation-item__navigation');
     const actions = row.locator('.row-action-group__direct');
     const edit = row.locator('[data-row-action="edit"]');
@@ -234,7 +234,7 @@ test.describe('canonical review workflow', () => {
       expect(await touchPage.evaluate(() => matchMedia('(pointer: coarse)').matches)).toBe(true);
 
       const row = touchPage.locator(
-        '[data-review-item]:has([data-row-action="edit"])',
+        '[data-annotation-item]:has([data-row-action="edit"])',
       ).first();
       const edit = row.locator('[data-row-action="edit"]');
       const remove = row.locator('[data-row-action="delete"]');
@@ -255,7 +255,7 @@ test.describe('canonical review workflow', () => {
             computedHeight: style.height,
             minWidth: style.minWidth,
             maxWidth: style.maxWidth,
-            touchSize: style.getPropertyValue('--review-control-touch'),
+            touchSize: style.getPropertyValue('--reader-control-touch'),
           };
         });
         expect(geometry).toMatchObject({
@@ -284,7 +284,7 @@ test.describe('canonical review workflow', () => {
     await page.setViewportSize({ width: 1280, height: 900 });
     await page.goto('/test/acceptance/reader-harness/index.html?reconciliation=1');
     const documentActionsTrigger = page.getByRole('button', { name: /Open document actions/u });
-    await expect(documentActionsTrigger.locator('.review-icon')).toBeVisible();
+    await expect(documentActionsTrigger.locator('.reader-icon')).toBeVisible();
     await documentActionsTrigger.click();
     const exportAction = page.getByRole('menuitem', { name: 'Export', exact: true });
     await expect(exportAction).toHaveAttribute('aria-disabled', 'true');
@@ -296,9 +296,9 @@ test.describe('canonical review workflow', () => {
     await expect(attention).toBeVisible();
     const openAnnotations = page.getByRole('menuitem', { name: 'Open Annotations' });
     await expect(openAnnotations).toBeVisible();
-    await expect(openAnnotations.locator('.review-icon')).toBeVisible();
+    await expect(openAnnotations.locator('.reader-icon')).toBeVisible();
     await openAnnotations.click();
-    await expect(page.getByRole('tab', { name: 'Annotations', exact: true }).locator('.review-icon'))
+    await expect(page.getByRole('tab', { name: 'Annotations', exact: true }).locator('.reader-icon'))
       .toBeVisible();
 
     const reconciliation = page.getByRole('region', { name: 'Annotations', exact: true });
@@ -445,7 +445,7 @@ test.describe('canonical review workflow', () => {
     });
     const trigger = page.getByRole('button', { name: /Open document actions/u });
     const documentActions = page.locator(
-      '[data-review-chrome] > .review-chrome__identity .document-actions',
+      '[data-reader-chrome] > .reader-chrome__identity .document-actions',
     );
     const geometry = await documentActions.evaluate((element) => {
       const triggerElement = element.querySelector<HTMLElement>('[data-document-actions-trigger]');
@@ -649,7 +649,7 @@ test.describe('canonical review workflow', () => {
     await expect(status.locator('.lucide-loader-circle')).toHaveCount(0);
     await page.goto('/test/acceptance/reader-harness/index.html?reconciliation=ready&refresh=reconciling');
     const spinner = status.locator('.lucide-loader-circle');
-    await expect(spinner).toHaveCSS('animation-name', 'review-loader-spin');
+    await expect(spinner).toHaveCSS('animation-name', 'reader-loader-spin');
     const initialTransform = await spinner.evaluate((element) => getComputedStyle(element).transform);
     await expect.poll(() => spinner.evaluate((element) => getComputedStyle(element).transform)).not.toBe(initialTransform);
     await page.getByRole('button', { name: /Open document actions/u }).click();
@@ -706,7 +706,7 @@ test.describe('canonical review workflow', () => {
     await clickHoverRevealedReferenceDockAction(
       page.getByRole('button', { name: 'Move References to right' }),
     );
-    await expect(page.locator('[data-review-stage]')).toHaveAttribute(
+    await expect(page.locator('[data-reader-stage]')).toHaveAttribute(
       'data-reference-layout',
       'wide-right',
     );
@@ -732,7 +732,7 @@ test.describe('canonical review workflow', () => {
     await expect(references).toBeFocused();
 
     await page.setViewportSize({ width: 760, height: 900 });
-    await expect(page.locator('[data-review-stage]')).toHaveAttribute(
+    await expect(page.locator('[data-reader-stage]')).toHaveAttribute(
       'data-reference-layout',
       'narrow-unified',
     );
@@ -754,7 +754,7 @@ test.describe('canonical review workflow', () => {
 
     await supplemental.click();
     await expect(supplemental).toHaveAttribute('aria-expanded', 'false');
-    await page.locator('.review-workspace__header').hover();
+    await page.locator('.reader-workspace__header').hover();
     await page.getByRole('button', { name: 'Collapse all outline entries' }).click();
     await expect(page.getByRole('button', {
       name: 'Restore previous outline expansion',
@@ -765,7 +765,7 @@ test.describe('canonical review workflow', () => {
 
     await supplemental.click();
     await expect(supplemental).toHaveAttribute('aria-expanded', 'true');
-    await page.locator('.review-workspace__header').hover();
+    await page.locator('.reader-workspace__header').hover();
     await page.getByRole('button', { name: 'Restore previous outline expansion' }).click();
     await expect(harness).toHaveAttribute('aria-expanded', 'true');
     await expect(nested).toHaveAttribute('aria-expanded', 'true');
@@ -779,7 +779,7 @@ test.describe('canonical review workflow', () => {
     await page.setViewportSize({ width: 1280, height: 900 });
     await page.getByRole('button', { name: 'Set outline tree' }).click();
     await page.getByRole('button', { name: 'Show Workspace' }).click();
-    await page.locator('.review-workspace__header').hover();
+    await page.locator('.reader-workspace__header').hover();
     await page.getByRole('button', { name: 'Collapse all outline entries' }).click();
     await expect(page.getByRole('button', {
       name: 'Restore previous outline expansion',
@@ -863,7 +863,7 @@ test.describe('canonical review workflow', () => {
     await expect(selectionActions).toBeVisible();
     for (const name of ['Replace', 'Delete', 'Highlight']) {
       const action = selectionActions.getByRole('button', { name, exact: true });
-      await expect(action.locator('.review-icon')).toBeVisible();
+      await expect(action.locator('.reader-icon')).toBeVisible();
       await expect(action).toHaveText('');
     }
     await selectionActions.getByRole('button', { name: 'Delete', exact: true }).click();
@@ -917,8 +917,8 @@ test.describe('canonical review workflow', () => {
       left: element.scrollLeft,
       top: element.scrollTop,
     }));
-    await expect.poll(() => page.locator('[data-review-stage]').evaluate((element) => (
-      getComputedStyle(element).getPropertyValue('--review-overlay-inset').trim()
+    await expect.poll(() => page.locator('[data-reader-stage]').evaluate((element) => (
+      getComputedStyle(element).getPropertyValue('--reader-overlay-inset').trim()
     ))).toBe('17px');
 
     await openAnnotationsWorkspace(page);
@@ -936,17 +936,17 @@ test.describe('canonical review workflow', () => {
     await page.getByRole('button', { name: 'Open harness reference' }).click();
     await page.getByRole('button', { name: 'Show Workspace' }).click();
     await page.setViewportSize({ width: 760, height: 720 });
-    await page.locator('[data-review-stage]').evaluate(async element => {
+    await page.locator('[data-reader-stage]').evaluate(async element => {
       await Promise.all(element.getAnimations({ subtree: true }).filter(animation => animation.effect?.getComputedTiming().iterations !== Infinity).map(animation => animation.finished.catch(() => undefined)));
     });
     await expect.poll(async () => {
-      const stage = await page.locator('[data-review-stage]').boundingBox();
-      const tray = await page.locator('#review-workspace').boundingBox();
+      const stage = await page.locator('[data-reader-stage]').boundingBox();
+      const tray = await page.locator('#reader-workspace').boundingBox();
       return stage && tray ? stage.y + stage.height - tray.y - tray.height : Number.NaN;
     }).toBeCloseTo(17, 0);
     const [stageBounds, surfaceBounds] = await Promise.all([
-      page.locator('[data-review-stage]').boundingBox(),
-      page.locator('#review-workspace').boundingBox(),
+      page.locator('[data-reader-stage]').boundingBox(),
+      page.locator('#reader-workspace').boundingBox(),
     ]);
     expect(stageBounds).not.toBeNull();
     expect(surfaceBounds).not.toBeNull();
@@ -984,15 +984,15 @@ test.describe('canonical review workflow', () => {
     await page.keyboard.press('Control+Meta+0');
     await expect(page.getByRole('textbox', { name: 'Current zoom 88 percent. Enter a zoom percentage' })).toHaveValue('88');
     await page.keyboard.press('Control+Meta+l');
-    await expect(page.locator('[data-review-stage]')).toHaveAttribute('data-horizontal-scroll-locked', 'true');
+    await expect(page.locator('[data-reader-stage]')).toHaveAttribute('data-horizontal-scroll-locked', 'true');
     await page.keyboard.press('Control+Meta+l');
-    await expect(page.locator('[data-review-stage]')).not.toHaveAttribute('data-horizontal-scroll-locked', 'true');
+    await expect(page.locator('[data-reader-stage]')).not.toHaveAttribute('data-horizontal-scroll-locked', 'true');
     const input = page.getByRole('textbox', { name: 'Native input', exact: true });
     await input.fill('keep this text');
     await input.press('Control+Meta+l');
     await expect(input).toHaveValue('keep this text');
     await expect(input).toBeFocused();
-    await expect(page.locator('[data-review-stage]')).not.toHaveAttribute('data-horizontal-scroll-locked', 'true');
+    await expect(page.locator('[data-reader-stage]')).not.toHaveAttribute('data-horizontal-scroll-locked', 'true');
   });
 
   test('keeps Workspace rightmost and preserves the inset between split trays', async ({ page }) => {
@@ -1015,12 +1015,12 @@ test.describe('canonical review workflow', () => {
     await trayToggles.nth(1).hover();
     await expect(page.getByRole('tooltip')).toHaveText('Hide Workspace');
 
-    const stage = page.locator('[data-review-stage]');
+    const stage = page.locator('[data-reader-stage]');
     await expect(stage).toHaveAttribute('data-reference-layout', 'wide-split');
     await expect.poll(async () => stage.evaluate((element) => {
-      const reference = element.querySelector('#review-workspace')!.getBoundingClientRect();
-      const tools = element.querySelector('#review-tools-workspace')!.getBoundingClientRect();
-      const inset = Number.parseFloat(getComputedStyle(element).getPropertyValue('--review-overlay-inset'));
+      const reference = element.querySelector('#reader-workspace')!.getBoundingClientRect();
+      const tools = element.querySelector('#reader-tools-workspace')!.getBoundingClientRect();
+      const inset = Number.parseFloat(getComputedStyle(element).getPropertyValue('--reader-overlay-inset'));
       return Math.abs(reference.top - tools.bottom - inset);
     })).toBeLessThan(1);
   });
@@ -1034,7 +1034,7 @@ test.describe('canonical review workflow', () => {
     await page.getByRole('button', { name: 'Open harness reference' }).press('Enter');
     await page.getByRole('button', { name: 'Show Workspace' }).click();
     await expect.poll(() => viewport.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
-    const backing = page.locator('.review-overlay-frame');
+    const backing = page.locator('.reader-overlay-frame');
     const expectedClip = () => viewport.evaluate((element) => {
       const scrollport = element as HTMLElement;
       const width = Math.max(16, scrollport.offsetWidth - scrollport.clientWidth);
@@ -1060,7 +1060,7 @@ test.describe('canonical review workflow', () => {
     test.skip(browserName !== 'chromium', 'Chromium exposes deterministic custom classic scrollbar metrics in CI.');
     await page.setViewportSize({ width: 760, height: 720 });
     const canvas = page.getByRole('application', { name: 'PDF review canvas' });
-    await expect(page.locator('[data-review-stage]')).toHaveAttribute('data-workspace-presentation', 'bottom');
+    await expect(page.locator('[data-reader-stage]')).toHaveAttribute('data-workspace-presentation', 'bottom');
     const initialCanvas = await canvas.boundingBox();
     const viewport = await installRuntimeClassicScrollport(page);
     const tracks = await viewport.evaluate((element) => {
@@ -1074,15 +1074,15 @@ test.describe('canonical review workflow', () => {
     // Headless Chromium on macOS reserves the styled vertical track while retaining
     // an overlay horizontal track. Test the runtime metrics rather than inventing it.
     expect(tracks.horizontal).toBeGreaterThanOrEqual(0);
-    await expect.poll(() => page.locator('[data-review-stage]').evaluate((element) => (
-      getComputedStyle(element).getPropertyValue('--review-overlay-inset').trim()
+    await expect.poll(() => page.locator('[data-reader-stage]').evaluate((element) => (
+      getComputedStyle(element).getPropertyValue('--reader-overlay-inset').trim()
     ))).toBe(`${Math.max(tracks.vertical, tracks.horizontal)}px`);
 
     await page.getByRole('button', { name: 'Open harness reference' }).press('Enter');
     await page.getByRole('button', { name: 'Show Workspace' }).click();
     const [stageBounds, surfaceBounds, viewportBounds] = await Promise.all([
-      page.locator('[data-review-stage]').boundingBox(),
-      page.locator('#review-workspace').boundingBox(),
+      page.locator('[data-reader-stage]').boundingBox(),
+      page.locator('#reader-workspace').boundingBox(),
       viewport.boundingBox(),
     ]);
     expect(stageBounds).not.toBeNull();
@@ -1093,10 +1093,10 @@ test.describe('canonical review workflow', () => {
       .toBeCloseTo(tracks.vertical, 0);
     expect(stageBounds!.y + stageBounds!.height - surfaceBounds!.y - surfaceBounds!.height)
       .toBeCloseTo(Math.max(tracks.vertical, tracks.horizontal), 0);
-    const documentBounds = await page.locator('.review-document').boundingBox();
+    const documentBounds = await page.locator('.reader-document').boundingBox();
     expect(viewportBounds).toEqual(documentBounds);
     expect(await canvas.boundingBox()).toEqual(initialCanvas);
-    const hide = page.locator('#review-workspace').getByRole('button', { name: 'Hide Workspace', exact: true });
+    const hide = page.locator('#reader-workspace').getByRole('button', { name: 'Hide Workspace', exact: true });
     await expect(hide).toBeVisible();
     await hide.focus();
     await expect(hide).toBeFocused();
@@ -1104,11 +1104,11 @@ test.describe('canonical review workflow', () => {
 
   test('keeps enlarged review text and fixed workspace actions reachable at compact and desktop widths', async ({ page }) => {
     await page.addStyleTag({ content: `
-      [data-review-stage] button,
-      [data-review-stage] input,
-      [data-review-stage] textarea,
-      [data-review-stage] [role='tab'],
-      [data-review-stage] [role='menuitem'] {
+      [data-reader-stage] button,
+      [data-reader-stage] input,
+      [data-reader-stage] textarea,
+      [data-reader-stage] [role='tab'],
+      [data-reader-stage] [role='menuitem'] {
         font-size: 20px !important;
       }
     ` });
@@ -1118,7 +1118,7 @@ test.describe('canonical review workflow', () => {
     for (const width of [320, 736, 1280]) {
       await page.setViewportSize({ width, height: 760 });
       const presentation = width < 900 ? 'bottom' : 'right';
-      await expect(page.locator('[data-review-stage]')).toHaveAttribute(
+      await expect(page.locator('[data-reader-stage]')).toHaveAttribute(
         'data-workspace-presentation',
         presentation,
       );
@@ -1126,7 +1126,7 @@ test.describe('canonical review workflow', () => {
         requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
       }));
       const surface = page.locator(
-        presentation === 'right' ? '#review-tools-workspace' : '#review-workspace',
+        presentation === 'right' ? '#reader-tools-workspace' : '#reader-workspace',
       );
       const openAttribute = presentation === 'right'
         ? 'data-tools-workspace-open'
@@ -1135,13 +1135,13 @@ test.describe('canonical review workflow', () => {
         await page.getByRole('button', { name: 'Show Workspace' }).click();
         await expect(surface).toHaveAttribute(openAttribute, 'true');
       }
-      await expect.poll(() => page.locator('[data-review-stage]').evaluate((element) => (
+      await expect.poll(() => page.locator('[data-reader-stage]').evaluate((element) => (
         element.scrollWidth <= element.clientWidth
       ))).toBe(true);
       const header = page.locator(
         presentation === 'right'
-          ? '#review-tools-workspace .review-workspace__header'
-          : '#review-workspace .review-workspace__header',
+          ? '#reader-tools-workspace .reader-workspace__header'
+          : '#reader-workspace .reader-workspace__header',
       );
       const scroller = page.locator('[data-annotation-scroll-viewport]');
       await expect(header).toBeVisible();
@@ -1208,8 +1208,8 @@ test.describe('canonical review workflow', () => {
   test('keeps direct page and zoom controls usable in the compact toolbar', async ({ page }) => {
     await page.goto('/test/acceptance/reader-harness/index.html?responsive=full');
     await page.setViewportSize({ width: 320, height: 720 });
-    const chrome = page.locator('[data-review-chrome]');
-    await expect(chrome).toHaveAttribute('data-review-chrome-title', 'icon');
+    const chrome = page.locator('[data-reader-chrome]');
+    await expect(chrome).toHaveAttribute('data-reader-chrome-title', 'icon');
     await expect(chrome.getByRole('button', { name: 'Open edit history' })).toBeVisible();
     await page.evaluate(() => new Promise<void>((resolve) => {
       requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
@@ -1240,7 +1240,7 @@ test.describe('canonical review workflow', () => {
     await expect(page.getByRole('textbox', {
       name: 'Current zoom 120 percent. Enter a zoom percentage',
     })).toBeFocused();
-    await page.locator('[data-review-chrome]').hover({ position: { x: 2, y: 2 } });
+    await page.locator('[data-reader-chrome]').hover({ position: { x: 2, y: 2 } });
     await page.getByRole('button', { name: 'Open zoom controls' }).hover();
     const zoomMenu = page.getByRole('menu', { name: 'PDF zoom' });
     await expect(zoomMenu.getByRole('menuitem')).toHaveCount(3);
@@ -1257,16 +1257,16 @@ test.describe('canonical review workflow', () => {
     await page.getByRole('button', { name: 'Make zoom controls unavailable' }).evaluate(element => (element as HTMLButtonElement).click());
     await expect(page.getByLabel('Zoom unavailable')).toHaveText('—');
     await expect(page.getByRole('button', { name: 'Open zoom controls' })).toBeDisabled();
-    await expect(page.locator('#review-workspace')).toHaveAttribute('data-workspace-open', 'true');
+    await expect(page.locator('#reader-workspace')).toHaveAttribute('data-workspace-open', 'true');
   });
 
   test('caps long titles and lets short titles shrink across responsive widths', async ({ page }) => {
     await page.goto('/test/acceptance/reader-harness/index.html?visual=reading');
     await page.setViewportSize({ width: 1280, height: 720 });
-    const chrome = page.locator('[data-review-chrome]');
-    await expect(chrome).toHaveAttribute('data-review-chrome-presentation', 'expanded');
+    const chrome = page.locator('[data-reader-chrome]');
+    await expect(chrome).toHaveAttribute('data-reader-chrome-presentation', 'expanded');
 
-    const longTitle = chrome.locator(':scope > .review-chrome__identity .review-chrome__filename');
+    const longTitle = chrome.locator(':scope > .reader-chrome__identity .reader-chrome__filename');
     const originalTitle = await longTitle.textContent();
     const longTitleGeometry = await longTitle.evaluate((element) => ({
       width: element.getBoundingClientRect().width,
@@ -1277,7 +1277,7 @@ test.describe('canonical review workflow', () => {
     expect(longTitleGeometry.width).toBeLessThanOrEqual(281.5);
     // Truncation must also constrain the grid track, not just the painted title.
     const identityGap = await chrome.evaluate((element) => {
-      const identity = element.querySelector<HTMLElement>(':scope > .review-chrome__identity')!;
+      const identity = element.querySelector<HTMLElement>(':scope > .reader-chrome__identity')!;
       const children = [...identity.children].filter((child) => child.getClientRects().length > 0);
       const contentRight = Math.max(...children.map((child) => child.getBoundingClientRect().right));
       return identity.getBoundingClientRect().right - contentRight;
@@ -1306,38 +1306,38 @@ test.describe('canonical review workflow', () => {
   test('matches the canonical filename, agent, page, and zoom geometry', async ({ page }) => {
     await page.goto('/test/acceptance/reader-harness/index.html?responsive=full');
     await page.setViewportSize({ width: 1280, height: 720 });
-    const chrome = page.locator('[data-review-chrome]');
-    const filenameControl = chrome.locator(':scope > .review-chrome__identity > .review-chrome__save-identity');
-    const context = chrome.locator(':scope > .review-chrome__identity > [data-review-context-status]');
-    const pagePosition = chrome.locator('[data-review-page-position]');
-    const pageDisclosure = chrome.locator('.review-chrome__page-disclosure');
-    const zoomGroup = chrome.locator('[data-review-chrome-group="zoom"]');
-    const zoomValue = zoomGroup.locator('.review-chrome__zoom-value');
-    const zoomInput = zoomGroup.locator('.review-chrome__zoom-input');
-    const zoomSuffix = zoomGroup.locator('.review-chrome__zoom-suffix');
-    const zoomDisclosure = zoomGroup.locator('.review-chrome__zoom-disclosure');
+    const chrome = page.locator('[data-reader-chrome]');
+    const filenameControl = chrome.locator(':scope > .reader-chrome__identity > .reader-chrome__save-identity');
+    const context = chrome.locator(':scope > .reader-chrome__identity > [data-reader-context-status]');
+    const pagePosition = chrome.locator('[data-reader-page-position]');
+    const pageDisclosure = chrome.locator('.reader-chrome__page-disclosure');
+    const zoomGroup = chrome.locator('[data-reader-chrome-group="zoom"]');
+    const zoomValue = zoomGroup.locator('.reader-chrome__zoom-value');
+    const zoomInput = zoomGroup.locator('.reader-chrome__zoom-input');
+    const zoomSuffix = zoomGroup.locator('.reader-chrome__zoom-suffix');
+    const zoomDisclosure = zoomGroup.locator('.reader-chrome__zoom-disclosure');
 
     const geometry = await chrome.evaluate((element) => {
       const bounds = (selector: string) => element.querySelector<HTMLElement>(selector)!.getBoundingClientRect();
       const styles = (selector: string) => getComputedStyle(element.querySelector<HTMLElement>(selector)!);
-      const file = bounds(':scope > .review-chrome__identity > .review-chrome__save-identity');
-      const contextStatus = bounds(':scope > .review-chrome__identity > [data-review-context-status]');
-      const pageGroup = bounds('[data-review-page-position]');
-      const pageNumber = bounds('.review-chrome__page-input');
-      const pageButton = bounds('.review-chrome__page-disclosure');
-      const pageText = bounds('.review-chrome__page-disclosure > span');
-      const zoom = bounds('[data-review-chrome-group="zoom"]');
-      const zoomNumber = bounds('.review-chrome__zoom-input');
-      const zoomUnit = bounds('.review-chrome__zoom-suffix');
-      const zoomButton = bounds('.review-chrome__zoom-disclosure');
+      const file = bounds(':scope > .reader-chrome__identity > .reader-chrome__save-identity');
+      const contextStatus = bounds(':scope > .reader-chrome__identity > [data-reader-context-status]');
+      const pageGroup = bounds('[data-reader-page-position]');
+      const pageNumber = bounds('.reader-chrome__page-input');
+      const pageButton = bounds('.reader-chrome__page-disclosure');
+      const pageText = bounds('.reader-chrome__page-disclosure > span');
+      const zoom = bounds('[data-reader-chrome-group="zoom"]');
+      const zoomNumber = bounds('.reader-chrome__zoom-input');
+      const zoomUnit = bounds('.reader-chrome__zoom-suffix');
+      const zoomButton = bounds('.reader-chrome__zoom-disclosure');
       return {
         file: file.toJSON(), context: contextStatus.toJSON(),
         pageGroup: pageGroup.toJSON(), pageNumber: pageNumber.toJSON(), pageButton: pageButton.toJSON(), pageText: pageText.toJSON(),
         zoom: zoom.toJSON(), zoomNumber: zoomNumber.toJSON(), zoomUnit: zoomUnit.toJSON(), zoomButton: zoomButton.toJSON(),
-        filePadding: [styles(':scope > .review-chrome__identity > .review-chrome__save-identity').paddingTop, styles(':scope > .review-chrome__identity > .review-chrome__save-identity').paddingRight],
-        fileGap: styles(':scope > .review-chrome__identity > .review-chrome__save-identity').gap,
-        fileRadius: styles(':scope > .review-chrome__identity > .review-chrome__save-identity').borderRadius,
-        pageAlign: styles('.review-chrome__page-input').textAlign,
+        filePadding: [styles(':scope > .reader-chrome__identity > .reader-chrome__save-identity').paddingTop, styles(':scope > .reader-chrome__identity > .reader-chrome__save-identity').paddingRight],
+        fileGap: styles(':scope > .reader-chrome__identity > .reader-chrome__save-identity').gap,
+        fileRadius: styles(':scope > .reader-chrome__identity > .reader-chrome__save-identity').borderRadius,
+        pageAlign: styles('.reader-chrome__page-input').textAlign,
       };
     });
 
@@ -1345,9 +1345,9 @@ test.describe('canonical review workflow', () => {
     expect(geometry.filePadding).toEqual(['6px', '8px']);
     expect(geometry.fileGap).toBe('7px');
     expect(geometry.fileRadius).toBe('10px');
-    const controlGaps = await chrome.locator(':scope > .review-chrome__viewer-controls').evaluate((element) => {
+    const controlGaps = await chrome.locator(':scope > .reader-chrome__viewer-controls').evaluate((element) => {
       const controls = Array.from(element.children).flatMap((child) =>
-        child.matches('.review-chrome__edit-cluster, .review-chrome__navigation-cluster')
+        child.matches('.reader-chrome__edit-cluster, .reader-chrome__navigation-cluster')
           ? Array.from(child.children)
           : [child]);
       const boxes = controls.map((control) => control.getBoundingClientRect()).filter((box) => box.width > 0);
@@ -1358,7 +1358,7 @@ test.describe('canonical review workflow', () => {
     expect(Math.abs(geometry.file.x + geometry.file.width + 8 - geometry.context.x)).toBeLessThanOrEqual(.5);
     expect(Math.abs(geometry.file.y + geometry.file.height / 2 - geometry.context.y - geometry.context.height / 2)).toBeLessThanOrEqual(.5);
     // The page input fits its digits (about 0.62em each) after a 6px lead.
-    const pageDigits = (await pagePosition.locator('.review-chrome__page-input').inputValue()).length;
+    const pageDigits = (await pagePosition.locator('.reader-chrome__page-input').inputValue()).length;
     expect(geometry.pageNumber.width).toBeCloseTo(6 + pageDigits * 0.62 * 13, 0);
     expect(geometry.pageAlign).toBe('right');
     expect(Math.abs(geometry.pageNumber.x + geometry.pageNumber.width - geometry.pageButton.x)).toBeLessThanOrEqual(.5);
@@ -1380,7 +1380,7 @@ test.describe('canonical review workflow', () => {
     await pageDisclosure.click();
     await page.mouse.move(0, 200);
     await expect(page.getByRole('menu', { name: 'Page navigation', exact: true })).toBeHidden();
-    await page.locator('[data-review-chrome]').hover({ position: { x: 2, y: 2 } });
+    await page.locator('[data-reader-chrome]').hover({ position: { x: 2, y: 2 } });
     await zoomGroup.hover();
     await expect(zoomGroup).toHaveCSS('background-color', 'rgb(231, 231, 231)');
     await expect(zoomDisclosure).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
@@ -1391,7 +1391,7 @@ test.describe('canonical review workflow', () => {
     await page.mouse.move(0, 200);
     await expect(page.getByRole('menu', { name: 'PDF zoom', exact: true })).toBeHidden();
 
-    await expect(filenameControl.locator(':scope > .review-icon + .review-chrome__filename')).toHaveCount(1);
+    await expect(filenameControl.locator(':scope > .reader-icon + .reader-chrome__filename')).toHaveCount(1);
     await expect(context).toBeVisible();
     await expect(zoomValue).toBeVisible();
     await expect(zoomInput).toBeVisible();
@@ -1402,13 +1402,13 @@ test.describe('canonical review workflow', () => {
     await page.setViewportSize({ width: 1280, height: 900 });
     await page.goto('/test/acceptance/reader-harness/index.html?visual=reference-layout');
     await page.getByRole('button', { name: 'Show References' }).click();
-    const stage = page.locator('[data-review-stage]');
+    const stage = page.locator('[data-reader-stage]');
     await expect(stage).toHaveAttribute('data-reference-layout', 'wide-bottom');
     await page.setViewportSize({ width: 760, height: 900 });
     await expect(stage).toHaveAttribute('data-reference-layout', 'narrow-unified');
     const references = page.getByRole('tab', { name: 'References', exact: true });
     await expect(references).toHaveAttribute('aria-selected', 'true');
-    const tools = page.locator('#review-tools-workspace');
+    const tools = page.locator('#reader-tools-workspace');
     await tools.evaluate(element => {
       const observer = new MutationObserver(() => {
         if (element.getAttribute('data-workspace-presentation') !== 'right') return;
@@ -1419,20 +1419,20 @@ test.describe('canonical review workflow', () => {
     });
     await page.setViewportSize({ width: 1280, height: 900 });
     await expect(tools).toHaveAttribute('data-test-first-wide-visibility', 'hidden');
-    await expect(page.locator('#review-workspace')).toHaveAttribute('data-workspace-open', 'true');
+    await expect(page.locator('#reader-workspace')).toHaveAttribute('data-workspace-open', 'true');
     await expect(tools).toHaveAttribute('data-tools-workspace-open', 'false');
     await page.mouse.move(12, 120);
     await expect(page.getByRole('group', { name: 'Workspace trays' })).toHaveCSS('opacity', '1');
   });
 
   test('reveals right-side controls on bar hover and dismisses hover menus outside their trigger and popup', async ({ page }) => {
-    const bar = page.locator('[data-review-chrome]');
-    const rightControls = bar.locator(':scope > .review-chrome__viewer-controls');
+    const bar = page.locator('[data-reader-chrome]');
+    const rightControls = bar.locator(':scope > .reader-chrome__viewer-controls');
     const expectToolbarRevealed = async () => {
       await expect(rightControls).toHaveCSS('opacity', '1');
       // Tray toggles reveal with the rest of the bar, including over its menus.
       await expect(bar.getByRole('group', { name: 'Workspace trays' })).toHaveCSS('opacity', '1');
-      for (const control of await bar.locator('[data-review-copy-link], [data-main-history]').all()) {
+      for (const control of await bar.locator('[data-reader-copy-link], [data-main-history]').all()) {
         // Unavailable history keeps its slot, greyed out.
         await expect(control).toHaveCSS('opacity', await control.isDisabled() ? '0.35' : '1');
         await expect(control).toHaveCSS('pointer-events', 'auto');
@@ -1450,7 +1450,7 @@ test.describe('canonical review workflow', () => {
     await expect(trayControls).toHaveCSS('opacity', '1');
     await canvas.hover();
     await expect(trayControls).toHaveCSS('opacity', '0');
-    for (const control of await bar.locator('[data-review-copy-link], [data-main-history]').all()) {
+    for (const control of await bar.locator('[data-reader-copy-link], [data-main-history]').all()) {
       await expect(control).toHaveCSS('opacity', '0');
     }
     for (const control of await bar.locator('[data-main-history]').all()) {
@@ -1459,14 +1459,14 @@ test.describe('canonical review workflow', () => {
     await bar.hover({ position: { x: 2, y: 2 } });
     await expect(rightControls).toHaveCSS('opacity', '1');
     // History keeps its slots: an unavailable direction is revealed greyed out.
-    for (const control of await bar.locator('[data-review-copy-link], [data-main-history]').all()) {
+    for (const control of await bar.locator('[data-reader-copy-link], [data-main-history]').all()) {
       await expect(control).toHaveCSS('opacity', await control.isDisabled() ? '0.35' : '1');
     }
     await page.getByRole('button', { name: 'Open zoom controls' }).hover();
     const zoomMenu = page.getByRole('menu', { name: 'PDF zoom', exact: true });
     await expect(zoomMenu).toBeVisible();
     await expect(page.getByRole('button', { name: 'Open zoom controls' })).not.toBeFocused();
-    const zoomBox = bar.locator('.review-chrome__zoom-cluster');
+    const zoomBox = bar.locator('.reader-chrome__zoom-cluster');
     const zoomHoverColor = await zoomBox.evaluate((element) => getComputedStyle(element).backgroundColor);
     const zoomBoxBounds = (await zoomBox.boundingBox())!;
     const zoomPopupBounds = (await zoomMenu.boundingBox())!;
@@ -1494,10 +1494,10 @@ test.describe('canonical review workflow', () => {
     await expect(zoomMenu).toHaveCount(0);
     await expect(rightControls).toHaveCSS('opacity', '0');
 
-    await page.locator('[data-review-page-position]').hover();
+    await page.locator('[data-reader-page-position]').hover();
     const pageMenu = page.getByRole('menu', { name: 'Page navigation', exact: true });
     await expect(pageMenu).toBeVisible();
-    const pageBox = page.locator('[data-review-page-position]');
+    const pageBox = page.locator('[data-reader-page-position]');
     const pageHoverColor = await pageBox.evaluate((element) => getComputedStyle(element).backgroundColor);
     const pageBoxBounds = (await pageBox.boundingBox())!;
     const pagePopupBounds = (await pageMenu.boundingBox())!;
@@ -1538,17 +1538,17 @@ test.describe('canonical review workflow', () => {
     });
     for (const width of [1280, 760, 641, 640, 521, 520, 481, 480, 390, 361, 360, 320]) {
       await page.setViewportSize({ width, height: 720 });
-      const chrome = page.locator('[data-review-chrome]');
+      const chrome = page.locator('[data-reader-chrome]');
       await expect(chrome).toHaveCSS('height', '50px');
       await page.evaluate(() => new Promise<void>((resolve) => {
         requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
       }));
 
       const geometry = await chrome.evaluate((element) => {
-        const identity = element.querySelector<HTMLElement>(':scope > .review-chrome__identity');
-        const controls = element.querySelector<HTMLElement>(':scope > .review-chrome__viewer-controls');
-        const navigation = element.querySelector<HTMLElement>(':scope > .review-chrome__left-controls');
-        const trays = element.querySelector<HTMLElement>(':scope > .review-chrome__tray-controls');
+        const identity = element.querySelector<HTMLElement>(':scope > .reader-chrome__identity');
+        const controls = element.querySelector<HTMLElement>(':scope > .reader-chrome__viewer-controls');
+        const navigation = element.querySelector<HTMLElement>(':scope > .reader-chrome__left-controls');
+        const trays = element.querySelector<HTMLElement>(':scope > .reader-chrome__tray-controls');
         if (!identity || !controls || !navigation || !trays) throw new Error('Review chrome geometry is incomplete.');
         const chromeBounds = element.getBoundingClientRect();
         const identityBounds = identity.getBoundingClientRect();
@@ -1566,9 +1566,9 @@ test.describe('canonical review workflow', () => {
           controls: controlsBounds.toJSON(),
           navigation: navigation.getBoundingClientRect().toJSON(),
           trays: trays.getBoundingClientRect().toJSON(),
-          identityChildren: visibleBounds(':scope > .review-chrome__identity > *'),
-          saveChildren: visibleBounds(':scope > .review-chrome__identity .review-chrome__save-identity > :not(.sr-only)'),
-          filename: element.querySelector<HTMLElement>(':scope > .review-chrome__identity .review-chrome__filename')?.getBoundingClientRect().toJSON(),
+          identityChildren: visibleBounds(':scope > .reader-chrome__identity > *'),
+          saveChildren: visibleBounds(':scope > .reader-chrome__identity .reader-chrome__save-identity > :not(.sr-only)'),
+          filename: element.querySelector<HTMLElement>(':scope > .reader-chrome__identity .reader-chrome__filename')?.getBoundingClientRect().toJSON(),
         };
       });
 
@@ -1604,8 +1604,8 @@ test.describe('canonical review workflow', () => {
   });
 
   test('keeps disabled history slots at narrow widths and stable through undo and redo', async ({ page }) => {
-    const chrome = page.locator('[data-review-chrome]');
-    const history = chrome.locator(':scope > .review-chrome__left-controls [data-main-history], :scope > .review-chrome__viewer-controls .review-chrome__history-control');
+    const chrome = page.locator('[data-reader-chrome]');
+    const history = chrome.locator(':scope > .reader-chrome__left-controls [data-main-history], :scope > .reader-chrome__viewer-controls .reader-chrome__history-control');
     await expect(history).toHaveCount(4);
     for (const width of [760, 759, 640, 480]) {
       await page.setViewportSize({ width, height: 720 });
@@ -1615,13 +1615,13 @@ test.describe('canonical review workflow', () => {
     }
 
     await page.setViewportSize({ width: 640, height: 720 });
-    await expect(chrome).toHaveAttribute('data-review-chrome-title', 'title');
+    await expect(chrome).toHaveAttribute('data-reader-chrome-title', 'title');
     const positions = async () => ({
       history: await history.evaluateAll((buttons) => buttons.map((button) => ({
         x: button.getBoundingClientRect().x,
         width: button.getBoundingClientRect().width,
       }))),
-      candidates: await chrome.locator('[data-review-chrome-candidate]').evaluateAll((candidates) => (
+      candidates: await chrome.locator('[data-reader-chrome-candidate]').evaluateAll((candidates) => (
         candidates.map((candidate) => candidate.getBoundingClientRect().width)
       )),
     });
@@ -1660,7 +1660,7 @@ test.describe('canonical review workflow', () => {
   });
 
   test('separates history again after widening before the combined bar is measured', async ({ page }) => {
-    const chrome = page.locator('[data-review-chrome]');
+    const chrome = page.locator('[data-reader-chrome]');
     await page.setViewportSize({ width: 640, height: 720 });
     await expect(chrome.getByRole('button', { name: 'Undo', exact: true })).toBeVisible();
     // Hold animation frames from the moment history combines, so the bar's
@@ -1670,7 +1670,7 @@ test.describe('canonical review workflow', () => {
       const native = window.requestAnimationFrame.bind(window);
       const globals = window as typeof window & { __releaseFrames?: () => void };
       const observer = new MutationObserver(() => {
-        if (!document.querySelector('[data-review-chrome] .review-chrome__history-trigger')) return;
+        if (!document.querySelector('[data-reader-chrome] .reader-chrome__history-trigger')) return;
         observer.disconnect();
         window.requestAnimationFrame = (callback) => { held.push(callback); return held.length; };
         globals.__releaseFrames = () => {
@@ -1694,7 +1694,7 @@ test.describe('canonical review workflow', () => {
     try {
       await page.goto('/test/acceptance/reader-harness/index.html?responsive=full');
       await page.locator('#root').evaluate((element) => element.setAttribute('data-production-root', 'true'));
-      const chrome = page.locator('[data-review-chrome]');
+      const chrome = page.locator('[data-reader-chrome]');
       const historyTrigger = chrome.getByRole('button', { name: 'Open edit history', exact: true });
       await expect(historyTrigger).toBeVisible();
       const geometry = async () => chrome.evaluate((element) => {
@@ -1703,7 +1703,7 @@ test.describe('canonical review workflow', () => {
         return {
           width: bounds.width, right: bounds.right,
           overlap: groups.slice(1).some((group, index) => groups[index]!.right > group.left + 0.5),
-          history: element.querySelector<HTMLElement>('.review-chrome__history-trigger')!.getBoundingClientRect().toJSON(),
+          history: element.querySelector<HTMLElement>('.reader-chrome__history-trigger')!.getBoundingClientRect().toJSON(),
         };
       });
       const expectContained = async () => {
@@ -1779,7 +1779,7 @@ test.describe('canonical review workflow', () => {
     try {
       await page.goto('/test/acceptance/reader-harness/index.html?responsive=full&history=single-page');
       if (!pageReady) await page.getByRole('button', { name: 'Make page controls unavailable' }).click();
-      const chrome = page.locator('[data-review-chrome]');
+      const chrome = page.locator('[data-reader-chrome]');
       const trigger = chrome.getByRole('button', { name: pageReady
         ? 'Page 1 of 1. Open page navigation' : 'Open document navigation', exact: true });
       await expect(trigger).toBeEnabled();
@@ -1824,13 +1824,13 @@ test.describe('canonical review workflow', () => {
       });
       expect(await touchPage.evaluate(() => matchMedia('(pointer: coarse)').matches)).toBe(true);
 
-      const chrome = touchPage.locator('[data-review-chrome]');
+      const chrome = touchPage.locator('[data-reader-chrome]');
       for (const width of [760, 641, 521, 481, 390, 361, 320]) {
         await touchPage.setViewportSize({ width, height: 720 });
         await touchPage.evaluate(() => new Promise<void>((resolve) => {
           requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
         }));
-        const chromeButtons = chrome.locator(':scope > .review-chrome__identity button, :scope > .review-chrome__left-controls button, :scope > .review-chrome__viewer-controls button, :scope > .review-chrome__tray-controls button');
+        const chromeButtons = chrome.locator(':scope > .reader-chrome__identity button, :scope > .reader-chrome__left-controls button, :scope > .reader-chrome__viewer-controls button, :scope > .reader-chrome__tray-controls button');
         // Unavailable history actions keep their touch-sized slots.
         const chromeButtonHeights = await chromeButtons.evaluateAll((buttons) => (
           buttons.filter((button) => button.getClientRects().length > 0)
@@ -1846,7 +1846,7 @@ test.describe('canonical review workflow', () => {
         expect(trayBounds.width).toBeGreaterThanOrEqual(44);
         expect(trayBounds.x + trayBounds.width).toBeLessThanOrEqual(width + 0.5);
         const sizingIconWidths = await chrome.locator(
-          '[data-review-chrome-sizing-rack] .review-chrome__icon-control',
+          '[data-reader-chrome-sizing-rack] .reader-chrome__icon-control',
         ).evaluateAll((buttons) => buttons.map((button) => button.getBoundingClientRect().width));
         expect(sizingIconWidths.length).toBeGreaterThan(0);
         expect(sizingIconWidths.every((iconWidth) => iconWidth >= 44)).toBe(true);
@@ -1857,15 +1857,15 @@ test.describe('canonical review workflow', () => {
             clientWidth: element.clientWidth,
             scrollWidth: element.scrollWidth,
             chrome: chromeBounds.toJSON(),
-            identity: bounds(':scope > .review-chrome__identity'),
-            controls: bounds(':scope > .review-chrome__viewer-controls'),
-            saveIdentity: bounds(':scope > .review-chrome__identity .review-chrome__save-identity'),
-            copy: bounds(':scope > .review-chrome__left-controls [data-review-copy-link]'),
-            filename: bounds(':scope > .review-chrome__identity .review-chrome__filename'),
-            recoveryDisplay: element.querySelector<HTMLElement>(':scope > .review-chrome__identity .review-chrome__save-recovery') === null
+            identity: bounds(':scope > .reader-chrome__identity'),
+            controls: bounds(':scope > .reader-chrome__viewer-controls'),
+            saveIdentity: bounds(':scope > .reader-chrome__identity .reader-chrome__save-identity'),
+            copy: bounds(':scope > .reader-chrome__left-controls [data-reader-copy-link]'),
+            filename: bounds(':scope > .reader-chrome__identity .reader-chrome__filename'),
+            recoveryDisplay: element.querySelector<HTMLElement>(':scope > .reader-chrome__identity .reader-chrome__save-recovery') === null
               ? null
-              : getComputedStyle(element.querySelector<HTMLElement>(':scope > .review-chrome__identity .review-chrome__save-recovery')!).display,
-            contextDisplay: getComputedStyle(element.querySelector<HTMLElement>(':scope > .review-chrome__identity .review-chrome__context')!).display,
+              : getComputedStyle(element.querySelector<HTMLElement>(':scope > .reader-chrome__identity .reader-chrome__save-recovery')!).display,
+            contextDisplay: getComputedStyle(element.querySelector<HTMLElement>(':scope > .reader-chrome__identity .reader-chrome__context')!).display,
           };
         });
         expect(geometry.scrollWidth).toBeLessThanOrEqual(geometry.clientWidth + 1);
@@ -1890,15 +1890,15 @@ test.describe('canonical review workflow', () => {
         }
       }
 
-      const identity = chrome.locator(':scope > .review-chrome__identity .review-chrome__save-identity');
+      const identity = chrome.locator(':scope > .reader-chrome__identity .reader-chrome__save-identity');
       const centered = await identity.evaluate(el => {
         const button = el.getBoundingClientRect();
         const icon = el.querySelector('svg')!.getBoundingClientRect();
         return Math.abs(button.x + button.width / 2 - icon.x - icon.width / 2);
       });
       expect(centered).toBeLessThanOrEqual(1);
-      await expect(chrome.locator('.review-chrome__history-trigger svg')).toHaveCount(2);
-      await expect(chrome.locator('.review-chrome__page-disclosure svg')).toHaveCount(0);
+      await expect(chrome.locator('.reader-chrome__history-trigger svg')).toHaveCount(2);
+      await expect(chrome.locator('.reader-chrome__page-disclosure svg')).toHaveCount(0);
 
       // The measured presentation can vary with platform font metrics; the
       // geometry and 44px touch targets above are the public contract.
@@ -1951,7 +1951,7 @@ test.describe('canonical review workflow', () => {
     await expect(currentPage).toBeFocused();
     await expect(workspace).toBeVisible();
     await expect(annotations).toHaveAttribute('aria-selected', 'true');
-    await expect(page.locator('#review-tools-workspace')).toBeVisible();
+    await expect(page.locator('#reader-tools-workspace')).toBeVisible();
     await expect(page.locator('[data-viewer-page-commands]')).toHaveAttribute(
       'data-viewer-page-commands',
       '',
@@ -1963,7 +1963,7 @@ test.describe('canonical review workflow', () => {
   });
 
   test('preserves click-through when dirty or invalid page input blurs to another control', async ({ page }) => {
-    const pageNumber = page.locator('.review-chrome__page-input');
+    const pageNumber = page.locator('.reader-chrome__page-input');
     const pageDisclosure = page.getByRole('button', {
       name: 'Page 3 of 12. Open page navigation',
     });
@@ -1977,7 +1977,7 @@ test.describe('canonical review workflow', () => {
 
     await page.keyboard.press('Escape');
     await pageNumber.fill('1.5');
-    const zoomInput = page.locator('.review-chrome__zoom-input');
+    const zoomInput = page.locator('.reader-chrome__zoom-input');
     await zoomInput.click();
     await expect(zoomInput).toBeFocused();
     await expect(pageNumber).toHaveValue('5');
@@ -1988,7 +1988,7 @@ test.describe('canonical review workflow', () => {
   });
 
   test('clamps signed page drafts, rejects malformed or unsafe values, and cancels invalid blur', async ({ page }) => {
-    const pageNumber = page.locator('.review-chrome__page-input');
+    const pageNumber = page.locator('.reader-chrome__page-input');
     await pageNumber.fill('0');
     await pageNumber.press('Enter');
     await expect(pageNumber).toHaveValue('1');
@@ -2126,7 +2126,7 @@ test.describe('canonical review workflow', () => {
     const zoomLevel = page.getByRole('textbox', {
       name: 'Current zoom 110 percent. Enter a zoom percentage',
     });
-    await page.locator('[data-review-chrome]').hover({ position: { x: 2, y: 2 } });
+    await page.locator('[data-reader-chrome]').hover({ position: { x: 2, y: 2 } });
     await zoomLevel.click();
 
     let zoomPercentage = zoomLevel;
@@ -2165,7 +2165,7 @@ test.describe('canonical review workflow', () => {
   });
 
   test('keeps an exact fitted scale when an unchanged zoom edit closes', async ({ page }) => {
-    await page.locator('[data-review-chrome]').hover({ position: { x: 2, y: 2 } });
+    await page.locator('[data-reader-chrome]').hover({ position: { x: 2, y: 2 } });
     await page.getByRole('button', { name: 'Open zoom controls' }).hover();
     await page.getByRole('menuitem', { name: 'Fit width' }).click();
     const fitResult = page.getByRole('textbox', {
@@ -2190,7 +2190,7 @@ test.describe('canonical review workflow', () => {
   });
 
   test('clamps signed zoom drafts, rejects malformed or unsafe values, and cancels invalid blur', async ({ page }) => {
-    const zoomPercentage = page.locator('.review-chrome__zoom-input');
+    const zoomPercentage = page.locator('.reader-chrome__zoom-input');
     await zoomPercentage.fill('-1');
     await zoomPercentage.press('Enter');
     await expect(zoomPercentage).toHaveValue('20');
@@ -2247,7 +2247,7 @@ test.describe('canonical review workflow', () => {
     const zoomLevel = page.getByRole('textbox', {
       name: /Current zoom \d+ percent\. Enter a zoom percentage/u,
     });
-    await page.locator('[data-review-chrome]').hover({ position: { x: 2, y: 2 } });
+    await page.locator('[data-reader-chrome]').hover({ position: { x: 2, y: 2 } });
     const originalZoom = await zoomLevel.inputValue();
     const originalRequests = await page.locator('[data-viewer-zoom-requests]').getAttribute('data-viewer-zoom-requests');
     await zoomLevel.click();
@@ -2271,7 +2271,7 @@ test.describe('canonical review workflow', () => {
     await expect(zoomLevel).toHaveValue(originalZoom);
     await expect(workspace).toBeVisible();
     await expect(annotations).toHaveAttribute('aria-selected', 'true');
-    await expect(page.locator('#review-tools-workspace')).toBeVisible();
+    await expect(page.locator('#reader-tools-workspace')).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Finish review' })).toHaveCount(0);
     await expect(page.locator('[data-viewer-zoom-requests]')).toHaveAttribute(
       'data-viewer-zoom-requests',
@@ -2280,7 +2280,7 @@ test.describe('canonical review workflow', () => {
   });
 
   test('runs Zoom Out, Zoom In, and Fit Width exactly once from the zoom menu', async ({ page }) => {
-    await page.locator('[data-review-chrome]').hover({ position: { x: 2, y: 2 } });
+    await page.locator('[data-reader-chrome]').hover({ position: { x: 2, y: 2 } });
     await page.getByRole('button', { name: 'Open zoom controls' }).hover();
     const zoomOut = page.getByRole('menuitem', { name: 'Zoom out' });
     await zoomOut.click();
@@ -2330,7 +2330,7 @@ test.describe('canonical review workflow', () => {
     await replacement.fill('rejected replacement');
     await page.getByRole('button', { name: 'Apply' }).click();
     await expect(replacement).toHaveValue('rejected replacement');
-    await expect(page.locator('.review-workspace__status')).toContainText('Review changed elsewhere');
+    await expect(page.locator('.reader-workspace__status')).toContainText('Review changed elsewhere');
 
     await page.getByRole('button', { name: 'Use selection' }).evaluate((button: HTMLButtonElement) => button.click());
     await expect(replacement).toHaveValue('rejected replacement');
@@ -2348,10 +2348,10 @@ test.describe('canonical review workflow', () => {
     await page.setViewportSize({ width: 1280, height: 760 });
     await page.getByRole('button', { name: 'Seed annotations' }).click();
     await openAnnotationsWorkspace(page);
-    const workspace = page.locator('#review-tools-workspace');
-    const references = page.locator('#review-workspace');
+    const workspace = page.locator('#reader-tools-workspace');
+    const references = page.locator('#reader-workspace');
     const panel = page.locator('[data-annotation-scroll-viewport]');
-    const rows = panel.locator('[data-review-item]');
+    const rows = panel.locator('[data-annotation-item]');
     const origin = rows.nth(7);
     const originContent = origin.locator('.annotation-item__content');
     const originEdit = origin.locator('[data-row-action="edit"]');
@@ -2389,7 +2389,7 @@ test.describe('canonical review workflow', () => {
 
     await composer.evaluate((element) => element.setAttribute('data-composer-mount-probe', 'stable'));
     await page.setViewportSize({ width: 840, height: 760 });
-    const stage = page.locator('[data-review-stage]');
+    const stage = page.locator('[data-reader-stage]');
     await expect(stage).toHaveAttribute('data-annotation-presentation', 'bottom');
     const [tabletComposer, tabletStage] = await Promise.all([
       composer.boundingBox(),
@@ -2466,10 +2466,10 @@ test.describe('canonical review workflow', () => {
     const mainViewport = await installMainScrollport(page);
 
     const panel = page.locator('[data-annotation-scroll-viewport]');
-    const rows = panel.locator('[data-review-item]');
+    const rows = panel.locator('[data-annotation-item]');
     const previouslySelected = rows.first();
     await previouslySelected.locator('.annotation-item__content').click();
-    const previousId = await previouslySelected.getAttribute('data-review-item');
+    const previousId = await previouslySelected.getAttribute('data-annotation-item');
     const navigationBefore = await page.locator('[data-navigated]').getAttribute('data-navigated');
     const zoomBefore = await page.locator('[data-viewer-zoom-requests]')
       .getAttribute('data-viewer-zoom-requests');
@@ -2502,12 +2502,12 @@ test.describe('canonical review workflow', () => {
       .toHaveAttribute('data-viewer-zoom-requests', zoomBefore ?? '');
     await expect(mainViewport).toHaveJSProperty('scrollTop', 137);
     await expect(mainViewport).toHaveJSProperty('scrollLeft', 41);
-    await expect(panel.locator('[data-review-item]')).toHaveCount(0);
+    await expect(panel.locator('[data-annotation-item]')).toHaveCount(0);
 
     await back.press('Enter');
     await expect(page.locator('[data-full-annotation-reader="true"]')).toHaveCount(0);
     await expect.poll(() => panel.evaluate((element) => element.scrollTop)).toBe(scrollBefore);
-    await expect(panel.locator(`[data-review-item="${previousId}"]`)).toHaveAttribute('data-active', 'true');
+    await expect(panel.locator(`[data-annotation-item="${previousId}"]`)).toHaveAttribute('data-active', 'true');
     await expect(more).toBeFocused();
     await expect(page.locator('[data-navigated]')).toHaveAttribute('data-navigated', navigationBefore ?? '');
     await expect(page.locator('[data-viewer-zoom-requests]'))
@@ -2521,7 +2521,7 @@ test.describe('canonical review workflow', () => {
     await page.getByRole('button', { name: 'Seed long annotation' }).click();
     await openAnnotationsWorkspace(page);
 
-    const row = page.locator('[data-review-item]').last();
+    const row = page.locator('[data-annotation-item]').last();
     await row.getByRole('button', { name: /Read full Page Note annotation/u }).click();
     const reader = page.locator('[data-full-annotation-reader="true"]');
     const edit = page.locator('[data-full-annotation-action="edit"]');
@@ -2541,7 +2541,7 @@ test.describe('canonical review workflow', () => {
     await page.getByRole('button', { name: 'Seed long annotation' }).click();
     await openAnnotationsWorkspace(page);
 
-    await page.locator('[data-review-item]').last()
+    await page.locator('[data-annotation-item]').last()
       .getByRole('button', { name: /Read full Page Note annotation/u }).click();
     const reader = page.locator('[data-full-annotation-reader="true"]');
     const edit = page.locator('[data-full-annotation-action="edit"]');
@@ -2561,10 +2561,10 @@ test.describe('canonical review workflow', () => {
     await page.getByRole('button', { name: 'Seed long annotation' }).click();
     await openAnnotationsWorkspace(page);
 
-    const row = page.locator('[data-review-item]').filter({
+    const row = page.locator('[data-annotation-item]').filter({
       has: page.getByRole('button', { name: /Read full Page Note annotation/u }),
     });
-    const itemId = await row.getAttribute('data-review-item');
+    const itemId = await row.getAttribute('data-annotation-item');
     await row.getByRole('button', { name: /Read full Page Note annotation/u }).click();
     const reader = page.locator('[data-full-annotation-reader="true"]');
     await page.locator('[data-full-annotation-action="edit"]').click();
@@ -2573,7 +2573,7 @@ test.describe('canonical review workflow', () => {
     await composer.getByRole('button', { name: 'Apply', exact: true }).click();
 
     await expect(reader).toHaveCount(0);
-    const restoredRow = page.locator(`[data-review-item="${itemId}"]`);
+    const restoredRow = page.locator(`[data-annotation-item="${itemId}"]`);
     await expect(restoredRow).toHaveAttribute('data-active', 'true');
     await expect(restoredRow.locator('[data-read-full-annotation="true"]')).toBeHidden();
     await expect(restoredRow.locator('.annotation-item__navigation')).toBeFocused();
@@ -2584,11 +2584,11 @@ test.describe('canonical review workflow', () => {
     await page.getByRole('button', { name: 'Seed long annotation' }).click();
     await openAnnotationsWorkspace(page);
 
-    const rows = page.locator('[data-review-item]').filter({
+    const rows = page.locator('[data-annotation-item]').filter({
       has: page.getByRole('button', { name: /Read full Page Note annotation/u }),
     });
-    const firstId = await rows.first().getAttribute('data-review-item');
-    const secondId = await rows.last().getAttribute('data-review-item');
+    const firstId = await rows.first().getAttribute('data-annotation-item');
+    const secondId = await rows.last().getAttribute('data-annotation-item');
     const navigationBefore = await page.locator('[data-navigated]').getAttribute('data-navigated');
     expect(firstId).not.toBe(secondId);
     await rows.first().getByRole('button', { name: /Read full Page Note annotation/u }).click();
@@ -2611,8 +2611,8 @@ test.describe('canonical review workflow', () => {
       });
       (document.querySelector('.full-annotation-reader__back') as HTMLButtonElement).click();
     });
-    await expect(page.locator(`[data-review-item="${secondId}"]`)).toBeVisible();
-    await page.locator(`[data-review-item="${secondId}"]`)
+    await expect(page.locator(`[data-annotation-item="${secondId}"]`)).toBeVisible();
+    await page.locator(`[data-annotation-item="${secondId}"]`)
       .getByRole('button', { name: /Read full Page Note annotation/u })
       .evaluate((button) => (button as HTMLButtonElement).click());
 
@@ -2660,7 +2660,7 @@ test.describe('canonical review workflow', () => {
     await page.getByRole('button', { name: 'Seed long annotation' }).click();
     await openAnnotationsWorkspace(page);
     const panel = page.locator('[data-annotation-scroll-viewport]');
-    const ownedRow = page.locator('[data-review-item]').filter({
+    const ownedRow = page.locator('[data-annotation-item]').filter({
       has: page.getByRole('button', { name: /Read full Page Note annotation/u }),
     }).last();
     await ownedRow.scrollIntoViewIfNeeded();
@@ -2693,8 +2693,8 @@ test.describe('canonical review workflow', () => {
     await composer.getByRole('button', { name: 'Save', exact: true }).click();
     await openAnnotationsWorkspace(page);
 
-    const row = page.locator('[data-review-item][data-annotation-kind="highlight"]');
-    const itemId = await row.getAttribute('data-review-item');
+    const row = page.locator('[data-annotation-item][data-annotation-kind="highlight"]');
+    const itemId = await row.getAttribute('data-annotation-item');
     await row.getByRole('button', { name: /Read full Highlight annotation/u }).click();
     const reader = page.locator('[data-full-annotation-reader="true"]');
     await page.locator('[data-full-annotation-action="edit"]').click();
@@ -2704,7 +2704,7 @@ test.describe('canonical review workflow', () => {
 
     await expect(editor).toHaveCount(0);
     await expect(reader).toHaveCount(0);
-    const restoredRow = page.locator(`[data-review-item="${itemId}"]`);
+    const restoredRow = page.locator(`[data-annotation-item="${itemId}"]`);
     await expect(restoredRow).toHaveAttribute('data-active', 'true');
     await expect(restoredRow.locator('[data-read-full-annotation="true"]')).toHaveCount(0);
     await expect(restoredRow.locator('.annotation-item__navigation')).toBeFocused();
@@ -2713,7 +2713,7 @@ test.describe('canonical review workflow', () => {
   test('falls back to row navigation when a restored More control is hidden', async ({ page }) => {
     await page.getByRole('button', { name: 'Seed long annotation' }).click();
     await openAnnotationsWorkspace(page);
-    const row = page.locator('[data-review-item]').last();
+    const row = page.locator('[data-annotation-item]').last();
     await row.getByRole('button', { name: /Read full Page Note annotation/u }).click();
     await page.addStyleTag({ content: '[data-read-full-annotation="true"] { display: none !important; }' });
 
@@ -2726,10 +2726,10 @@ test.describe('canonical review workflow', () => {
     await page.getByRole('button', { name: 'Seed annotations' }).click();
     await page.getByRole('button', { name: 'Seed long annotation' }).click();
     await openAnnotationsWorkspace(page);
-    const row = page.locator('[data-review-item]').filter({
+    const row = page.locator('[data-annotation-item]').filter({
       has: page.getByRole('button', { name: /Read full Page Note annotation/u }),
     }).last();
-    const itemId = await row.getAttribute('data-review-item');
+    const itemId = await row.getAttribute('data-annotation-item');
     await row.getByRole('button', { name: /Read full Page Note annotation/u }).click();
     await page.locator('[data-full-annotation-action="edit"]').click();
     const composer = page.getByRole('region', { name: 'Edit Page Note' });
@@ -2747,12 +2747,12 @@ test.describe('canonical review workflow', () => {
     await composer.getByRole('button', { name: 'Cancel' }).click();
     await expect(composer).toHaveCount(0);
     await expect(page.locator('[data-full-annotation-reader="true"]')).toHaveCount(0);
-    await expect(page.locator(`[data-review-item="${itemId}"]`)).toBeVisible();
+    await expect(page.locator(`[data-annotation-item="${itemId}"]`)).toBeVisible();
 
-    await page.locator(`[data-review-item="${itemId}"]`)
+    await page.locator(`[data-annotation-item="${itemId}"]`)
       .locator('.annotation-item__navigation')
       .evaluate((button: HTMLButtonElement) => button.click());
-    await page.locator(`[data-review-item="${itemId}"]`)
+    await page.locator(`[data-annotation-item="${itemId}"]`)
       .getByRole('button', { name: /Read full Page Note annotation/u }).click();
     await page.locator('[data-full-annotation-action="edit"]').click();
     const deletedItemDraft = 'Keep this exact draft after the annotation disappears.';
@@ -2763,12 +2763,12 @@ test.describe('canonical review workflow', () => {
     await expect(composer).toBeVisible();
     await expect(editor).toHaveValue(deletedItemDraft);
     await expect(apply).toBeDisabled();
-    await expect(page.locator(`[data-review-item="${itemId}"]`)).toHaveCount(0);
+    await expect(page.locator(`[data-annotation-item="${itemId}"]`)).toHaveCount(0);
     await composer.getByRole('button', { name: 'Cancel' }).click();
     await expect(composer).toHaveCount(0);
     await expect(page.locator('[data-full-annotation-reader="true"]')).toHaveCount(0);
-    await expect(page.locator('[data-review-item]')).not.toHaveCount(0);
-    await expect(page.locator('[data-review-item][data-active="true"]')).toHaveCount(0);
+    await expect(page.locator('[data-annotation-item]')).not.toHaveCount(0);
+    await expect(page.locator('[data-annotation-item][data-active="true"]')).toHaveCount(0);
   });
 
   test('keeps a closed tray closed and gives Save Destination Escape precedence', async ({ page }) => {
@@ -2784,7 +2784,7 @@ test.describe('canonical review workflow', () => {
     await page.getByRole('button', { name: /Open automatic save options/u }).click();
     const destination = page.getByRole('dialog', { name: 'Choose Where to Save Annotations' });
     await expect(destination).toBeVisible();
-    await expect(page.locator('[data-review-drawer-host]')).toHaveAttribute('inert', '');
+    await expect(page.locator('[data-reader-drawer-host]')).toHaveAttribute('inert', '');
     await inputElement.evaluate((element) => element.focus());
     await expect(inputElement).not.toBeFocused();
     await page.keyboard.press('Escape');
@@ -2794,7 +2794,7 @@ test.describe('canonical review workflow', () => {
     await expect(inputElement).toHaveValue('draft survives save setup');
     await expect(inputElement).toBeFocused();
     await page.locator('[data-owned-focus-id]').first().click({ force: true });
-    await expect(page.locator('#review-tools-workspace')).toHaveAttribute(
+    await expect(page.locator('#reader-tools-workspace')).toHaveAttribute(
       'data-tools-workspace-open',
       'false',
     );
@@ -2885,7 +2885,7 @@ test.describe('canonical review workflow', () => {
     }).toBeLessThan(4);
 
     await page.setViewportSize({ width: 736, height: 700 });
-    await expect(page.locator('[data-review-stage]')).toHaveAttribute(
+    await expect(page.locator('[data-reader-stage]')).toHaveAttribute(
       'data-workspace-presentation',
       'bottom',
     );
@@ -2988,14 +2988,14 @@ test.describe('canonical review workflow', () => {
       requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
     }));
     await expect(input).toHaveValue('revised wording');
-    await expect(page.locator('[data-review-stage]'))
+    await expect(page.locator('[data-reader-stage]'))
       .toHaveAttribute('data-annotation-presentation', 'bottom');
     const inputBounds = await input.boundingBox();
     expect(inputBounds).not.toBeNull();
     expect(inputBounds!.x).toBeGreaterThanOrEqual(0);
     expect(inputBounds!.x + inputBounds!.width).toBeLessThanOrEqual(320);
     await page.getByRole('button', { name: 'Apply' }).click();
-    await page.locator('[data-review-chrome]').hover({ position: { x: 2, y: 2 } });
+    await page.locator('[data-reader-chrome]').hover({ position: { x: 2, y: 2 } });
     await page.getByRole('button', { name: 'Open edit history' }).click();
     const historyMenu = page.getByRole('menu', { name: 'Edit history' });
     await historyMenu.getByRole('menuitem', { name: 'Undo' }).click();
@@ -3005,7 +3005,7 @@ test.describe('canonical review workflow', () => {
     await page.keyboard.press('Escape');
 
     await openAnnotationsWorkspace(page);
-    await expect(page.locator('#review-tools-workspace')).toBeVisible();
+    await expect(page.locator('#reader-tools-workspace')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Close annotations' })).toHaveCount(0);
     await closeWorkspace(page);
     await openAnnotationsWorkspace(page);
@@ -3028,7 +3028,7 @@ test.describe('canonical review workflow', () => {
     await page.setViewportSize({ width: 320, height: 720 });
     await openAnnotationsWorkspace(page);
 
-    const drawer = page.locator('#review-tools-workspace');
+    const drawer = page.locator('#reader-tools-workspace');
     await expect(drawer).toHaveAttribute('data-workspace-presentation', 'bottom');
 
     const row = drawer.locator('[data-annotation-origin="owned"][data-annotation-kind="delete"]');
@@ -3093,14 +3093,14 @@ test.describe('canonical review workflow', () => {
     const editor = page.getByRole('region', { name: 'Edit Highlight' });
     await expect(editor).toBeVisible();
     await expect(workspace).toHaveAttribute(
-      (await workspace.getAttribute('id')) === 'review-tools-workspace'
+      (await workspace.getAttribute('id')) === 'reader-tools-workspace'
         ? 'data-tools-workspace-open'
         : 'data-workspace-open',
       'true',
     );
     await editor.getByRole('button', { name: 'Cancel' }).click();
     await expect(editor).toHaveCount(0);
-    await expect(page.locator('[data-review-item]')).toHaveCount(1);
+    await expect(page.locator('[data-annotation-item]')).toHaveCount(1);
 
     await edit.focus();
     await edit.press('Enter');
@@ -3118,7 +3118,7 @@ test.describe('canonical review workflow', () => {
   test('removes spatial disclosure motion when reduced motion is requested', async ({ page }) => {
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await openAnnotationsWorkspace(page);
-    const drawer = page.locator('#review-tools-workspace');
+    const drawer = page.locator('#reader-tools-workspace');
     await expect(drawer).toBeVisible();
     await expect(drawer).toHaveCSS('transition-duration', '0s');
     await expect(drawer).toHaveCSS('animation-duration', '0s');
@@ -3189,7 +3189,7 @@ test.describe('canonical review workflow', () => {
     const workspace = await currentWorkspaceToggle(page);
     await workspace.press('Space');
 
-    await expect(page.locator('#review-tools-workspace')).toHaveAttribute('data-tools-workspace-open', 'true');
+    await expect(page.locator('#reader-tools-workspace')).toHaveAttribute('data-tools-workspace-open', 'true');
     await expect(page.getByRole('region', { name: 'Replacement' })).toHaveCount(0);
     await expect(page.locator('[data-revision]')).toHaveAttribute('data-revision', '0');
   });
@@ -3224,7 +3224,7 @@ test.describe('canonical review workflow', () => {
     await expect(page.locator('[data-revision]')).toHaveAttribute('data-revision', '1');
 
     await page.getByRole('button', { name: 'Use caret' }).click();
-    await expect(page.locator('[data-review-insertion-caret]')).toBeVisible();
+    await expect(page.locator('[data-reader-insertion-caret]')).toBeVisible();
     await expect(page.getByRole('toolbar', { name: 'Insertion review action' })).toHaveCount(0);
     await canvas.focus();
     await page.keyboard.press('Alt+Shift+I');
@@ -3248,7 +3248,7 @@ test.describe('canonical review workflow', () => {
   });
 
   test('announces anchor recovery and creates no mutation when selection authority is absent', async ({ page }) => {
-    const announcement = page.locator('.review-workspace__status');
+    const announcement = page.locator('.reader-workspace__status');
     await page.getByRole('button', { name: 'Clear anchors' }).click();
     await expect(page.getByRole('toolbar', { name: 'Selection actions' })).toHaveCount(0);
     await page.getByRole('application', { name: 'PDF review canvas' }).focus();
@@ -3328,9 +3328,9 @@ test.describe('canonical review workflow', () => {
     await openAnnotationsWorkspace(page);
     const beforeActivation = await canvas.boundingBox();
     await markTarget.click();
-    const drawer = page.locator('#review-tools-workspace');
+    const drawer = page.locator('#reader-tools-workspace');
     await expect(drawer).toHaveAttribute('data-tools-workspace-open', 'true');
-    const row = page.locator('[data-review-item]').first();
+    const row = page.locator('[data-annotation-item]').first();
     await expect(row).toHaveAttribute('data-active', 'true');
     await expect(row.getByRole('button', { name: /Highlight · Page 1/ })).toBeFocused();
     expect(await canvas.boundingBox()).toEqual(beforeActivation);
@@ -3370,7 +3370,7 @@ test.describe('canonical review workflow', () => {
     expect(await drawer.evaluate((element) => element.scrollTop)).toBe(scrollBefore);
 
     await page.keyboard.press('Enter');
-    const selected = page.locator('[data-review-item][data-active="true"]');
+    const selected = page.locator('[data-annotation-item][data-active="true"]');
     await expect(selected).toHaveCount(1);
     await expect(selected.getByRole('button', { name: /Highlight · Page 1/ })).toBeFocused();
     expect(await drawer.evaluate((element) => element.scrollTop)).toBeGreaterThan(scrollBefore);

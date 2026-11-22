@@ -50,11 +50,11 @@ export function ProductShowcase() {
   const id = useId();
   const feature = features[index]!;
   return <section className="landing-showcase" id="features" aria-label="Feature demos">
-    <div className="landing-demo-selector review-workspace__activity-strip">
-      <div className="review-workspace__tabs" role="tablist" aria-label="Explore features" data-workspace-mode-count="3">
-        {features.map((item, itemIndex) => <span key={item.id} className="review-workspace__mode-segment" data-workspace-mode-selected={index === itemIndex ? 'true' : 'false'} role="presentation">
+    <div className="landing-demo-selector reader-workspace__activity-strip">
+      <div className="reader-workspace__tabs" role="tablist" aria-label="Explore features" data-workspace-mode-count="3">
+        {features.map((item, itemIndex) => <span key={item.id} className="reader-workspace__mode-segment" data-workspace-mode-selected={index === itemIndex ? 'true' : 'false'} role="presentation">
           <ReaderTooltipButton label={item.label} tooltip={compactControls ? item.label : false} type="button" ref={(button) => { controls.current[itemIndex] = button; }}
-            role="tab" className="review-workspace__mode-tab"
+            role="tab" className="reader-workspace__mode-tab"
             id={`${id}-${item.id}`} aria-label={item.label} aria-selected={index === itemIndex}
             aria-controls={`${id}-panel`} tabIndex={index === itemIndex ? 0 : -1}
             onClick={() => selectFeature(itemIndex)}
@@ -67,7 +67,7 @@ export function ProductShowcase() {
               controls.current[next]?.focus();
             }}>
             <ReaderIcon name={item.icon} />
-            <span className="review-workspace__mode-label" aria-hidden="true">{item.label}</span>
+            <span className="reader-workspace__mode-label" aria-hidden="true">{item.label}</span>
           </ReaderTooltipButton>
         </span>)}
       </div>

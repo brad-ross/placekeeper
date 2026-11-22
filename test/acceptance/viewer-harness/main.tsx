@@ -79,7 +79,7 @@ globalThis.viewerAcceptance = {
     }
   },
   annotationCount() {
-    return document.querySelectorAll('[data-review-item]').length;
+    return document.querySelectorAll('[data-annotation-item]').length;
   },
   interactionCount(type: ViewerInteractionEvent['type']) {
     return viewerInteractionCounts.get(type) ?? 0;
@@ -156,7 +156,7 @@ createRoot(root).render(<>
       reverseSyncTexEnabled={params.get('reverse-synctex') === 'true'}
   />
   {params.get('composer') === 'replacement' ? (
-    <div className="review-layout" data-annotation-presentation="right">
+    <div className="reader-layout" data-annotation-presentation="right">
       <CommentComposer
         title="Replacement"
         fieldLabel="Replacement"

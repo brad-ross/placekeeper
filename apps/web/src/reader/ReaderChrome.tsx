@@ -41,17 +41,17 @@ function measureReaderChromeTitleRoom(chrome: HTMLElement): number {
     - (Number.parseFloat(style.paddingRight) || 0);
   const columnGap = Number.parseFloat(style.columnGap) || 0;
   const width = (element: Element | null) => element?.getBoundingClientRect().width ?? 0;
-  const identity = chrome.querySelector<HTMLElement>(':scope > .review-chrome__identity');
-  const trigger = identity?.querySelector<HTMLElement>('.review-chrome__save-identity') ?? null;
-  const filename = trigger?.querySelector<HTMLElement>('.review-chrome__filename') ?? null;
-  const context = identity?.querySelector<HTMLElement>(':scope > [data-review-context-status]') ?? null;
-  const trays = chrome.querySelector(':scope > .review-chrome__tray-controls');
+  const identity = chrome.querySelector<HTMLElement>(':scope > .reader-chrome__identity');
+  const trigger = identity?.querySelector<HTMLElement>('.reader-chrome__save-identity') ?? null;
+  const filename = trigger?.querySelector<HTMLElement>('.reader-chrome__filename') ?? null;
+  const context = identity?.querySelector<HTMLElement>(':scope > [data-reader-context-status]') ?? null;
+  const trays = chrome.querySelector(':scope > .reader-chrome__tray-controls');
   const identityGap = identity === null ? 0 : Number.parseFloat(getComputedStyle(identity).columnGap) || 0;
   const filenameShown = filename !== null && getComputedStyle(filename).display !== 'none';
   const triggerChrome = width(trigger) - (filenameShown ? width(filename) : 0);
   return contentWidth
-    - width(chrome.querySelector(':scope > .review-chrome__left-controls'))
-    - width(chrome.querySelector(':scope > .review-chrome__viewer-controls'))
+    - width(chrome.querySelector(':scope > .reader-chrome__left-controls'))
+    - width(chrome.querySelector(':scope > .reader-chrome__viewer-controls'))
     - 2 * columnGap
     - (trays === null ? 0 : width(trays) + columnGap)
     - (context === null ? 0 : width(context) + identityGap)
@@ -266,7 +266,7 @@ export function ReaderChrome({
   const fitOptionsKeyboardOpenRef = useRef(false);
   const fitOptionsDismissTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const fitChoiceFocusRef = useRef<'first' | 'last' | null>(null);
-  const fitOptionsId = `review-fit-options-${useId().replaceAll(':', '')}`;
+  const fitOptionsId = `reader-fit-options-${useId().replaceAll(':', '')}`;
   const zoomInputRef = useRef<HTMLInputElement>(null);
   const zoomPointerActivationRef = useRef(false);
   const restoreZoomTriggerFocus = useRef(false);
@@ -286,9 +286,9 @@ export function ReaderChrome({
   const zoomHoverRef = useRef<HTMLElement | null>(null);
   const pendingTransitionFocusRef = useRef<TopBarMenuId | null>(null);
   const deferredTopBarFocusVersionRef = useRef(0);
-  const historyMenuId = `review-history-menu-${useId().replaceAll(':', '')}`;
-  const navigationMenuId = `review-navigation-menu-${useId().replaceAll(':', '')}`;
-  const zoomMenuId = `review-zoom-menu-${useId().replaceAll(':', '')}`;
+  const historyMenuId = `reader-history-menu-${useId().replaceAll(':', '')}`;
+  const navigationMenuId = `reader-navigation-menu-${useId().replaceAll(':', '')}`;
+  const zoomMenuId = `reader-zoom-menu-${useId().replaceAll(':', '')}`;
   const saveOptionsWereOpen = useRef(saveOptionsOpen);
   const saveStatusText = savePendingDestination
     ? 'protected recovery, choose where to save'
@@ -370,7 +370,7 @@ export function ReaderChrome({
 
   const prepareHistoryLayoutChange = useCallback(() => {
     const focusedGroup = document.activeElement instanceof HTMLElement
-      ? document.activeElement.closest<HTMLElement>('[data-review-chrome-group]')?.dataset.reviewChromeGroup
+      ? document.activeElement.closest<HTMLElement>('[data-reader-chrome-group]')?.dataset.readerChromeGroup
       : undefined;
     // Combining history controls leaves the identity slot in place, so an
     // open document menu survives with its focus and confirmation.
@@ -400,7 +400,7 @@ export function ReaderChrome({
     switch (group) {
       case 'history':
         target = compactHistory ? historyAnchorRef.current
-          : chromeRef.current?.querySelector<HTMLElement>('.review-chrome__history-control:not(:disabled)') ?? navigationAnchorRef.current;
+          : chromeRef.current?.querySelector<HTMLElement>('.reader-chrome__history-control:not(:disabled)') ?? navigationAnchorRef.current;
         break;
       case 'navigation':
         target = navigationAnchorRef.current;
@@ -426,7 +426,7 @@ export function ReaderChrome({
       if (disposed) return;
       const measuredWidths = Object.fromEntries(READER_CHROME_PRESENTATIONS.map((candidate) => {
         const element = sizingRack.querySelector<HTMLElement>(
-          `[data-review-chrome-candidate="${candidate}"]`,
+          `[data-reader-chrome-candidate="${candidate}"]`,
         );
         return [candidate, element?.getBoundingClientRect().width ?? 0];
       })) as ReaderChromePresentationWidths;
@@ -446,8 +446,8 @@ export function ReaderChrome({
         ? document.activeElement
         : null;
       const focusedGroup = activeElement
-        ?.closest<HTMLElement>('[data-review-chrome-group]')
-        ?.dataset.reviewChromeGroup as TopBarMenuId | undefined;
+        ?.closest<HTMLElement>('[data-reader-chrome-group]')
+        ?.dataset.readerChromeGroup as TopBarMenuId | undefined;
       // The document menu belongs to the identity slot, which every
       // presentation keeps, so it stays open (with any stale-export
       // confirmation) and keeps its own focus. Menus anchored to recomposed
@@ -466,7 +466,7 @@ export function ReaderChrome({
     };
     const observer = new ResizeObserver(scheduleMeasure);
     observer.observe(chrome);
-    for (const candidate of sizingRack.querySelectorAll<HTMLElement>('[data-review-chrome-candidate]')) {
+    for (const candidate of sizingRack.querySelectorAll<HTMLElement>('[data-reader-chrome-candidate]')) {
       observer.observe(candidate);
     }
     measure();
@@ -491,7 +491,7 @@ export function ReaderChrome({
       frame = 0;
       if (disposed || chrome.clientWidth <= 0) return;
       const titleRoom = measureReaderChromeTitleRoom(chrome);
-      const showsCombined = chrome.querySelector('.review-chrome__history-trigger') !== null;
+      const showsCombined = chrome.querySelector('.reader-chrome__history-trigger') !== null;
       if (measurement.narrow && measurement.roomBeforeCombining !== null && showsCombined) {
         // Count only the room the combined controls freed. If the bar also
         // resized before this frame, that change in width is not savings;
@@ -511,7 +511,7 @@ export function ReaderChrome({
         measurement.widthBeforeCombining = nextNarrow && !showsCombined ? chrome.clientWidth : null;
         // Already combined (touch layout): nothing to free, so no runway owed.
         measurement.savings = nextNarrow && showsCombined ? 0 : null;
-        if (chrome.dataset.reviewChromeTouchCompact !== 'true') prepareHistoryLayoutChange();
+        if (chrome.dataset.readerChromeTouchCompact !== 'true') prepareHistoryLayoutChange();
         setNarrowHistory(nextNarrow);
       }
       // Combined controls come after the title has collapsed; the freed room
@@ -530,7 +530,7 @@ export function ReaderChrome({
     const observer = new ResizeObserver(scheduleMeasure);
     observer.observe(chrome);
     for (const element of chrome.querySelectorAll<HTMLElement>(
-      ':scope > :is(.review-chrome__identity, .review-chrome__left-controls, .review-chrome__viewer-controls, .review-chrome__tray-controls)',
+      ':scope > :is(.reader-chrome__identity, .reader-chrome__left-controls, .reader-chrome__viewer-controls, .reader-chrome__tray-controls)',
     )) {
       observer.observe(element);
     }
@@ -647,7 +647,7 @@ export function ReaderChrome({
     // the step that still works.
     if (document.activeElement !== document.body && document.activeElement !== button) return;
     const remaining = document.getElementById(navigationMenuId)
-      ?.querySelector<HTMLButtonElement>('[data-review-page-step]:not(:disabled)');
+      ?.querySelector<HTMLButtonElement>('[data-reader-page-step]:not(:disabled)');
     (remaining ?? navigationAnchorRef.current)?.focus({ preventScroll: true });
   });
 
@@ -735,11 +735,11 @@ export function ReaderChrome({
   };
 
   const pageValue = (): ReactNode => viewerState.pageReady ? (
-    <span className="review-chrome__page-control" data-review-stat>
-      <span className="review-chrome__page-editor" data-review-page-editor={editingPage ? 'true' : 'false'}>
+    <span className="reader-chrome__page-control" data-reader-stat>
+      <span className="reader-chrome__page-editor" data-reader-page-editor={editingPage ? 'true' : 'false'}>
         <input
           ref={pageInputRef}
-          className="review-chrome__page-input"
+          className="reader-chrome__page-input"
           title="Page number"
           type="text"
           inputMode="numeric"
@@ -769,7 +769,7 @@ export function ReaderChrome({
           onBlur={(event) => {
             if (!editingPage) return;
             const pageStep = event.relatedTarget instanceof Element
-              ? event.relatedTarget.closest('[data-review-page-step]')
+              ? event.relatedTarget.closest('[data-reader-page-step]')
               : null;
             if (pageStepIntent.current || pageStep) {
               clearPageStepIntent();
@@ -788,23 +788,23 @@ export function ReaderChrome({
             }
           }}
         />
-        {pageInvalid ? <span id={pageErrorId} className="review-chrome__page-error" role="alert">
+        {pageInvalid ? <span id={pageErrorId} className="reader-chrome__page-error" role="alert">
           Enter a whole page number from 1 to {viewerState.totalPages}
         </span> : null}
       </span>
     </span>
   ) : <span
-    className="review-chrome__stat"
-    data-review-stat
+    className="reader-chrome__stat"
+    data-reader-stat
     aria-label="Current page unavailable"
   >—</span>;
 
   const zoomValue = (): ReactNode => viewerState.zoomReady ? (
-    <span className="review-chrome__zoom-control" data-review-stat aria-label="Zoom level">
-      <span className="review-chrome__zoom-editor" data-review-zoom-editor={editingZoom ? 'true' : 'false'}>
+    <span className="reader-chrome__zoom-control" data-reader-stat aria-label="Zoom level">
+      <span className="reader-chrome__zoom-editor" data-reader-zoom-editor={editingZoom ? 'true' : 'false'}>
         <input
           ref={zoomInputRef}
-          className="review-chrome__zoom-input"
+          className="reader-chrome__zoom-input"
           title="Zoom percentage"
           type="text"
           inputMode="numeric"
@@ -834,7 +834,7 @@ export function ReaderChrome({
           onBlur={(event) => {
             if (!editingZoom) return;
             const zoomAction = event.relatedTarget instanceof Element
-              ? event.relatedTarget.closest('[data-review-zoom-action]')
+              ? event.relatedTarget.closest('[data-reader-zoom-action]')
               : null;
             if (zoomActionIntent.current || zoomAction) {
               clearZoomActionIntent();
@@ -854,14 +854,14 @@ export function ReaderChrome({
             }
           }}
         />
-        {zoomInvalid ? <span id={zoomErrorId} className="review-chrome__zoom-error" role="alert">
+        {zoomInvalid ? <span id={zoomErrorId} className="reader-chrome__zoom-error" role="alert">
           Enter a whole zoom percentage from {VIEWER_ZOOM_MIN_PERCENT} to {VIEWER_ZOOM_MAX_PERCENT}
         </span> : null}
       </span>
     </span>
   ) : <span
-    className="review-chrome__stat"
-    data-review-stat
+    className="reader-chrome__stat"
+    data-reader-stat
     aria-label="Zoom unavailable"
   >—</span>;
 
@@ -894,26 +894,26 @@ export function ReaderChrome({
   const historyControls = <span
     ref={(element) => { if (!compactHistory) historyAnchorRef.current = element; }}
     tabIndex={compactHistory ? undefined : -1}
-    data-review-chrome-group="history"
-    className="review-chrome__control-cluster review-chrome__edit-cluster"
+    data-reader-chrome-group="history"
+    className="reader-chrome__control-cluster reader-chrome__edit-cluster"
     role="group"
     aria-label="Edit history"
   >
     {compactHistory ? <>
       <ReaderTooltipButton label="Open edit history" tooltip={false} type="button"
         ref={(element) => { historyAnchorRef.current = element; }}
-        className="review-chrome__icon-control review-chrome__history-trigger"
+        className="reader-chrome__icon-control reader-chrome__history-trigger"
         aria-haspopup="menu" aria-expanded={activeTopBarMenu === 'history'} aria-controls={historyMenuId}
         onClick={(event) => activateMenu('history', event)}
-      ><span className="review-chrome__paired-icon"><ReaderIcon name="undo" /><ReaderIcon name="redo" /></span></ReaderTooltipButton>
+      ><span className="reader-chrome__paired-icon"><ReaderIcon name="undo" /><ReaderIcon name="redo" /></span></ReaderTooltipButton>
       <TopBarMenu open={activeTopBarMenu === 'history'} menuId={historyMenuId} label="Edit history"
         openerRef={historyAnchorRef} onDismiss={() => requestTopBarMenu('history', false)}>
         <ReaderTooltipButton label="Undo" type="button" role="menuitem" disabled={!canUndo} onClick={(event) => runMenuHistoryAction(event.currentTarget, onUndo)}><ReaderIcon name="undo" /><span>Undo</span></ReaderTooltipButton>
         <ReaderTooltipButton label="Redo" type="button" role="menuitem" disabled={!canRedo} onClick={(event) => runMenuHistoryAction(event.currentTarget, onRedo)}><ReaderIcon name="redo" /><span>Redo</span></ReaderTooltipButton>
       </TopBarMenu>
     </> : <>
-      <ReaderTooltipButton label="Undo" type="button" className="review-chrome__icon-control review-chrome__history-control" disabled={!canUndo} onClick={onUndo}><ReaderIcon name="undo" /></ReaderTooltipButton>
-      <ReaderTooltipButton label="Redo" type="button" className="review-chrome__icon-control review-chrome__history-control" disabled={!canRedo} onClick={onRedo}><ReaderIcon name="redo" /></ReaderTooltipButton>
+      <ReaderTooltipButton label="Undo" type="button" className="reader-chrome__icon-control reader-chrome__history-control" disabled={!canUndo} onClick={onUndo}><ReaderIcon name="undo" /></ReaderTooltipButton>
+      <ReaderTooltipButton label="Redo" type="button" className="reader-chrome__icon-control reader-chrome__history-control" disabled={!canRedo} onClick={onRedo}><ReaderIcon name="redo" /></ReaderTooltipButton>
     </>}
   </span>;
 
@@ -924,7 +924,7 @@ export function ReaderChrome({
       label={backward ? 'Back in document history' : 'Forward in document history'}
       type="button"
       role={inMenu ? 'menuitem' : undefined}
-      className="review-chrome__icon-control review-chrome__main-history-control"
+      className="reader-chrome__icon-control reader-chrome__main-history-control"
       data-main-history={direction}
       aria-busy={documentNavigationPending ? 'true' : undefined}
       disabled={documentNavigationPending || !available}
@@ -944,12 +944,12 @@ export function ReaderChrome({
     : navigationMenuAvailable ? 'Open document navigation' : 'Page navigation unavailable';
 
   const navigationControls = <span
-    data-review-chrome-group="navigation"
-    className="review-chrome__control-cluster review-chrome__navigation-cluster"
+    data-reader-chrome-group="navigation"
+    className="reader-chrome__control-cluster reader-chrome__navigation-cluster"
     role="group"
     aria-label="Document navigation"
   >
-    <span className="review-chrome__page-position" data-review-page-position
+    <span className="reader-chrome__page-position" data-reader-page-position
       ref={navigationHoverRef}
       onPointerEnter={(event) => openHoverMenu('navigation', event.pointerType)}
     >
@@ -959,7 +959,7 @@ export function ReaderChrome({
         tooltip={false}
         ref={(element) => { navigationAnchorRef.current = element; }}
         type="button"
-        className="review-chrome__page-disclosure review-chrome__stat"
+        className="reader-chrome__page-disclosure reader-chrome__stat"
         aria-label={navigationMenuLabel}
         aria-haspopup="menu"
         aria-expanded={activeTopBarMenu === 'navigation'}
@@ -968,14 +968,14 @@ export function ReaderChrome({
         onClick={(event) => activateMenu('navigation', event)}
       ><span aria-hidden="true">/ {viewerState.pageReady ? viewerState.totalPages : '—'}</span></ReaderTooltipButton>
     </span>
-      {copyLink === undefined ? null : <div className="review-chrome__link" data-review-copy-link><CopyLinkControl {...copyLink} /></div>}
+      {copyLink === undefined ? null : <div className="reader-chrome__link" data-reader-copy-link><CopyLinkControl {...copyLink} /></div>}
     {/* Back and Forward keep fixed slots, greyed out when unavailable. */}
     {compactHistory ? null : <>{mainHistoryControl('back')}{mainHistoryControl('forward')}</>}
     <TopBarMenu hoverOpen={topBarMenuHoverOpen} hoverRegionRef={navigationHoverRef} open={activeTopBarMenu === 'navigation'} menuId={navigationMenuId} label="Page navigation" openerRef={navigationAnchorRef} focusOnOpen={topBarMenuKeyboardOpenRef.current} onDismiss={() => requestTopBarMenu('navigation', false)}>
-      <div className="review-chrome__control-cluster review-chrome__page-menu" role="group" aria-label="Page navigation controls">
+      <div className="reader-chrome__control-cluster reader-chrome__page-menu" role="group" aria-label="Page navigation controls">
         {compactHistory ? <>{mainHistoryControl('back', true)}{mainHistoryControl('forward', true)}</> : null}
-        <ReaderTooltipButton label="Previous page" type="button" role="menuitem" className="review-chrome__icon-control" data-review-page-step="previous" disabled={!viewerState.pageReady || viewerState.currentPage <= 1} onPointerDown={preparePageStep} onPointerUp={clearPageStepIntent} onPointerCancel={clearPageStepIntent} onClick={(event) => runPageStep(event.currentTarget, () => controls?.previousPage())}><ReaderIcon name="chevron-up" /></ReaderTooltipButton>
-        <ReaderTooltipButton label="Next page" type="button" role="menuitem" className="review-chrome__icon-control" data-review-page-step="next" disabled={!viewerState.pageReady || viewerState.currentPage >= viewerState.totalPages} onPointerDown={preparePageStep} onPointerUp={clearPageStepIntent} onPointerCancel={clearPageStepIntent} onClick={(event) => runPageStep(event.currentTarget, () => controls?.nextPage())}><ReaderIcon name="chevron-down" /></ReaderTooltipButton>
+        <ReaderTooltipButton label="Previous page" type="button" role="menuitem" className="reader-chrome__icon-control" data-reader-page-step="previous" disabled={!viewerState.pageReady || viewerState.currentPage <= 1} onPointerDown={preparePageStep} onPointerUp={clearPageStepIntent} onPointerCancel={clearPageStepIntent} onClick={(event) => runPageStep(event.currentTarget, () => controls?.previousPage())}><ReaderIcon name="chevron-up" /></ReaderTooltipButton>
+        <ReaderTooltipButton label="Next page" type="button" role="menuitem" className="reader-chrome__icon-control" data-reader-page-step="next" disabled={!viewerState.pageReady || viewerState.currentPage >= viewerState.totalPages} onPointerDown={preparePageStep} onPointerUp={clearPageStepIntent} onPointerCancel={clearPageStepIntent} onClick={(event) => runPageStep(event.currentTarget, () => controls?.nextPage())}><ReaderIcon name="chevron-down" /></ReaderTooltipButton>
       </div>
     </TopBarMenu>
   </span>;
@@ -983,36 +983,36 @@ export function ReaderChrome({
   const zoomControls = <span
     ref={zoomHoverRef}
     onPointerEnter={(event) => openHoverMenu('zoom', event.pointerType)}
-    data-review-chrome-group="zoom"
-    className="review-chrome__control-cluster review-chrome__zoom-cluster"
+    data-reader-chrome-group="zoom"
+    className="reader-chrome__control-cluster reader-chrome__zoom-cluster"
     role="group"
     aria-label="PDF zoom"
   >
     {/* Like the page group's "/ 33", the fixed "%" suffix opens the menu. */}
-    <span className="review-chrome__zoom-value">{zoomValue()}</span>
+    <span className="reader-chrome__zoom-value">{zoomValue()}</span>
     <ReaderTooltipButton
       label="Open zoom controls"
       tooltip={false}
       ref={(element) => { zoomAnchorRef.current = element; }}
       type="button"
-      className="review-chrome__zoom-disclosure"
+      className="reader-chrome__zoom-disclosure"
       aria-label="Open zoom controls"
       aria-haspopup="menu"
       aria-expanded={activeTopBarMenu === 'zoom'}
       aria-controls={zoomMenuId}
       disabled={!viewerState.zoomReady}
       onClick={(event) => activateMenu('zoom', event)}
-    ><span aria-hidden="true" className="review-chrome__zoom-suffix">%</span></ReaderTooltipButton>
+    ><span aria-hidden="true" className="reader-chrome__zoom-suffix">%</span></ReaderTooltipButton>
     <TopBarMenu hoverOpen={topBarMenuHoverOpen} hoverRegionRef={zoomHoverRef} open={activeTopBarMenu === 'zoom'} menuId={zoomMenuId} label="PDF zoom" openerRef={zoomAnchorRef} focusOnOpen={topBarMenuKeyboardOpenRef.current} onDismiss={() => requestTopBarMenu('zoom', false)}>
-      <div className="review-chrome__control-cluster" role="group" aria-label="Zoom controls">
+      <div className="reader-chrome__control-cluster" role="group" aria-label="Zoom controls">
         {horizontalScrollAvailable ? <ReaderTooltipButton
           label="Horizontal lock"
           tooltip={horizontalScrollLocked ? 'Unlock horizontal scrolling' : 'Lock horizontal scrolling'}
           type="button"
           role="menuitemcheckbox"
           aria-checked={horizontalScrollLocked}
-          className="review-chrome__icon-control"
-          data-review-horizontal-lock
+          className="reader-chrome__icon-control"
+          data-reader-horizontal-lock
           disabled={!viewerState.zoomReady || onToggleHorizontalScrollLock === undefined}
           onClick={onToggleHorizontalScrollLock}
         ><ReaderIcon name={horizontalScrollLocked ? 'lock' : 'unlock'} /></ReaderTooltipButton> : null}
@@ -1022,8 +1022,8 @@ export function ReaderChrome({
           tooltip={onFitMode ? false : 'Fit width'}
           type="button"
           role="menuitem"
-          className="review-chrome__icon-control review-chrome__fit-width"
-          data-review-zoom-action="fit-width"
+          className="reader-chrome__icon-control reader-chrome__fit-width"
+          data-reader-zoom-action="fit-width"
           data-fit-width-current={fitWidthCurrent ? 'true' : undefined}
           data-fit-active={fitActive ? 'true' : 'false'}
           data-fit-mode={selectedFit}
@@ -1058,13 +1058,13 @@ export function ReaderChrome({
           onPointerCancel={clearZoomActionIntent}
           onClick={(event) => runFit(event.currentTarget, fitAction)}
         ><ReaderIcon name={FIT_ICONS[fitActive ? fitState?.effectiveMode ?? selectedFit : selectedFit]} /></ReaderTooltipButton>
-        <ReaderTooltipButton label="Zoom out" type="button" role="menuitem" className="review-chrome__icon-control" data-review-zoom-action="out" aria-describedby={zoomUnavailable} disabled={!viewerState.zoomReady} onPointerDown={prepareZoomAction} onPointerUp={clearZoomActionIntent} onPointerCancel={clearZoomActionIntent} onClick={(event) => runZoomAction(event.currentTarget, () => controls?.zoomOut())}><ReaderIcon name="minus" /></ReaderTooltipButton>
-        <ReaderTooltipButton label="Zoom in" type="button" role="menuitem" className="review-chrome__icon-control" data-review-zoom-action="in" aria-describedby={zoomUnavailable} disabled={!viewerState.zoomReady} onPointerDown={prepareZoomAction} onPointerUp={clearZoomActionIntent} onPointerCancel={clearZoomActionIntent} onClick={(event) => runZoomAction(event.currentTarget, () => controls?.zoomIn())}><ReaderIcon name="plus" /></ReaderTooltipButton>
+        <ReaderTooltipButton label="Zoom out" type="button" role="menuitem" className="reader-chrome__icon-control" data-reader-zoom-action="out" aria-describedby={zoomUnavailable} disabled={!viewerState.zoomReady} onPointerDown={prepareZoomAction} onPointerUp={clearZoomActionIntent} onPointerCancel={clearZoomActionIntent} onClick={(event) => runZoomAction(event.currentTarget, () => controls?.zoomOut())}><ReaderIcon name="minus" /></ReaderTooltipButton>
+        <ReaderTooltipButton label="Zoom in" type="button" role="menuitem" className="reader-chrome__icon-control" data-reader-zoom-action="in" aria-describedby={zoomUnavailable} disabled={!viewerState.zoomReady} onPointerDown={prepareZoomAction} onPointerUp={clearZoomActionIntent} onPointerCancel={clearZoomActionIntent} onClick={(event) => runZoomAction(event.currentTarget, () => controls?.zoomIn())}><ReaderIcon name="plus" /></ReaderTooltipButton>
       </div>
       {onFitMode && fitOptionsOpen ? <div
         ref={fitOptionsRef}
         id={fitOptionsId}
-        className="review-chrome__fit-options"
+        className="reader-chrome__fit-options"
         role="menu"
         aria-label="PDF fit modes"
         onPointerEnter={cancelFitOptionsDismiss}
@@ -1086,7 +1086,7 @@ export function ReaderChrome({
           title={FIT_LABELS[mode]}
           role="menuitemradio"
           aria-checked={fitActive && (fitState?.effectiveMode ?? 'width') === mode}
-          className="review-chrome__fit-option"
+          className="reader-chrome__fit-option"
           disabled={!viewerState.zoomReady || !fitWidthReady}
           onPointerDown={prepareZoomAction}
           onPointerUp={clearZoomActionIntent}
@@ -1105,34 +1105,34 @@ export function ReaderChrome({
     {zoomControls}
   </>;
 
-  const sizingCluster = (_candidate: ReaderChromePresentation): ReactNode => <div className="review-chrome__viewer-controls" style={{ display: 'inline-flex', gridColumn: 'auto', gridRow: 'auto', flexWrap: 'nowrap' }}>
-    <span className="review-chrome__control-cluster review-chrome__edit-cluster"><button type="button" title={compactHistory ? 'Open edit history' : 'Undo'} className="review-chrome__icon-control">{compactHistory ? <span className="review-chrome__paired-icon"><ReaderIcon name="undo" /><ReaderIcon name="redo" /></span> : <ReaderIcon name="undo" />}</button>{compactHistory ? null : <button type="button" title="Redo" className="review-chrome__icon-control"><ReaderIcon name="redo" /></button>}</span>
-    <span className="review-chrome__control-cluster review-chrome__navigation-cluster">{compactHistory ? null : <><button type="button" title="Back in document history" data-main-history="back" className="review-chrome__icon-control"><ReaderIcon name="arrow-left" /></button><button type="button" title="Forward in document history" data-main-history="forward" className="review-chrome__icon-control"><ReaderIcon name="arrow-right" /></button></>}<span className="review-chrome__stat">{viewerState.pageReady ? `${viewerState.currentPage} / ${viewerState.totalPages}` : '— / —'}</span></span>
-    <span className="review-chrome__control-cluster"><span className="review-chrome__stat">{viewerState.zoomReady ? `${viewerState.zoomPercent}%` : '—%'}</span></span>
-    {copyLink === undefined ? null : <div className="review-chrome__link"><button type="button" title="Copy link to current location" className="review-chrome__icon-control"><ReaderIcon name="link" /></button></div>}
+  const sizingCluster = (_candidate: ReaderChromePresentation): ReactNode => <div className="reader-chrome__viewer-controls" style={{ display: 'inline-flex', gridColumn: 'auto', gridRow: 'auto', flexWrap: 'nowrap' }}>
+    <span className="reader-chrome__control-cluster reader-chrome__edit-cluster"><button type="button" title={compactHistory ? 'Open edit history' : 'Undo'} className="reader-chrome__icon-control">{compactHistory ? <span className="reader-chrome__paired-icon"><ReaderIcon name="undo" /><ReaderIcon name="redo" /></span> : <ReaderIcon name="undo" />}</button>{compactHistory ? null : <button type="button" title="Redo" className="reader-chrome__icon-control"><ReaderIcon name="redo" /></button>}</span>
+    <span className="reader-chrome__control-cluster reader-chrome__navigation-cluster">{compactHistory ? null : <><button type="button" title="Back in document history" data-main-history="back" className="reader-chrome__icon-control"><ReaderIcon name="arrow-left" /></button><button type="button" title="Forward in document history" data-main-history="forward" className="reader-chrome__icon-control"><ReaderIcon name="arrow-right" /></button></>}<span className="reader-chrome__stat">{viewerState.pageReady ? `${viewerState.currentPage} / ${viewerState.totalPages}` : '— / —'}</span></span>
+    <span className="reader-chrome__control-cluster"><span className="reader-chrome__stat">{viewerState.zoomReady ? `${viewerState.zoomPercent}%` : '—%'}</span></span>
+    {copyLink === undefined ? null : <div className="reader-chrome__link"><button type="button" title="Copy link to current location" className="reader-chrome__icon-control"><ReaderIcon name="link" /></button></div>}
   </div>;
 
   const contextControl = documentContext !== undefined ? <DocumentContextButton {...documentContext} />
     : codexContext === undefined ? null : <CodexContextStatus status={codexContext} />;
   const contextSlotClass = documentContext === undefined
-    ? 'review-chrome__context'
-    : 'review-chrome__context review-chrome__context--document';
-  const sizingIdentity = <div className="review-chrome__identity">
-    {documentActions !== undefined ? <div className="document-actions"><button type="button" className="review-chrome__save-identity document-actions__trigger" title="Open document actions"><ReaderIcon name="file" size={16} /><span className="review-chrome__filename">{displayTitle}</span>{!showSaveStatusDot || savePhase === 'clean' ? null : <span className="review-chrome__save-dot" data-save-phase={savePhase} />}</button></div> : saveOptionsAvailable ? <button type="button" className="review-chrome__save-identity" title="Open automatic save options"><ReaderIcon name="file" size={16} /><span className="review-chrome__filename">{displayTitle}</span>{!showSaveStatusDot || savePhase === 'clean' ? null : <span className="review-chrome__save-dot" data-save-phase={savePhase} />}</button> : <div className="review-chrome__save-identity"><ReaderIcon name="file" size={16} /><span className="review-chrome__filename">{displayTitle}</span>{!showSaveStatusDot || savePhase === 'clean' ? null : <span className="review-chrome__save-dot" data-save-phase={savePhase} />}</div>}
+    ? 'reader-chrome__context'
+    : 'reader-chrome__context reader-chrome__context--document';
+  const sizingIdentity = <div className="reader-chrome__identity">
+    {documentActions !== undefined ? <div className="document-actions"><button type="button" className="reader-chrome__save-identity document-actions__trigger" title="Open document actions"><ReaderIcon name="file" size={16} /><span className="reader-chrome__filename">{displayTitle}</span>{!showSaveStatusDot || savePhase === 'clean' ? null : <span className="reader-chrome__save-dot" data-save-phase={savePhase} />}</button></div> : saveOptionsAvailable ? <button type="button" className="reader-chrome__save-identity" title="Open automatic save options"><ReaderIcon name="file" size={16} /><span className="reader-chrome__filename">{displayTitle}</span>{!showSaveStatusDot || savePhase === 'clean' ? null : <span className="reader-chrome__save-dot" data-save-phase={savePhase} />}</button> : <div className="reader-chrome__save-identity"><ReaderIcon name="file" size={16} /><span className="reader-chrome__filename">{displayTitle}</span>{!showSaveStatusDot || savePhase === 'clean' ? null : <span className="reader-chrome__save-dot" data-save-phase={savePhase} />}</div>}
     {contextControl === null ? null :
       <div className={contextSlotClass}><div className="codex-context-status"><ReaderIcon name="agent" size={16} /></div></div>}
   </div>;
 
   return <header
     ref={chromeRef}
-    className="review-chrome"
-    data-review-chrome
-    data-review-chrome-presentation={presentation}
-    data-review-chrome-title={titlePresentation}
-    data-review-chrome-touch-compact={compactTouch ? 'true' : undefined}
+    className="reader-chrome"
+    data-reader-chrome
+    data-reader-chrome-presentation={presentation}
+    data-reader-chrome-title={titlePresentation}
+    data-reader-chrome-touch-compact={compactTouch ? 'true' : undefined}
     data-top-bar-menu-open={activeTopBarMenu ?? undefined}
   >
-    <div className="review-chrome__identity">
+    <div className="reader-chrome__identity">
       {documentActions !== undefined ? <DocumentActionsMenu
         {...documentActions}
         documentTitle={documentTitle}
@@ -1146,27 +1146,27 @@ export function ReaderChrome({
           setDocumentMenuPending(pending);
           if (pending) setActiveTopBarMenu('document');
         }}
-      /> : saveOptionsAvailable ? <ReaderTooltipButton ref={saveTriggerRef} label={saveControlLabel} tooltip={documentTitle} type="button" className="review-chrome__save-identity" aria-haspopup="dialog" aria-expanded={saveOptionsOpen} onClick={onSaveOptions}>
+      /> : saveOptionsAvailable ? <ReaderTooltipButton ref={saveTriggerRef} label={saveControlLabel} tooltip={documentTitle} type="button" className="reader-chrome__save-identity" aria-haspopup="dialog" aria-expanded={saveOptionsOpen} onClick={onSaveOptions}>
         <ReaderIcon name="file" size={16} />
-        <span className="review-chrome__filename">{displayTitle}</span>
-        {!showSaveStatusDot || savePhase === 'clean' ? null : <span className="review-chrome__save-dot" data-save-phase={savePhase} aria-hidden="true" />}
-        <span className="sr-only" data-review-saved-status>{saveStatusDisplay}</span>
-      </ReaderTooltipButton> : <div className="review-chrome__save-identity" aria-label={`${identityLabel}, ${saveStatusText}`} title={documentTitle} tabIndex={0}>
+        <span className="reader-chrome__filename">{displayTitle}</span>
+        {!showSaveStatusDot || savePhase === 'clean' ? null : <span className="reader-chrome__save-dot" data-save-phase={savePhase} aria-hidden="true" />}
+        <span className="sr-only" data-reader-saved-status>{saveStatusDisplay}</span>
+      </ReaderTooltipButton> : <div className="reader-chrome__save-identity" aria-label={`${identityLabel}, ${saveStatusText}`} title={documentTitle} tabIndex={0}>
         <ReaderIcon name="file" size={16} />
-        <span className="review-chrome__filename">{displayTitle}</span>
-        {!showSaveStatusDot || savePhase === 'clean' ? null : <span className="review-chrome__save-dot" data-save-phase={savePhase} aria-hidden="true" />}
-        <span className="sr-only" data-review-saved-status>{saveStatusDisplay}</span>
+        <span className="reader-chrome__filename">{displayTitle}</span>
+        {!showSaveStatusDot || savePhase === 'clean' ? null : <span className="reader-chrome__save-dot" data-save-phase={savePhase} aria-hidden="true" />}
+        <span className="sr-only" data-reader-saved-status>{saveStatusDisplay}</span>
       </div>}
-      {contextControl === null ? null : <div className={contextSlotClass} data-review-context-status>{contextControl}</div>}
+      {contextControl === null ? null : <div className={contextSlotClass} data-reader-context-status>{contextControl}</div>}
     </div>
-    <div className="review-chrome__left-controls" role="group" aria-label="PDF navigation and links">
+    <div className="reader-chrome__left-controls" role="group" aria-label="PDF navigation and links">
       {navigationControls}
     </div>
-    <div className="review-chrome__viewer-controls" role="group" aria-label="PDF editing and zoom">
+    <div className="reader-chrome__viewer-controls" role="group" aria-label="PDF editing and zoom">
       {controlsForPresentation(presentation)}
     </div>
     {hasWorkspaceTrayToggles ? <div
-      className="review-chrome__tray-controls"
+      className="reader-chrome__tray-controls"
       role="group"
       aria-label="Workspace trays"
       inert={saveOptionsOpen}
@@ -1181,7 +1181,7 @@ export function ReaderChrome({
           label={label}
           tooltip={hint ? `${label} ${referencesShortcutLabel}` : label}
           type="button"
-          className="review-chrome__icon-control review-chrome__tray-toggle"
+          className="reader-chrome__icon-control reader-chrome__tray-toggle"
           data-workspace-tray-toggle={surface}
           aria-expanded={open}
           aria-controls={trayControls}
@@ -1201,17 +1201,17 @@ export function ReaderChrome({
     </div> : null}
     <div
       ref={sizingRackRef}
-      data-review-chrome-sizing-rack
+      data-reader-chrome-sizing-rack
       aria-hidden="true"
       inert
       style={{ position: 'absolute', width: 'max-content', height: 0, overflow: 'hidden', visibility: 'hidden', pointerEvents: 'none' }}
     >
       {READER_CHROME_PRESENTATIONS.map((candidate) => <div
         key={candidate}
-        className="review-chrome review-chrome__sizing-candidate"
-        data-review-chrome-candidate={candidate}
-        data-review-chrome-title={titlePresentation}
-        data-review-chrome-touch-compact={compactTouch ? 'true' : undefined}
+        className="reader-chrome reader-chrome__sizing-candidate"
+        data-reader-chrome-candidate={candidate}
+        data-reader-chrome-title={titlePresentation}
+        data-reader-chrome-touch-compact={compactTouch ? 'true' : undefined}
         style={{
           position: 'absolute',
           display: 'inline-grid',
@@ -1219,14 +1219,14 @@ export function ReaderChrome({
             ? 'max-content max-content max-content' : 'max-content max-content',
           gridTemplateRows: 'max-content',
           width: 'max-content',
-          height: 'var(--review-chrome-height)',
+          height: 'var(--reader-chrome-height)',
         }}
       >
         {sizingIdentity}
         {sizingCluster(candidate)}
-        {hasWorkspaceTrayToggles ? <div className="review-chrome__tray-controls">
+        {hasWorkspaceTrayToggles ? <div className="reader-chrome__tray-controls">
           {workspaceTrayToggles.map(({ surface }) => (
-            <button key={surface} type="button" className="review-chrome__icon-control review-chrome__tray-toggle" />
+            <button key={surface} type="button" className="reader-chrome__icon-control reader-chrome__tray-toggle" />
           ))}
         </div> : null}
       </div>)}

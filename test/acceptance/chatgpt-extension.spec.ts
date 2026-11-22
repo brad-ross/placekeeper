@@ -16,7 +16,7 @@ for (const scenario of [
   });
   try {
     await reader.ready();
-    const bot = page.locator('[data-review-context-status] button[data-document-context]');
+    const bot = page.locator('[data-reader-context-status] button[data-document-context]');
     const icon = bot.locator('svg');
     const tooltip = page.getByRole('tooltip');
     const documentPublications = () => page.evaluate(() =>
@@ -49,7 +49,7 @@ for (const scenario of [
     await expect(bot).toHaveAttribute('data-document-context', 'publishing');
     await expect(bot).toHaveAttribute('aria-disabled', 'true');
     expect(await bot.boundingBox()).toEqual(idle);
-    await expect(icon).toHaveCSS('animation-name', scenario.keyboard ? 'review-save-pulse' : 'none');
+    await expect(icon).toHaveCSS('animation-name', scenario.keyboard ? 'reader-save-pulse' : 'none');
     await expect(icon).toHaveCSS('color', 'rgb(217, 173, 43)');
     await expect.poll(async () => (await documentPublications()).length).toBe(1);
     await bot.press('Enter');
@@ -92,7 +92,7 @@ test('toolbox document context waits for the replacement PDF receipt', async ({ 
   const reader = await extensionReader(page, 'text-native.pdf', { documentPublication: 'hold-second' });
   try {
     await reader.ready();
-    const bot = page.locator('[data-review-context-status] button[data-document-context]');
+    const bot = page.locator('[data-reader-context-status] button[data-document-context]');
     const before = await reader.tool('inspect_review', {});
     await bot.click();
     await expect(bot).toHaveAttribute('data-document-context', 'available');
@@ -125,7 +125,7 @@ test('toolbox document context waits for the replacement PDF receipt', async ({ 
 });
 
 async function openAnnotationContext(page: Page, id: string) {
-  const mark=page.locator(`[data-owned-native-geometry][data-review-id="${id}"], [data-owned-mark][data-review-id="${id}"]`).first();
+  const mark=page.locator(`[data-owned-native-geometry][data-annotation-id="${id}"], [data-owned-mark][data-annotation-id="${id}"]`).first();
   await mark.scrollIntoViewIfNeeded();
   const bounds=await mark.boundingBox();if(!bounds)throw Error('Annotation mark is not visible');
   await page.mouse.move(bounds.x+bounds.width/2,bounds.y+bounds.height/2);
@@ -216,7 +216,7 @@ test('extension bot attaches annotation notes without editing the prompt and res
     const revealed = await reader.tool('reveal_search_result', { resultId: search.results[0].id, documentGeneration: 1, source: search.source });
     expect(revealed, JSON.stringify(revealed)).toMatchObject({ status: 'navigated', page: 1 });
     expect(await reader.tool('navigate_page', { page: 1, documentGeneration: 2, source: snapshot.source })).toMatchObject({ status: 'unavailable', reason: 'stale-generation' });
-    await expect(page.locator('.review-discussion-actions')).toHaveCount(0);
+    await expect(page.locator('.reader-discussion-actions')).toHaveCount(0);
     await openAnnotationContext(page, snapshot.annotations[0].id);
     const note=page.getByRole('textbox',{name:'Note (optional)',exact:true});
     await note.fill('Compare this annotation with the earlier result.');
@@ -287,7 +287,7 @@ for (const width of [1440, 1120, 375]) test(`extension reader and bot note layou
     await reader.ready();
     await expect(page.locator('.extension-menu')).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Close review', exact: true })).toHaveCount(0);
-    await expect(page.locator('.review-discussion-actions')).toHaveCount(0);
+    await expect(page.locator('.reader-discussion-actions')).toHaveCount(0);
     const initial=await page.locator('#root').boundingBox();expect(initial!.y).toBeLessThan(2);
     await page.getByRole('button', { name: 'Show Workspace', exact: true }).click({ trial: true });
     await info.attach(`extension-${width}px-reader`, { body: await page.screenshot({ fullPage: true }), contentType: 'image/png' });

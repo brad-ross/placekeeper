@@ -90,7 +90,7 @@ export const ReaderTooltipButton = forwardRef<HTMLButtonElement, ReaderTooltipBu
     'aria-describedby': describedBy,
     ...buttonProps
   }, forwardedRef) {
-    const tooltipId = `review-tooltip-${useId().replaceAll(':', '')}`;
+    const tooltipId = `reader-tooltip-${useId().replaceAll(':', '')}`;
     const buttonRef = useRef<HTMLButtonElement | null>(null);
     const tooltipRef = useRef<HTMLSpanElement>(null);
     const hoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -221,7 +221,7 @@ export const ReaderTooltipButton = forwardRef<HTMLButtonElement, ReaderTooltipBu
         }}
       />
       {visible && tooltip !== false && typeof document !== 'undefined' ? createPortal(
-        <span ref={tooltipRef} id={tooltipId} className="review-tooltip" popover="manual" role="tooltip" style={style}>
+        <span ref={tooltipRef} id={tooltipId} className="reader-tooltip" popover="manual" role="tooltip" style={style}>
           {tooltip}
         </span>,
         document.body,

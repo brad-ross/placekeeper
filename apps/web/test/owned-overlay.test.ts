@@ -40,7 +40,7 @@ describe("owned annotation overlay geometry", () => {
       contents: 'Editable note', ownedAnnotationId: 'review-17', pageIndex: 2,
     });
     expect(sourceReaderMarkIdentityAttributes(visible.sourceMarks.get('2:pdf-17')!)).toEqual({
-      'data-review-id': 'review-17',
+      'data-annotation-id': 'review-17',
     });
     expect(visible.sourceMarks.get('3:pdf-23')).toMatchObject({
       contents: 'Source note', annotationKey: '3:pdf-23', pageIndex: 3,
@@ -56,7 +56,7 @@ describe("owned annotation overlay geometry", () => {
       documentRotation: Rotation.Degree0,
     }));
     expect(geometryHtml).toContain('data-owned-native-geometry="true"');
-    expect(geometryHtml).toContain('data-review-id="review-17"');
+    expect(geometryHtml).toContain('data-annotation-id="review-17"');
     expect(geometryHtml).toContain('left:2px;top:4px;width:6px;height:8px');
     expect(geometryHtml).not.toContain('Editable note');
     expect(visible.residualSourceFocusMarks).toEqual([expect.objectContaining({

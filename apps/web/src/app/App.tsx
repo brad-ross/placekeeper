@@ -1111,7 +1111,7 @@ export function App({
         documentGeneration,
         runway: () => viewerRunwayRef.current,
         fitTextMargins: () => {
-          const stage = workspaceElementRef.current?.closest<HTMLElement>('[data-review-stage]');
+          const stage = workspaceElementRef.current?.closest<HTMLElement>('[data-reader-stage]');
           const rightFade = stage?.dataset.rightSurfaceOpen === 'true'
             ? READER_OVERLAY_INSET + READER_OVERLAY_FADE_SIZE
             : 0;
@@ -1120,7 +1120,7 @@ export function App({
           return { left: 36, right: 36 + rightFade };
         },
         fitWidthMargins: () => {
-          const stage = workspaceElementRef.current?.closest<HTMLElement>('[data-review-stage]');
+          const stage = workspaceElementRef.current?.closest<HTMLElement>('[data-reader-stage]');
           if (stage?.dataset.rightSurfaceOpen === 'true') {
             const gap = READER_OVERLAY_INSET + READER_OVERLAY_FADE_SIZE;
             return { left: gap, right: gap };

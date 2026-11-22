@@ -1,50 +1,50 @@
-.review-layout {
-  --review-document-right-space: 0px;
-  --review-document-left-gap: 10px;
-  --review-document-right-gap: 10px;
+.reader-layout {
+  --reader-document-right-space: 0px;
+  --reader-document-left-gap: 10px;
+  --reader-document-right-gap: 10px;
   position: relative;
   min-width: 0;
   min-height: 0;
   overflow: hidden;
 }
 
-.review-document {
+.reader-document {
   position: absolute;
   z-index: 0;
-  inset: 0 var(--review-document-right-space) 0 0;
+  inset: 0 var(--reader-document-right-space) 0 0;
   min-width: 0;
   min-height: 0;
   overflow: visible;
 }
 
-.review-layout[data-right-surface-open="true"] {
-  --review-document-right-space: calc(var(--reference-right-width) + var(--review-overlay-inset, 12px));
-  --review-document-left-gap: 24px;
-  --review-document-right-gap: 24px;
+.reader-layout[data-right-surface-open="true"] {
+  --reader-document-right-space: calc(var(--reference-right-width) + var(--reader-overlay-inset, 12px));
+  --reader-document-left-gap: 24px;
+  --reader-document-right-gap: 24px;
 }
 
 /* One native scrollport reaches the window edge. Its content reserves the
-   workspace area, while .review-document remains the reading geometry. The
+   workspace area, while .reader-document remains the reading geometry. The
    scrollbar's width is already included in that reserved area. */
-.review-document .pdf-workspace__viewport {
-  width: calc(100% + var(--review-document-right-space)) !important;
+.reader-document .pdf-workspace__viewport {
+  width: calc(100% + var(--reader-document-right-space)) !important;
   /* WebKit requires physical properties to animate the logical padding below. */
-  transition: padding-left var(--review-motion-surface) ease-out, padding-right var(--review-motion-surface) ease-out;
-  --review-scrollport-trailing-space: calc(var(--review-document-right-gap) + max(0px, var(--review-document-right-space) - var(--review-main-scrollbar-width, 0px)));
-  padding-inline: var(--review-document-left-gap) var(--review-scrollport-trailing-space) !important;
+  transition: padding-left var(--reader-motion-surface) ease-out, padding-right var(--reader-motion-surface) ease-out;
+  --reader-scrollport-trailing-space: calc(var(--reader-document-right-gap) + max(0px, var(--reader-document-right-space) - var(--reader-main-scrollbar-width, 0px)));
+  padding-inline: var(--reader-document-left-gap) var(--reader-scrollport-trailing-space) !important;
 }
 
 /* The zoom wrapper's synthetic margin assumes uniform library padding.
    Native content padding owns centering beside the workspace instead. */
-.review-document [data-viewer-framing-content] {
+.reader-document [data-viewer-framing-content] {
   margin-left: 0 !important;
 }
 
-.review-overlay-frame {
+.reader-overlay-frame {
   /* Decorative backing must never paint over the native PDF scrollbar. */
   /* Overlay scrollbars report zero layout width on macOS. Leave their
      painted edge exposed too, without styling or disabling native auto-hide. */
-  clip-path: inset(0 max(16px, var(--review-main-scrollbar-width, 0px)) max(16px, var(--review-main-scrollbar-height, 0px)) 0);
+  clip-path: inset(0 max(16px, var(--reader-main-scrollbar-width, 0px)) max(16px, var(--reader-main-scrollbar-height, 0px)) 0);
   position: absolute;
   z-index: 1;
   inset: 0;
@@ -52,73 +52,73 @@
   pointer-events: none;
 }
 
-.review-overlay-frame > span {
+.reader-overlay-frame > span {
   position: absolute;
   display: none;
   pointer-events: none;
 }
 
-.review-layout[data-right-overlay="true"] .review-overlay-frame__right-backing {
+.reader-layout[data-right-overlay="true"] .reader-overlay-frame__right-backing {
   display: block;
-  inset: 0 0 0 var(--review-overlay-right-start);
-  background: var(--review-surface-canvas);
+  inset: 0 0 0 var(--reader-overlay-right-start);
+  background: var(--reader-surface-canvas);
 }
 
-.review-layout[data-right-overlay="true"] .review-overlay-frame__right-fade {
+.reader-layout[data-right-overlay="true"] .reader-overlay-frame__right-fade {
   display: block;
   top: 0;
   bottom: 0;
-  left: calc(var(--review-overlay-right-start) - var(--review-overlay-fade-size));
-  width: var(--review-overlay-fade-size);
-  background: linear-gradient(to right, transparent, var(--review-surface-canvas));
+  left: calc(var(--reader-overlay-right-start) - var(--reader-overlay-fade-size));
+  width: var(--reader-overlay-fade-size);
+  background: linear-gradient(to right, transparent, var(--reader-surface-canvas));
 }
 
-.review-layout[data-bottom-overlay="true"] .review-overlay-frame__bottom-backing {
+.reader-layout[data-bottom-overlay="true"] .reader-overlay-frame__bottom-backing {
   display: block;
-  inset: var(--review-overlay-bottom-start) 0 0;
-  background: var(--review-surface-canvas);
+  inset: var(--reader-overlay-bottom-start) 0 0;
+  background: var(--reader-surface-canvas);
 }
 
-.review-layout[data-bottom-overlay="true"] .review-overlay-frame__bottom-fade {
+.reader-layout[data-bottom-overlay="true"] .reader-overlay-frame__bottom-fade {
   display: block;
   right: 0;
   left: 0;
-  top: calc(var(--review-overlay-bottom-start) - var(--review-overlay-fade-size));
-  height: var(--review-overlay-fade-size);
-  background: linear-gradient(transparent, var(--review-surface-canvas));
+  top: calc(var(--reader-overlay-bottom-start) - var(--reader-overlay-fade-size));
+  height: var(--reader-overlay-fade-size);
+  background: linear-gradient(transparent, var(--reader-surface-canvas));
 }
 
-.review-layout[data-scroll-top-fade="true"] .review-overlay-frame__top-fade {
+.reader-layout[data-scroll-top-fade="true"] .reader-overlay-frame__top-fade {
   display: block;
   z-index: 1;
   top: 0;
-  right: var(--review-main-scrollbar-width);
+  right: var(--reader-main-scrollbar-width);
   left: 0;
-  height: var(--review-overlay-fade-size);
-  background: linear-gradient(var(--review-surface-canvas), transparent);
+  height: var(--reader-overlay-fade-size);
+  background: linear-gradient(var(--reader-surface-canvas), transparent);
 }
 
-.review-layout[data-scroll-right-fade="true"][data-right-overlay="false"]
-  .review-overlay-frame__outer-right-fade {
+.reader-layout[data-scroll-right-fade="true"][data-right-overlay="false"]
+  .reader-overlay-frame__outer-right-fade {
   display: block;
   top: 0;
-  right: var(--review-main-scrollbar-width);
-  bottom: var(--review-main-scrollbar-height);
-  width: var(--review-overlay-fade-size);
-  background: linear-gradient(to right, transparent, var(--review-surface-canvas));
+  right: var(--reader-main-scrollbar-width);
+  bottom: var(--reader-main-scrollbar-height);
+  width: var(--reader-overlay-fade-size);
+  background: linear-gradient(to right, transparent, var(--reader-surface-canvas));
 }
 
-.review-layout[data-scroll-bottom-fade="true"][data-bottom-overlay="false"]
-  .review-overlay-frame__outer-bottom-fade {
+.reader-layout[data-scroll-bottom-fade="true"][data-bottom-overlay="false"]
+  .reader-overlay-frame__outer-bottom-fade {
   display: block;
-  right: var(--review-main-scrollbar-width);
-  bottom: var(--review-main-scrollbar-height);
+  right: var(--reader-main-scrollbar-width);
+  bottom: var(--reader-main-scrollbar-height);
   left: 0;
-  height: var(--review-overlay-fade-size);
-  background: linear-gradient(transparent, var(--review-surface-canvas));
+  height: var(--reader-overlay-fade-size);
+  background: linear-gradient(transparent, var(--reader-surface-canvas));
 }
 
-.review-document > *,
+.reader-document > *,
 [data-viewer-shell],
 .pdf-workspace {
   width: 100%;
@@ -135,21 +135,21 @@
   height: 100%;
   overflow: auto;
   scrollbar-gutter: stable;
-  background: var(--review-surface-canvas);
+  background: var(--reader-surface-canvas);
 }
 
 /* Leave room for the page shadow (18px offset, 44px blur) to fade above
    the 16px native scrollbar backing, including after bottom-tray runway. */
-.review-document .pdf-workspace__viewport {
+.reader-document .pdf-workspace__viewport {
   padding-top: 12px !important;
-  --review-page-bottom-clearance: 64px;
-  padding-bottom: var(--review-page-bottom-clearance) !important;
+  --reader-page-bottom-clearance: 64px;
+  padding-bottom: var(--reader-page-bottom-clearance) !important;
 }
 
 .pdf-workspace__page {
   background: #fff;
   outline: none;
-  box-shadow: inset 0 0 0 1px var(--review-border-subtle), var(--review-shadow-page);
+  box-shadow: inset 0 0 0 1px var(--reader-border-subtle), var(--reader-shadow-page);
 }
 
 .pdf-workspace__loading {
@@ -158,23 +158,23 @@
   align-items: center;
   justify-content: center;
   gap: .5rem;
-  color: var(--review-ink-muted);
+  color: var(--reader-ink-muted);
   font-size: 12px;
 }
 
-.pdf-workspace__loading .review-icon {
-  animation: review-loader-spin 900ms linear infinite;
+.pdf-workspace__loading .reader-icon {
+  animation: reader-loader-spin 900ms linear infinite;
 }
 
 .pdf-workspace__status,
-.review-toast {
+.reader-toast {
   display: flex;
   align-items: center;
   gap: .4rem;
   margin: 0;
   padding: .45rem .65rem;
-  border-radius: var(--review-radius-control);
-  background: var(--review-surface-panel);
+  border-radius: var(--reader-radius-control);
+  background: var(--reader-surface-panel);
   box-shadow: 0 2px 7px rgb(24 27 23 / 8%);
   font-size: 12px;
   font-weight: 400;
@@ -187,11 +187,11 @@
   top: .75rem;
   left: .75rem;
   max-width: min(24rem, calc(100% - 1.5rem));
-  border: 1px solid color-mix(in srgb, var(--review-danger) 48%, var(--review-border));
-  color: var(--review-danger);
+  border: 1px solid color-mix(in srgb, var(--reader-danger) 48%, var(--reader-border));
+  color: var(--reader-danger);
 }
 
-.review-toast-stack {
+.reader-toast-stack {
   position: absolute;
   z-index: 8;
   top: .75rem;
@@ -203,14 +203,14 @@
   pointer-events: none;
 }
 
-.review-toast {
-  border: 1px solid color-mix(in srgb, var(--review-warning) 55%, var(--review-border));
-  color: var(--review-ink-primary);
+.reader-toast {
+  border: 1px solid color-mix(in srgb, var(--reader-warning) 55%, var(--reader-border));
+  color: var(--reader-ink-primary);
 }
 
-.review-toast--error {
-  border-color: color-mix(in srgb, var(--review-danger) 48%, var(--review-border));
-  color: var(--review-danger);
+.reader-toast--error {
+  border-color: color-mix(in srgb, var(--reader-danger) 48%, var(--reader-border));
+  color: var(--reader-danger);
 }
 
 .pdf-copy-owner {
@@ -220,26 +220,26 @@
   right: .5rem;
   margin: 0;
   padding: .3rem .55rem;
-  border: 1px solid var(--review-border);
-  border-radius: var(--review-radius-control);
-  background: color-mix(in srgb, var(--review-surface-panel) 94%, transparent);
+  border: 1px solid var(--reader-border);
+  border-radius: var(--reader-radius-control);
+  background: color-mix(in srgb, var(--reader-surface-panel) 94%, transparent);
   box-shadow: 0 2px 7px rgb(24 27 23 / 8%);
-  color: var(--review-ink-muted);
+  color: var(--reader-ink-muted);
   font-size: 11px;
   font-weight: 400;
   pointer-events: none;
 }
 
-.review-toast[data-generation-busy="true"] .review-icon {
-  animation: review-loader-spin 900ms linear infinite;
+.reader-toast[data-generation-busy="true"] .reader-icon {
+  animation: reader-loader-spin 900ms linear infinite;
 }
 
-@keyframes review-loader-spin {
+@keyframes reader-loader-spin {
   to { transform: rotate(1turn); }
 }
 
-.review-contextual-host,
-.review-drawer-host {
+.reader-contextual-host,
+.reader-drawer-host {
   position: absolute;
   z-index: 2;
   inset: 0;
@@ -247,11 +247,11 @@
   pointer-events: none;
 }
 
-.review-contextual-host {
+.reader-contextual-host {
   z-index: 3;
 }
 
-.review-drawer-host {
+.reader-drawer-host {
   display: grid;
   grid-template: minmax(0, 1fr) / minmax(0, 1fr);
   overflow: clip;
@@ -259,32 +259,32 @@
 
 /* The outer review layout already clips these surfaces. A second clip can
    leave native WebKit workspace layers unpainted until the window resizes. */
-[data-launch-surface="macos"] .review-drawer-host {
+[data-launch-surface="macos"] .reader-drawer-host {
   overflow: visible;
 }
 
-.review-context-palette,
-.review-page-menu {
+.reader-context-palette,
+.reader-page-menu {
   position: fixed;
   z-index: 3;
   display: flex;
   align-items: center;
-  gap: var(--review-control-group-gap);
+  gap: var(--reader-control-group-gap);
   padding: 5px;
-  border: 1px solid var(--review-border);
-  border-radius: var(--review-radius-float);
-  background: var(--review-surface-panel);
-  box-shadow: var(--review-shadow-float);
+  border: 1px solid var(--reader-border);
+  border-radius: var(--reader-radius-float);
+  background: var(--reader-surface-panel);
+  box-shadow: var(--reader-shadow-float);
   pointer-events: auto;
 }
 
-.review-context-palette[hidden],
-.review-page-menu[hidden] {
+.reader-context-palette[hidden],
+.reader-page-menu[hidden] {
   display: none;
 }
 
 /* A plain text cursor: thin, dark grey, blinking on and off at the system rate. */
-.review-insertion-caret {
+.reader-insertion-caret {
   position: fixed;
   z-index: 3;
   width: 1px;
@@ -294,59 +294,59 @@
   box-shadow: none;
   pointer-events: none;
   transform: translate(-50%, -50%);
-  animation: review-insertion-caret-blink 1.06s step-end infinite;
+  animation: reader-insertion-caret-blink 1.06s step-end infinite;
 }
 
-@keyframes review-insertion-caret-blink {
+@keyframes reader-insertion-caret-blink {
   0% { opacity: 1; }
   50% { opacity: 0; }
 }
 
-.review-insertion-caret[hidden] { display: none; }
+.reader-insertion-caret[hidden] { display: none; }
 
-.review-context-palette button,
-.review-page-menu button {
+.reader-context-palette button,
+.reader-page-menu button {
   display: inline-flex;
-  min-height: var(--review-control-default);
+  min-height: var(--reader-control-default);
   align-items: center;
   gap: 7px;
   padding: 0 11px;
   border: 1px solid transparent;
-  border-radius: var(--review-radius-control);
-  color: var(--review-ink-primary);
+  border-radius: var(--reader-radius-control);
+  color: var(--reader-ink-primary);
   background: transparent;
   font-size: 13px;
   font-weight: 400;
-  transition: color var(--review-motion-fast) ease, border-color var(--review-motion-fast) ease, background-color var(--review-motion-fast) ease, box-shadow var(--review-motion-fast) ease;
+  transition: color var(--reader-motion-fast) ease, border-color var(--reader-motion-fast) ease, background-color var(--reader-motion-fast) ease, box-shadow var(--reader-motion-fast) ease;
 }
 
-.review-context-palette button:hover:not(:disabled),
-.review-page-menu button:hover:not(:disabled) {
-  border-color: var(--review-border-strong);
-  background: var(--review-surface-interactive);
+.reader-context-palette button:hover:not(:disabled),
+.reader-page-menu button:hover:not(:disabled) {
+  border-color: var(--reader-border-strong);
+  background: var(--reader-surface-interactive);
 }
 
-.review-context-palette button:active:not(:disabled),
-.review-page-menu button:active:not(:disabled) {
-  border-color: var(--review-border-strong);
-  background: var(--review-surface-interactive);
+.reader-context-palette button:active:not(:disabled),
+.reader-page-menu button:active:not(:disabled) {
+  border-color: var(--reader-border-strong);
+  background: var(--reader-surface-interactive);
   box-shadow: inset 0 1px 2px rgb(24 26 23 / 16%);
 }
 
-.review-context-palette button .review-icon,
-.review-page-menu button .review-icon {
-  color: var(--review-ink-muted);
+.reader-context-palette button .reader-icon,
+.reader-page-menu button .reader-icon {
+  color: var(--reader-ink-muted);
 }
 
-.review-context-palette .review-action-button--icon,
-.review-page-menu .review-action-button--icon {
-  width: var(--review-control-default);
-  min-width: var(--review-control-default);
+.reader-context-palette .reader-action-button--icon,
+.reader-page-menu .reader-action-button--icon {
+  width: var(--reader-control-default);
+  min-width: var(--reader-control-default);
   justify-content: center;
   padding: 0;
 }
 
-.review-page-menu {
+.reader-page-menu {
   transform: translate(.35rem, .35rem);
 }
 
@@ -375,62 +375,62 @@
   display: none;
 }
 
-.review-layout[data-references-available="false"][data-bottom-overlay="false"] .review-overlay-frame__outer-bottom-fade {
+.reader-layout[data-references-available="false"][data-bottom-overlay="false"] .reader-overlay-frame__outer-bottom-fade {
   display: none;
 }
 
-.review-layout[data-workspace-presentation="bottom"][data-right-overlay="false"]
-  .review-overlay-frame__outer-right-fade {
+.reader-layout[data-workspace-presentation="bottom"][data-right-overlay="false"]
+  .reader-overlay-frame__outer-right-fade {
   display: none;
 }
 
-.review-layout[data-workspace-presentation="right"][data-right-overlay] .review-overlay-frame__right-backing,
-.review-layout[data-workspace-presentation="right"][data-right-overlay] .review-overlay-frame__right-fade,
-.review-layout[data-workspace-presentation="right"][data-right-overlay] .review-overlay-frame__outer-right-fade {
+.reader-layout[data-workspace-presentation="right"][data-right-overlay] .reader-overlay-frame__right-backing,
+.reader-layout[data-workspace-presentation="right"][data-right-overlay] .reader-overlay-frame__right-fade,
+.reader-layout[data-workspace-presentation="right"][data-right-overlay] .reader-overlay-frame__outer-right-fade {
   display: none;
 }
 
 /* The top fade shares the scrollport layer so it reaches both corners without
    being cut off to make room for native scrollbars. */
-.review-layout[data-scroll-top-fade="true"] .pdf-workspace__scrollbar-backing::before {
+.reader-layout[data-scroll-top-fade="true"] .pdf-workspace__scrollbar-backing::before {
   content: "";
   position: absolute;
   top: 0;
   left: 0;
   width: var(--scrollbar-backing-width, 0px);
-  height: var(--review-overlay-fade-size, 12px);
-  background: linear-gradient(var(--review-surface-canvas), transparent);
+  height: var(--reader-overlay-fade-size, 12px);
+  background: linear-gradient(var(--reader-surface-canvas), transparent);
 }
 
-.review-layout[data-scroll-top-fade="true"] .review-overlay-frame__top-fade {
+.reader-layout[data-scroll-top-fade="true"] .reader-overlay-frame__top-fade {
   display: none;
 }
 
 /* Paint open trays and scroll cues inside the scrollport so native
    scrollbars stay above the full edge, including the corners. */
-.review-layout[data-workspace-presentation="right"][data-right-overlay="true"] .pdf-workspace__scrollbar-backing,
-.review-layout[data-workspace-presentation="right"][data-right-overlay="false"][data-scroll-right-fade="true"] .pdf-workspace__scrollbar-backing {
-  --review-right-edge-paint: linear-gradient(to left, var(--review-surface-canvas) var(--review-right-backing-size, 0px), transparent calc(var(--review-right-backing-size, 0px) + var(--review-overlay-fade-size, 12px)));
+.reader-layout[data-workspace-presentation="right"][data-right-overlay="true"] .pdf-workspace__scrollbar-backing,
+.reader-layout[data-workspace-presentation="right"][data-right-overlay="false"][data-scroll-right-fade="true"] .pdf-workspace__scrollbar-backing {
+  --reader-right-edge-paint: linear-gradient(to left, var(--reader-surface-canvas) var(--reader-right-backing-size, 0px), transparent calc(var(--reader-right-backing-size, 0px) + var(--reader-overlay-fade-size, 12px)));
 }
 
-.review-layout[data-workspace-presentation="right"][data-right-overlay="true"] .pdf-workspace__scrollbar-backing {
-  --review-right-backing-size: calc(100% - var(--review-overlay-right-start));
+.reader-layout[data-workspace-presentation="right"][data-right-overlay="true"] .pdf-workspace__scrollbar-backing {
+  --reader-right-backing-size: calc(100% - var(--reader-overlay-right-start));
 }
 
-.review-layout[data-workspace-presentation="right"][data-right-overlay="true"] .pdf-workspace__scrollbar-backing::after,
-.review-layout[data-workspace-presentation="right"][data-right-overlay="false"]:where([data-scroll-right-fade="true"]) .pdf-workspace__scrollbar-backing::after {
+.reader-layout[data-workspace-presentation="right"][data-right-overlay="true"] .pdf-workspace__scrollbar-backing::after,
+.reader-layout[data-workspace-presentation="right"][data-right-overlay="false"]:where([data-scroll-right-fade="true"]) .pdf-workspace__scrollbar-backing::after {
   display: block;
-  background: var(--review-right-edge-paint);
+  background: var(--reader-right-edge-paint);
 }
 
-.review-layout[data-bottom-overlay="true"][data-workspace-presentation] .pdf-workspace__scrollbar-backing::after {
+.reader-layout[data-bottom-overlay="true"][data-workspace-presentation] .pdf-workspace__scrollbar-backing::after {
   display: block;
   background:
-    var(--review-right-edge-paint, linear-gradient(transparent, transparent)),
-    linear-gradient(to top, var(--review-surface-canvas) calc(100% - var(--review-overlay-bottom-start)), transparent calc(100% - var(--review-overlay-bottom-start) + var(--review-overlay-fade-size, 12px)));
+    var(--reader-right-edge-paint, linear-gradient(transparent, transparent)),
+    linear-gradient(to top, var(--reader-surface-canvas) calc(100% - var(--reader-overlay-bottom-start)), transparent calc(100% - var(--reader-overlay-bottom-start) + var(--reader-overlay-fade-size, 12px)));
 }
 
-.review-layout[data-bottom-overlay="true"] .review-overlay-frame__bottom-backing,
-.review-layout[data-bottom-overlay="true"] .review-overlay-frame__bottom-fade {
+.reader-layout[data-bottom-overlay="true"] .reader-overlay-frame__bottom-backing,
+.reader-layout[data-bottom-overlay="true"] .reader-overlay-frame__bottom-fade {
   display: none;
 }

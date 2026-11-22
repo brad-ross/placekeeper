@@ -685,7 +685,7 @@ export function RuntimeProductionReaderApp(props: {
   // real session afresh so its first render cannot reuse placeholder resources.
   // Later generations keep this instance and its predecessor reading capture.
   if (upgradeClosed) return <div role="status">This document was protected and closed for the upgrade. Reopen it in Placekeeper after installation finishes.</div>;
-  return <>{upgradeMessage && <div className="review-upgrade-status" role="status">{upgradeMessage}</div>}<div className="review-upgrade-content" inert={upgradeFrozen}><ProductionReaderApp
+  return <>{upgradeMessage && <div className="reader-upgrade-status" role="status">{upgradeMessage}</div>}<div className="reader-upgrade-content" inert={upgradeFrozen}><ProductionReaderApp
     key={loaded === undefined ? 'preparing-runtime' : 'active-runtime'}
     {...(props.onContextSnapshot === undefined ? {} : { onContextSnapshot: props.onContextSnapshot })}
     {...(props.agentBridge === undefined ? {} : { agentBridge: props.agentBridge })}

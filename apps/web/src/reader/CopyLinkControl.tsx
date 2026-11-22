@@ -98,7 +98,7 @@ function triggerClassName(
   presentation: NonNullable<CopyLinkControlProps['presentation']>,
 ): string {
   const surfaceClass = variant === 'chrome'
-    ? 'review-chrome__icon-control'
+    ? 'reader-chrome__icon-control'
     : variant === 'annotation'
       ? 'annotation-item__action'
       : `copy-link-control__trigger--${variant}`;

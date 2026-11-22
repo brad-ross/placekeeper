@@ -14,7 +14,7 @@ export function ElectronSourceEndpointDialog(props: {
         return () => { if (previous instanceof HTMLElement && previous.isConnected) previous.focus({ preventScroll: true }); };
     }, []);
     return <div className="save-destination-backdrop">
-        <form className="save-destination-dialog review-choice-dialog compact-editorial-modal" role="dialog" aria-modal="true" aria-labelledby={titleId} aria-describedby={descriptionId}
+        <form className="save-destination-dialog reader-choice-dialog compact-editorial-modal" role="dialog" aria-modal="true" aria-labelledby={titleId} aria-describedby={descriptionId}
             onSubmit={event => { event.preventDefault(); if (endpoint.trim()) props.onConfirm(endpoint); }}
             onKeyDown={event => {
                 if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); props.onCancel(); }
@@ -29,8 +29,8 @@ export function ElectronSourceEndpointDialog(props: {
                 </label>
             </div>
             <footer className="compact-editorial-modal__footer">
-                <button className="review-button" type="button" onClick={props.onCancel}>Cancel</button>
-                <button className="review-button review-button--primary" type="submit" disabled={!endpoint.trim()}>Choose Source Folder…</button>
+                <button className="reader-button" type="button" onClick={props.onCancel}>Cancel</button>
+                <button className="reader-button reader-button--primary" type="submit" disabled={!endpoint.trim()}>Choose Source Folder…</button>
             </footer>
         </form>
     </div>;

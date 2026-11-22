@@ -1,5 +1,5 @@
-.review-context-palette,
-.review-page-menu,
+.reader-context-palette,
+.reader-page-menu,
 .link-action-popover {
   gap: 2px;
   padding: 5px;
@@ -13,8 +13,8 @@
   padding: 0;
 }
 
-.review-context-palette button,
-.review-page-menu button,
+.reader-context-palette button,
+.reader-page-menu button,
 .link-action-popover__surface [role="menuitem"] {
   min-height: 32px;
   border: 0;
@@ -24,16 +24,16 @@
   font: 400 13px/1.2 var(--pk-font-ui);
 }
 
-.review-context-palette .review-action-button--icon,
-.review-page-menu .review-action-button--icon,
+.reader-context-palette .reader-action-button--icon,
+.reader-page-menu .reader-action-button--icon,
 .link-action-popover__surface [role="menuitem"] {
   width: 32px;
   min-width: 32px;
   height: 32px;
 }
 
-.review-context-palette button:hover:not(:disabled),
-.review-page-menu button:hover:not(:disabled),
+.reader-context-palette button:hover:not(:disabled),
+.reader-page-menu button:hover:not(:disabled),
 .link-action-popover__surface [role="menuitem"]:hover,
 .link-action-popover__surface [role="menuitem"]:focus-visible {
   border-color: transparent;
@@ -203,20 +203,20 @@
 .codex-context-status:hover { background: var(--pk-hover); }
 .codex-context-status:focus-visible { box-shadow: none; }
 
-.review-chrome__context.review-chrome__context--document {
+.reader-chrome__context.reader-chrome__context--document {
   display: block;
   flex: none;
 }
 
 .document-context-button { padding: 0; }
-.document-context-button .review-icon { color: var(--codex-context-accent); }
+.document-context-button .reader-icon { color: var(--codex-context-accent); }
 .document-context-button[data-document-context="idle"] { --codex-context-accent: var(--pk-muted); }
 .document-context-button:not([aria-disabled="true"]) { cursor: pointer; }
 .document-context-button[data-document-context="publishing"] { cursor: progress; }
 
 @media (prefers-reduced-motion: reduce) {
   .document-context-button,
-  .document-context-button.codex-context-status--connecting .review-icon {
+  .document-context-button.codex-context-status--connecting .reader-icon {
     animation: none;
     transition: none;
   }
@@ -322,7 +322,7 @@
   background: var(--pk-raised);
   box-shadow: var(--pk-shadow-raised);
 }
-.review-toast,
+.reader-toast,
 .pdf-workspace__status {
   gap: 7px;
   padding: 10px 14px;
@@ -332,7 +332,7 @@
   box-shadow: var(--pk-shadow-raised);
   font: 400 12px/1.5 var(--pk-font-ui);
 }
-.review-toast--error,
+.reader-toast--error,
 .pdf-workspace__status { color: #843b33; background: #faf0ee; }
 @media (pointer: coarse) {
   .workspace-error button,

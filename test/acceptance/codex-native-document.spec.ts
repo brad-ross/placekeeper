@@ -66,7 +66,7 @@ test('test MCP bridge retains nested references and returns to the main reading 
     await page.keyboard.press('Enter');
     await page.getByRole('menuitem', { name: /Open in References/u }).click();
     await expect(page.locator('[data-reference-tab]')).toHaveCount(2);
-    await page.locator('#review-workspace').getByRole('button', { name: 'Hide References', exact: true }).click();
+    await page.locator('#reader-workspace').getByRole('button', { name: 'Hide References', exact: true }).click();
     await expect(main).toBeVisible();
     expect(await main.locator('.pdf-workspace__viewport').evaluate(element => ({ top: element.scrollTop, left: element.scrollLeft }))).toEqual(before);
   } finally { await bridge.dispose(); }
@@ -93,7 +93,7 @@ for (const deferRemovalReply of [false, true]) test('test MCP bridge production 
     const id = bridge.broker.state(bridge.sessionId)!.items[0]!.id;
     await page.getByRole('button', { name: 'Show Workspace' }).click();
     await page.getByRole('tab', { name: 'Annotations', exact: true }).click();
-    const row = page.locator(`[data-review-item="${id}"]`);
+    const row = page.locator(`[data-annotation-item="${id}"]`);
     await row.hover(); await row.getByRole('button', { name: 'Edit Page Note annotation on page 1' }).click();
     const edit = page.getByRole('region', { name: /^Edit Page Note/u });
     await edit.getByRole('textbox', { name: 'Comment', exact: true }).fill('Edited through production UI');
@@ -187,7 +187,7 @@ test('test MCP bridge imported comment inspection and Cancel leave original byte
     await page.getByRole('button', { name: 'Show Workspace' }).click();
     await page.getByRole('tab', { name: 'Annotations', exact: true }).click();
     for (const item of items) {
-      const row = page.locator(`[data-review-item="${item.id}"]`);
+      const row = page.locator(`[data-annotation-item="${item.id}"]`);
       await row.hover(); await row.getByRole('button', { name: /^Edit .* annotation on page 1$/u }).click();
       const composer = page.getByRole('region', { name: /^Edit /u });
       await expect(composer.getByRole('textbox', { name: 'Comment (optional)', exact: true })).toHaveValue(String(item.payload.comment));

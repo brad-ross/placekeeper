@@ -73,8 +73,8 @@ export function ContextNoteComposer({ kind, excerpt, note, onNoteChange, onCance
         </label>
         {failed ? <p role="alert">Could not add context to chat. Try again.</p> : null}
         <div className="comment-composer__actions">
-          <button type="button" className="review-button review-button--secondary" disabled={pending} onClick={onCancel}>Cancel</button>
-          <button type="submit" className="review-button review-button--primary" disabled={pending}>
+          <button type="button" className="reader-button reader-button--secondary" disabled={pending} onClick={onCancel}>Cancel</button>
+          <button type="submit" className="reader-button reader-button--primary" disabled={pending}>
             {pending ? 'Adding…' : 'Add to chat'}
           </button>
         </div>

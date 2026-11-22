@@ -7,7 +7,7 @@ export function ExternalLinkRecovery({ url, onDismiss }: {
   readonly onDismiss: () => void;
 }) {
   const [copyStatus, setCopyStatus] = useState<'idle' | 'copied' | 'failed'>('idle');
-  return <aside className="external-link-recovery" data-review-contextual-ui aria-label="Web link recovery">
+  return <aside className="external-link-recovery" data-reader-contextual-ui aria-label="Web link recovery">
     <div className="external-link-recovery__heading">
       <p role="alert"><ReaderIcon name="alert" size={15} />Couldn’t open this link</p>
       <ReaderTooltipButton type="button" className="external-link-recovery__button" label="Dismiss link error" onClick={onDismiss}>

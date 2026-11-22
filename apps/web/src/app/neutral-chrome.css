@@ -1,6 +1,6 @@
 /* Stable neutral override entrypoint; keep this order after reader-layout.css.
  * Shared selectors and late interaction refinements deliberately stay in source order.
- * --pk-* globals and scoped --review-* tokens retain separate ownership. */
+ * --pk-* globals and scoped --reader-* tokens retain separate ownership. */
 @import './neutral-controls.css';
 @import './neutral-editor-surfaces.css';
 @import './neutral-workspace-navigation.css';

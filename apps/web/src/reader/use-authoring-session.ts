@@ -23,7 +23,7 @@ export function referenceAnnotationTargetSelector(tabIdentity: string, documentI
 
 /** Selects visible geometry for both projected owned marks and owned native PDF fragments. */
 export function ownedAnnotationFragmentSelector(documentId: string): string {
-  return `:is([data-owned-mark], [data-source-reader-mark], [data-owned-native-geometry])[data-review-id="${cssAttributeValue(documentId)}"]`;
+  return `:is([data-owned-mark], [data-source-reader-mark], [data-owned-native-geometry])[data-annotation-id="${cssAttributeValue(documentId)}"]`;
 }
 
 export function referenceAnnotationScrollportSelector(tabIdentity: string): string {
@@ -616,7 +616,7 @@ export function useAuthoringSession({
           '[data-reference-tab][aria-selected="true"], [data-reference-pdf-viewport] [data-page-index]',
         );
         const currentControl = shell.querySelector<HTMLElement>(
-          '.review-workspace:not([aria-hidden="true"]) [role="tab"][aria-selected="true"], [role="application"]',
+          '.reader-workspace:not([aria-hidden="true"]) [role="tab"][aria-selected="true"], [role="application"]',
         );
         (origin ?? currentReference ?? currentControl)?.focus({ preventScroll: true });
       }));
@@ -677,8 +677,8 @@ export function useAuthoringSession({
     const originTrigger = session.origin.trigger;
     const restoredItem = session.workspace.activeItemId === undefined
       ? null
-      : [...shell.querySelectorAll<HTMLElement>('[data-review-item]')]
-        .find((element) => element.dataset.reviewItem === session.workspace.activeItemId);
+      : [...shell.querySelectorAll<HTMLElement>('[data-annotation-item]')]
+        .find((element) => element.dataset.annotationItem === session.workspace.activeItemId);
     const restoredPeek = session.workspace.activeItemId === undefined ? null
       : [...shell.querySelectorAll<HTMLElement>('[data-annotation-peek]')]
         .find((element) => element.dataset.annotationPeek === session.workspace.activeItemId);

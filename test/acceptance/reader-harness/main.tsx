@@ -945,7 +945,7 @@ function Harness() {
               const mark = document.createElement('span');
               mark.dataset.harnessAuthoringPreview = '';
               mark.dataset.ownedMark = annotation.kind;
-              mark.dataset.reviewId = annotation.reviewItemId ?? annotation.id;
+              mark.dataset.annotationId = annotation.reviewItemId ?? annotation.id;
               mark.dataset.previewPage = String(annotation.pageIndex);
               mark.dataset.previewSegment = String(index);
               layer?.append(mark);
@@ -1224,7 +1224,7 @@ function Harness() {
         <div contentEditable suppressContentEditableWarning role="textbox" aria-label="Contenteditable editor">
           contenteditable text
         </div>
-        <div data-review-editor>
+        <div data-reader-editor>
           <div contentEditable suppressContentEditableWarning role="textbox" aria-label="Review editor">
             review editor text
           </div>
@@ -1315,13 +1315,13 @@ function Harness() {
         ? createPortal(
           <div
             data-visual-reference-document
-            style={{ height: '100%', overflow: 'auto', padding: '28px', background: 'var(--review-surface-subtle)' }}
+            style={{ height: '100%', overflow: 'auto', padding: '28px', background: 'var(--reader-surface-subtle)' }}
           >
             <article
               aria-label="Rendered reference PDF page"
-              style={{ boxSizing: 'border-box', width: 'min(520px, 100%)', minHeight: 620, margin: '0 auto', padding: '52px 56px', background: 'var(--review-surface-panel)', border: '1px solid var(--review-border-subtle)', boxShadow: 'var(--review-shadow-page)', color: 'var(--review-ink-primary)', fontFamily: 'Georgia, Times New Roman, serif' }}
+              style={{ boxSizing: 'border-box', width: 'min(520px, 100%)', minHeight: 620, margin: '0 auto', padding: '52px 56px', background: 'var(--reader-surface-panel)', border: '1px solid var(--reader-border-subtle)', boxShadow: 'var(--reader-shadow-page)', color: 'var(--reader-ink-primary)', fontFamily: 'Georgia, Times New Roman, serif' }}
             >
-              <p style={{ margin: 0, font: '600 10px/1.4 ui-sans-serif, system-ui', letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--review-ink-muted)' }}>Reference · Appendix</p>
+              <p style={{ margin: 0, font: '600 10px/1.4 ui-sans-serif, system-ui', letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--reader-ink-muted)' }}>Reference · Appendix</p>
               <h2 style={{ margin: '18px 0 16px', fontSize: 22 }}>Lemma A.3</h2>
               <p style={{ fontSize: 14, lineHeight: 1.7 }}>The local equilibrium is unique whenever the response map is a contraction on the maintained neighborhood.</p>
               <p style={{ fontSize: 14, lineHeight: 1.7 }}>The proof applies the implicit function theorem after conditioning on the market-level innovation.</p>
@@ -1350,7 +1350,7 @@ function Harness() {
       ) : null}
       {composerPreview ? (
         <div
-          className="composer-preview-host review-drawer-host"
+          className="composer-preview-host reader-drawer-host"
           data-composer-preview-host
           inert={visualSaveDestinationOpen}
           aria-hidden={visualSaveDestinationOpen ? 'true' : undefined}

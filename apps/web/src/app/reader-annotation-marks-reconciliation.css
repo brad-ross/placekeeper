@@ -78,7 +78,7 @@
   color: var(--pdf-note-ink);
   background: var(--pdf-note-fill);
 }
-[data-pdf-mark-style="pageNote"] > .review-icon {
+[data-pdf-mark-style="pageNote"] > .reader-icon {
   width: 70%;
   height: 70%;
   max-width: 18px;
@@ -154,8 +154,8 @@
   gap: 10px;
   min-width: 0;
   padding: 13px;
-  border-bottom: 1px solid var(--review-border-subtle);
-  background: var(--review-surface-panel);
+  border-bottom: 1px solid var(--reader-border-subtle);
+  background: var(--reader-surface-panel);
 }
 
 .reconciliation-workspace--detail.full-annotation-reader {
@@ -179,9 +179,9 @@
   align-items: center;
   justify-content: center;
   padding: 3px 7px;
-  border-radius: var(--review-radius-round);
-  color: color-mix(in srgb, var(--review-warning) 58%, var(--review-ink-primary));
-  background: color-mix(in srgb, var(--review-warning) 20%, var(--review-surface-panel));
+  border-radius: var(--reader-radius-round);
+  color: color-mix(in srgb, var(--reader-warning) 58%, var(--reader-ink-primary));
+  background: color-mix(in srgb, var(--reader-warning) 20%, var(--reader-surface-panel));
   font-size: 11px;
   font-weight: 500;
   line-height: 1.25;
@@ -189,8 +189,8 @@
 }
 
 .reconciliation-workspace__header-spacer {
-  width: var(--review-control-compact);
-  height: var(--review-control-compact);
+  width: var(--reader-control-compact);
+  height: var(--reader-control-compact);
 }
 
 .reconciliation-workspace__header {
@@ -212,7 +212,7 @@
 .reconciliation-workspace__message,
 .reconciliation-workspace__instruction {
   margin: 0;
-  color: var(--review-ink-muted);
+  color: var(--reader-ink-muted);
   font-size: 11px;
   line-height: 1.45;
 }
@@ -220,9 +220,9 @@
 .reconciliation-workspace__notice,
 .reconciliation-workspace__message {
   padding: 7px 9px;
-  border: 1px solid var(--review-border-subtle);
-  border-radius: var(--review-radius-control);
-  background: var(--review-surface-subtle);
+  border: 1px solid var(--reader-border-subtle);
+  border-radius: var(--reader-radius-control);
+  background: var(--reader-surface-subtle);
 }
 
 .reconciliation-workspace__list {
@@ -243,17 +243,17 @@
 }
 
 .reconciliation-workspace__discard,
-.review-button.reconciliation-workspace__destructive,
-#root[data-production-root="true"] .review-button.reconciliation-workspace__destructive {
-  color: var(--review-danger, #9a3d34);
+.reader-button.reconciliation-workspace__destructive,
+#root[data-production-root="true"] .reader-button.reconciliation-workspace__destructive {
+  color: var(--reader-danger, #9a3d34);
 }
 
 .reconciliation-workspace__discard:hover,
-.review-button.reconciliation-workspace__destructive:hover:not(:disabled),
-#root[data-production-root="true"] .review-button.reconciliation-workspace__destructive:hover:not(:disabled) {
-  border-color: color-mix(in srgb, var(--review-danger) 55%, var(--review-border-strong));
-  color: var(--review-danger, #9a3d34);
-  background: color-mix(in srgb, var(--review-danger) 8%, var(--review-surface-panel));
+.reader-button.reconciliation-workspace__destructive:hover:not(:disabled),
+#root[data-production-root="true"] .reader-button.reconciliation-workspace__destructive:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--reader-danger) 55%, var(--reader-border-strong));
+  color: var(--reader-danger, #9a3d34);
+  background: color-mix(in srgb, var(--reader-danger) 8%, var(--reader-surface-panel));
 }
 
 .reconciliation-workspace__resolution {
@@ -279,10 +279,10 @@
   align-items: center;
   justify-content: flex-end;
   flex-wrap: wrap;
-  gap: var(--review-action-group-gap);
+  gap: var(--reader-action-group-gap);
 }
 
-.reconciliation-workspace__editor-actions .review-button {
+.reconciliation-workspace__editor-actions .reader-button {
   flex: none;
 }
 

@@ -61,12 +61,12 @@ export function WorkspaceModeStrip<Mode extends WorkspaceMode>({
   const dockAttached = selectedMode === 'references' && dockAction !== undefined;
 
   return (
-    <div className={`review-workspace__activity-strip${
-      dockAttached ? ' review-workspace__activity-strip--compound' : ''
-    }${quietSingleMode ? ' review-workspace__activity-strip--title' : ''
+    <div className={`reader-workspace__activity-strip${
+      dockAttached ? ' reader-workspace__activity-strip--compound' : ''
+    }${quietSingleMode ? ' reader-workspace__activity-strip--title' : ''
     }`}>
       <div
-        className="review-workspace__tabs"
+        className="reader-workspace__tabs"
         role="tablist"
         aria-label="Workspace modes"
         data-workspace-mode-count={modes.length}
@@ -79,8 +79,8 @@ export function WorkspaceModeStrip<Mode extends WorkspaceMode>({
           return (
             <span
               key={mode}
-              className={`review-workspace__mode-segment${
-                compound ? ' review-workspace__mode-segment--compound' : ''
+              className={`reader-workspace__mode-segment${
+                compound ? ' reader-workspace__mode-segment--compound' : ''
               }`}
               data-workspace-mode-selected={selected ? 'true' : 'false'}
               role="presentation"
@@ -89,7 +89,7 @@ export function WorkspaceModeStrip<Mode extends WorkspaceMode>({
                 label={presentation.label}
                 ref={(element) => onModeRef(mode, element)}
                 id={`workspace-mode-${mode}`}
-                className="review-workspace__mode-tab"
+                className="reader-workspace__mode-tab"
                 type="button"
                 role="tab"
                 data-workspace-mode={mode}
@@ -118,7 +118,7 @@ export function WorkspaceModeStrip<Mode extends WorkspaceMode>({
                 <ReaderIcon name={presentation.icon} />
                 {selected ? (
                   <span
-                    className="review-workspace__mode-label"
+                    className="reader-workspace__mode-label"
                     data-workspace-mode-label={mode}
                     aria-hidden="true"
                   >
@@ -134,7 +134,7 @@ export function WorkspaceModeStrip<Mode extends WorkspaceMode>({
         <ReaderTooltipButton
           label={`Move References to ${dockAction.destination}`}
           type="button"
-          className="review-workspace__move review-workspace__move--activity review-workspace__move--header-action"
+          className="reader-workspace__move reader-workspace__move--activity reader-workspace__move--header-action"
           data-reference-move={dockAction.destination}
           disabled={dockAction.disabled}
           aria-label={`Move References to ${dockAction.destination}`}
