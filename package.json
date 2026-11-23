@@ -28,7 +28,7 @@
     "test": "node --import tsx scripts/testing/run-suite.ts test",
     "test:codex-native": "node --import tsx scripts/testing/run-suite.ts test:codex-native",
     "test:pdf-writer": "node --import tsx scripts/testing/run-suite.ts test:pdf-writer",
-    "test:reviewed-pdf": "node --import tsx scripts/testing/run-suite.ts test:reviewed-pdf",
+    "test:annotated-pdf": "node --import tsx scripts/testing/run-suite.ts test:annotated-pdf",
     "test:pdf-viewer": "node --import tsx scripts/testing/run-suite.ts test:pdf-viewer",
     "test:static:artifact": "node --import tsx scripts/testing/run-suite.ts test:static:artifact",
     "test:static:secondary-full": "node --import tsx scripts/testing/run-suite.ts test:static:secondary-full",

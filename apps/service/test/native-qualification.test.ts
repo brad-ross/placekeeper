@@ -1,6 +1,7 @@
 import { constants, readSync, openSync, mkdirSync, chmodSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createHmac } from "node:crypto";
 import { afterEach, expect, it, vi } from "vitest";
 import { NativeQualificationObserver } from "../src/codex/native-qualification.js";
 import { TaskBindingRegistry } from "../src/context/task-binding-registry.js";
@@ -28,11 +29,19 @@ it("is disabled by absence, invalid mode/schema, symlink and expiry", () => {
 it("stores bounded closed records with domain-separated correlations and fresh private nonces", () => {
   const f = fixture(); f.write(); const first = f.observer.invocation()!, second = f.observer.invocation()!;
   expect(first.invocationNonce).not.toEqual(second.invocationNonce); expect(Object.keys(first).sort()).toEqual(["expiresAt", "invocationNonce", "runId"]);
-  for (let i = 0; i < 400; i++) f.observer.record("claim-accepted", { taskSessionId: "private-task", reviewSessionId: "private-task", generation: 2, capability: "secret", arbitrary: "secret" } as never);
+  for (let i = 0; i < 400; i++) f.observer.record("claim-accepted", { taskSessionId: "private-task", documentSessionId: "private-task", generation: 2, capability: "secret", arbitrary: "secret" } as never);
   const records = f.records(); expect(records.length).toBeGreaterThan(0); expect(records.length).toBeLessThanOrEqual(256);
   expect(records.find(r => r.event === "claim-accepted").taskHash).not.toEqual(records.find(r => r.event === "claim-accepted").reviewHash); expect(records.map(r => r.sequence)).toEqual(records.map((_, i) => i + 1));
   expect(JSON.stringify(records)).not.toMatch(/private-task|secret|capability|arbitrary/);
   expect(Buffer.byteLength(records.map(r => JSON.stringify(r) + "\n").join(""))).toBeLessThanOrEqual(32768);
+});
+it("keeps the frozen reviewHash record key and review HMAC domain for document sessions", () => {
+  const f = fixture(); f.write();
+  f.observer.record("claim-arrived", { taskSessionId: "task-key", documentSessionId: "document-key", generation: 1 });
+  const record = f.records().find(r => r.event === "claim-arrived");
+  const expected = createHmac("sha256", f.descriptor.salt).update("review\0document-key").digest("hex");
+  expect(record.reviewHash).toBe(expected);
+  expect(Object.keys(record).filter(key => /document/iu.test(key))).toEqual([]);
 });
 it("drops failed sinks and invalid or excessive fields without throwing", () => {
   const f = fixture(); f.write(); writeFileSync(join(f.root, "native-qualification"), "occupied");
@@ -50,9 +59,9 @@ it("limits a run to 64 reserved writers and rejects symlink directories and exce
 
 it("records both simultaneous native ownership conflicts from the deciding state without changing claims", () => {
   const f = fixture(); f.write(); const registry = new TaskBindingRegistry({ qualification: f.observer });
-  const claim = (taskSessionId: string, reviewSessionId: string, browserCapability: string, generation = 1) => {
-    const bindProof = registry.issueBindProof({ reviewSessionId, documentGeneration: 1, browserCapability, native: true });
-    return registry.claimNative({ taskSessionId, reviewSessionId, bindProof, documentGeneration: generation });
+  const claim = (taskSessionId: string, documentSessionId: string, browserCapability: string, generation = 1) => {
+    const bindProof = registry.issueBindProof({ documentSessionId: documentSessionId, documentGeneration: 1, browserCapability, native: true });
+    return registry.claimNative({ taskSessionId, documentSessionId: documentSessionId, bindProof, documentGeneration: generation });
   };
   expect(claim("task-a", "review-a", "capability-a")).toMatchObject({ status: "pending" });
   expect(claim("task-b", "review-b", "capability-b")).toMatchObject({ status: "pending" });
@@ -60,7 +69,7 @@ it("records both simultaneous native ownership conflicts from the deciding state
   const denials = f.records().map(record => record.denial);
   expect(denials).toContain("task-associated-other-review"); expect(denials).toContain("review-owned-other-task");
   expect(claim("task-c", "review-c", "capability-generation", 2)).toEqual({ status: "denied" });
-  expect(registry.claimNative({ taskSessionId: "task-c", reviewSessionId: "review-c", bindProof: "missing-proof", documentGeneration: 1 })).toEqual({ status: "denied" });
+  expect(registry.claimNative({ taskSessionId: "task-c", documentSessionId: "review-c", bindProof: "missing-proof", documentGeneration: 1 })).toEqual({ status: "denied" });
   expect(f.records().map(record => record.denial)).toContain("generation-mismatch");
   expect(f.records().map(record => record.denial)).toContain("proof-missing-or-expired");
   expect(registry.activityCount()).toBe(2);
@@ -297,7 +306,7 @@ it("old-attempt definite prior consumption stops repeated opens across retained 
 it("only the genuine async display hook receives the readiness scheduling host budget", () => {
   const config = JSON.parse(readFileSync("integrations/codex-plugin/hooks/hooks.json", "utf8"));
   const post = config.hooks.PostToolUse;
-  const display = post.find((entry: { matcher: string }) => entry.matcher === "^mcp__placekeeper__display_review$").hooks[0];
+  const display = post.find((entry: { matcher: string }) => entry.matcher === "^mcp__placekeeper__display_(document|review)$").hooks[0];
   expect(display.async).toBe(true); expect(display.timeout).toBe(55);
   expect(post.find((entry: { matcher: string }) => entry.matcher === "^Bash$").hooks[0].timeout).toBe(8);
   expect(config.hooks.UserPromptSubmit[0].hooks[0].timeout).toBe(8);

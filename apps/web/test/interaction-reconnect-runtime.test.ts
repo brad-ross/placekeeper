@@ -1,12 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { ReviewInteractions } from '../../service/src/sessions/review-interactions.js';
-import { createReviewState } from '../../../packages/core/src/review-model.js';
+import { DocumentInteractions } from '../../service/src/sessions/document-interactions.js';
+import { createDocumentState } from '../../../packages/core/src/document-model.js';
 import { createBrowserHostRuntime } from '../src/host/browser-runtime.js';
 import {
   attachmentOrderedInteractionTransport,
-  beginReviewInteraction,
-} from '../src/review/authoring-session.js';
+  beginDocumentInteraction,
+} from '../src/reader/authoring-session.js';
 
 afterEach(() => {
   vi.useRealTimers();
@@ -17,12 +17,12 @@ describe('browser interaction reconnect barrier', () => {
   it('rehydrates canonical state and reacquires an actively typed editor before refresh continues', async () => {
     vi.useFakeTimers();
     const sessionId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
-    const state = createReviewState({
+    const state = createDocumentState({
       sessionId,
       source: { fileId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', digest: 'a'.repeat(64), byteLength: 100 },
       documentGeneration: 4,
     });
-    const broker = new ReviewInteractions({ currentGeneration: () => 4 });
+    const broker = new DocumentInteractions({ currentGeneration: () => 4 });
     let attachment = broker.register(sessionId, 'browser-view');
     const fetch = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       const path = String(input);
@@ -58,7 +58,7 @@ describe('browser interaction reconnect barrier', () => {
           ...authenticated,
           outcome: body.outcome as 'applied' | 'discarded',
           draftId: body.draftId as string,
-          reviewRevision: 1,
+          annotationRevision: 1,
         }));
       }
       throw new Error(`Unexpected request: ${path}`);
@@ -106,7 +106,7 @@ describe('browser interaction reconnect barrier', () => {
       releaseInteraction: runtime.releaseInteraction,
       acknowledgeInteraction: runtime.acknowledgeInteraction,
     });
-    const editor = await beginReviewInteraction(
+    const editor = await beginDocumentInteraction(
       lifecycle, 4, 'actively-typed-editor', 1, '00000000-0000-4000-8000-000000000445',
     );
     expect(broker.held(sessionId)).toBe(true);

@@ -3,9 +3,9 @@ import { open, readFile, realpath } from "node:fs/promises";
 import { isAbsolute } from "node:path";
 
 import { assessPdfRewriteEligibility } from "../../../../packages/pdf-backends/src/embedpdf-adapter.js";
-import { readEditableReviewItems } from "../../../../packages/pdf-backends/src/embedpdf-adapter.js";
+import { readEditableAnnotations } from "../../../../packages/pdf-backends/src/embedpdf-adapter.js";
 import type { PdfRewriteEligibility } from "../../../../packages/core/src/pdf-writer.js";
-import type { ReviewItem } from "../../../../packages/core/src/review-model.js";
+import type { Annotation } from "../../../../packages/core/src/document-model.js";
 import { MAX_CHROME_PDF_BYTES } from "./chrome-pdf-limits.js";
 
 const MAX_VALIDATION_OUTPUT_BYTES = 1_024;
@@ -26,7 +26,7 @@ export interface PdfValidationSubprocessOptions {
 export interface ChromePdfInspection {
   readonly nativeAnnotationsImported?: boolean;
   readonly rewriteEligibility: PdfRewriteEligibility;
-  readonly importedItems: readonly ReviewItem[];
+  readonly importedItems: readonly Annotation[];
 }
 
 /** Runs the existing backend's structural open in the isolated worker. */
@@ -68,10 +68,10 @@ export async function inspectPdfFile(path: string): Promise<ChromePdfInspection>
   }
   const bytes = new Uint8Array(await readFile(canonical));
   const rewriteEligibility = await assessPdfRewriteEligibility(bytes);
-  let importedItems: readonly ReviewItem[] = [];
+  let importedItems: readonly Annotation[] = [];
   let nativeAnnotationsImported = false;
   try {
-    importedItems = await readEditableReviewItems(bytes);
+    importedItems = await readEditableAnnotations(bytes);
     nativeAnnotationsImported = true;
   } catch (error) {
     if ((error as { readonly code?: unknown }).code === "invalid-portable-annotation") {
@@ -201,7 +201,7 @@ export async function inspectPdfInSubprocess(
   ) throw new Error("invalid-pdf");
   return {
     rewriteEligibility: eligibility,
-    importedItems: record.importedItems as readonly ReviewItem[],
+    importedItems: record.importedItems as readonly Annotation[],
     nativeAnnotationsImported: record.nativeAnnotationsImported === true,
   };
 }

@@ -72,8 +72,8 @@ describe("local document observer", () => {
     brokers.push(broker);
     const observed: Array<{ sessionId: string; changed: boolean }> = [];
     broker.onLocalDocumentObservation((event) => observed.push(event));
-    const ordinary = await broker.openReview({ pdfPath: ordinaryPath, surface: "browser" });
-    const generated = await broker.openReview({
+    const ordinary = await broker.openDocument({ pdfPath: ordinaryPath, surface: "browser" });
+    const generated = await broker.openDocument({
       pdfPath: generatedPath,
       surface: "browser",
       workflowMode: "generated-output",
@@ -344,7 +344,7 @@ describe("local document observer", () => {
     brokers.push(broker);
     const observations: Array<{ reason: string; changed: boolean }> = [];
     broker.onLocalDocumentObservation(({ reason, changed }) => observations.push({ reason, changed }));
-    const opened = await broker.openReview({
+    const opened = await broker.openDocument({
       pdfPath: sourcePath,
       surface: "browser",
       workflowMode: "generated-output",

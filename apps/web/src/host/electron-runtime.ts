@@ -1,12 +1,12 @@
 import { externalWebUrl } from '../../../../packages/core/src/external-web-url.js';
 import type { ElectronShellBridge, ElectronShellIdentity } from '../../../../packages/core/src/electron-shell-protocol.js';
 import { decodePlacekeeperLink, type PlacekeeperLinkLocation } from '../../../../packages/core/src/placekeeper-link.js';
-import { MemoryReviewLocationHistory } from '../review/review-location-history.js';
+import { MemoryDocumentLocationHistory } from '../reader/document-location-history.js';
 import { createRpcHostRuntime } from './vscode-runtime.js';
 export function createElectronHostRuntime(bridge: ElectronShellBridge, identity: ElectronShellIdentity) {
     const listeners = new Set<(value: unknown) => void>();
     let disposed = false;
-    let history: MemoryReviewLocationHistory | undefined;
+    let history: MemoryDocumentLocationHistory | undefined;
     let generation: number | undefined;
     const runtime = createRpcHostRuntime({ runtimeId: identity.windowId,
         postMessage(message) { if ((message as {
@@ -23,7 +23,7 @@ export function createElectronHostRuntime(bridge: ElectronShellBridge, identity:
         async bootstrap(signal?: AbortSignal) {
             const snapshot = await runtime.bootstrap(signal);
             if (disposed) throw new Error('Retired reader');
-            history = snapshot.locationHistory instanceof MemoryReviewLocationHistory ? snapshot.locationHistory : undefined;
+            history = snapshot.locationHistory instanceof MemoryDocumentLocationHistory ? snapshot.locationHistory : undefined;
             generation = snapshot.generation;
             return snapshot;
         },

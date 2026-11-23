@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 import { VersionedWebviewBridge } from '../src/webview-bridge.js';
-import { REVIEW_RUNTIME_PROTOCOL, REVIEW_RUNTIME_VERSION } from '../../../packages/core/src/review-runtime-protocol.js';
+import { DOCUMENT_RUNTIME_PROTOCOL, DOCUMENT_RUNTIME_VERSION } from '../../../packages/core/src/document-runtime-protocol.js';
 
 const identity = { panelId: 'panel_1234567890123456', sessionId: 'session_1234567890123456', generation: 2, revision: 3 };
-const request = { protocol: REVIEW_RUNTIME_PROTOCOL, version: REVIEW_RUNTIME_VERSION, kind: 'external-link-request', ...identity, requestId: 'request_1234567890123456', url: 'https://example.com/a?q=b#c' };
+const request = { protocol: DOCUMENT_RUNTIME_PROTOCOL, version: DOCUMENT_RUNTIME_VERSION, kind: 'external-link-request', ...identity, requestId: 'request_1234567890123456', url: 'https://example.com/a?q=b#c' };
 function harness(open = vi.fn(async (_url: string) => {})) {
   const post = vi.fn();
   const invoke = vi.fn();
@@ -17,7 +17,7 @@ describe('trusted VS Code external links', () => {
     await h.bridge.receive(request);
     expect(h.open).toHaveBeenCalledExactlyOnceWith(request.url);
     expect(h.invoke).not.toHaveBeenCalled();
-    expect(h.post).toHaveBeenCalledWith({ protocol: REVIEW_RUNTIME_PROTOCOL, version: REVIEW_RUNTIME_VERSION, kind: 'external-link-response', ...identity, requestId: request.requestId, ok: true });
+    expect(h.post).toHaveBeenCalledWith({ protocol: DOCUMENT_RUNTIME_PROTOCOL, version: DOCUMENT_RUNTIME_VERSION, kind: 'external-link-response', ...identity, requestId: request.requestId, ok: true });
   });
   it.each([{ panelId: 'wrong' }, { generation: 1 }, { revision: 1 }, { sessionId: 'wrong' }, { version: 1 }])('ignores stale or foreign requests %j', async change => {
     const h = harness(); await h.bridge.receive({ ...request, ...change }); expect(h.open).not.toHaveBeenCalled();
@@ -41,7 +41,7 @@ describe('trusted VS Code external links', () => {
     let finish!: () => void;
     const h = harness(vi.fn(() => new Promise<void>(resolve => { finish = resolve; })));
     const pending = h.bridge.receive(request);
-    await h.bridge.receive({ protocol: REVIEW_RUNTIME_PROTOCOL, version: REVIEW_RUNTIME_VERSION,
+    await h.bridge.receive({ protocol: DOCUMENT_RUNTIME_PROTOCOL, version: DOCUMENT_RUNTIME_VERSION,
       kind: 'cancel', panelId: identity.panelId, requestId: request.requestId });
     finish(); await pending;
     expect(h.post).not.toHaveBeenCalled();

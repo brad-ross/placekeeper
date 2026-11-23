@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readdir, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
@@ -35,7 +35,7 @@ async function fixture() {
 
 const ticket = {
   taskSessionId: "task-a",
-  reviewSessionId: "review-a",
+  documentSessionId: "review-a",
   browserToken: "browser-secret-a",
   canonicalSourcePath: "/private/tmp/paper.pdf",
   sourceDigest: "a".repeat(64),
@@ -256,7 +256,7 @@ describe("native reconnect ticket purpose and peer scope", () => {
     expect(second).toBeDefined();
     expect(await store.matchNative({ ...native, attemptId: "wrong_attempt", ticket: "native-a" })).toBeUndefined();
     expect(await store.matchNative({ ...native, documentGeneration: 2, ticket: "native-a" })).toBeUndefined();
-    await store.revokeSession(ticket.reviewSessionId);
+    await store.revokeSession(ticket.documentSessionId);
     expect(await store.consumeForTask(first!, ticket.taskSessionId)).toBe(false);
     expect(await store.consumeForTask(second!, ticket.taskSessionId)).toBe(false);
   });
@@ -268,5 +268,47 @@ describe("native reconnect ticket purpose and peer scope", () => {
     advance(100);
     await store.issue({ ...ticket, browserToken: "live-native", native: { ...native, runtimeId: "runtime_b" } });
     expect((await readdir(store.directory)).filter((name) => name.endsWith(".json"))).toHaveLength(1);
+  });
+});
+
+describe("restart reconnect ticket storage compatibility", () => {
+  it("keeps the legacy reviewSessionHash key on disk and reads tickets written with it", async () => {
+    const { store } = await fixture();
+    await store.issue(ticket);
+    const path = join(store.directory, `${digestSecretHex(ticket.browserToken)}.json`);
+    const written = JSON.parse(await readFile(path, "utf8")) as { checksum: string; payload: Record<string, unknown> };
+    expect(Object.keys(written.payload)).toEqual([
+      "schemaVersion", "ticketId", "taskSessionHash", "reviewSessionHash",
+      "browserTokenHash", "sourcePathHash", "sourceDigest", "expiresAtMs",
+    ]);
+    expect(written.payload.reviewSessionHash).toBe(digestSecretHex(ticket.documentSessionId));
+    expect(written.checksum).toBe(digestSecretHex(JSON.stringify(written.payload)));
+
+    // A ticket exactly as an earlier release wrote it, in its key order.
+    const legacyToken = "legacy-browser-secret";
+    const legacyPayload = {
+      schemaVersion: 1,
+      ticketId: "00000000-0000-4000-8000-000000000001",
+      taskSessionHash: digestSecretHex("legacy-task"),
+      reviewSessionHash: digestSecretHex("legacy-document"),
+      browserTokenHash: digestSecretHex(legacyToken),
+      sourcePathHash: digestSecretHex(ticket.canonicalSourcePath),
+      sourceDigest: ticket.sourceDigest,
+      expiresAtMs: 1_050,
+    };
+    const legacyPath = join(store.directory, `${digestSecretHex(legacyToken)}.json`);
+    await writeFile(legacyPath, JSON.stringify({ checksum: digestSecretHex(JSON.stringify(legacyPayload)), payload: legacyPayload }));
+    const matched = await store.matchBrowser({
+      browserToken: legacyToken,
+      canonicalSourcePath: ticket.canonicalSourcePath,
+      sourceDigest: ticket.sourceDigest,
+    });
+    expect(matched).toMatchObject({ documentSessionHash: digestSecretHex("legacy-document"), ticketId: legacyPayload.ticketId });
+    expect(matched).not.toHaveProperty("reviewSessionHash");
+
+    // Revoking by document session still finds the legacy-keyed record.
+    await store.revokeSession("legacy-document");
+    await expect(readFile(legacyPath)).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(readFile(path)).resolves.toBeDefined();
   });
 });

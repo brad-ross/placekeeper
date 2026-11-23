@@ -2,7 +2,7 @@ import { copyFile, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 import { InstalledCandidate } from './electron-installed-harness.js';
-import { REVIEW_RUNTIME_PROTOCOL, REVIEW_RUNTIME_VERSION } from '../../packages/core/src/review-runtime-protocol.js';
+import { DOCUMENT_RUNTIME_PROTOCOL, DOCUMENT_RUNTIME_VERSION } from '../../packages/core/src/document-runtime-protocol.js';
 
 async function ready(page: Page): Promise<void> {
   await expect(page.locator('[data-production-review]')).toHaveAttribute('data-initial-view-ready', 'true', { timeout: 30_000 });
@@ -40,7 +40,7 @@ test('duplicate opens preserve the window and closing protects current input whi
       const result = await shell.request(id, { protocol, version, kind: 'request', runtimeId: id.windowId,
         requestId: crypto.randomUUID(), method: 'bootstrap', payload: {} }) as { sessionId: string };
       return result.sessionId;
-    }, { protocol: REVIEW_RUNTIME_PROTOCOL, version: REVIEW_RUNTIME_VERSION });
+    }, { protocol: DOCUMENT_RUNTIME_PROTOCOL, version: DOCUMENT_RUNTIME_VERSION });
     const closed = first.waitForEvent('close');
     await first.evaluate(() => window.close());
     await test.step('Wait for protected-input settlement and native window close', () => closed);

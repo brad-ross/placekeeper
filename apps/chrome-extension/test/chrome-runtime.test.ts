@@ -4,8 +4,8 @@ import { describe, expect, it, vi } from "vitest";
 import {
   createChromeInteractionOwnerClaimStore,
   chromePdfDisplayName,
-  createNativeEmbeddedReview,
-  type NativeEmbeddedReviewSession,
+  createNativeEmbeddedDocument,
+  type NativeEmbeddedDocumentSession,
 } from "../src/chrome-runtime.js";
 import type { NativePort } from "../src/chrome-api.js";
 
@@ -310,8 +310,8 @@ function runtimePort(options: {
   };
 }
 
-function opener(port: NativePort, overrides: Partial<Parameters<typeof createNativeEmbeddedReview>[0]> = {}) {
-  return createNativeEmbeddedReview({
+function opener(port: NativePort, overrides: Partial<Parameters<typeof createNativeEmbeddedDocument>[0]> = {}) {
+  return createNativeEmbeddedDocument({
     connectNative: () => port,
     fetchStream: vi.fn(async () => new Response(pdf)),
     createId: () => connectionId,
@@ -497,7 +497,7 @@ describe("embedded Chrome review runtime", () => {
     const responses: unknown[] = [];
     session.runtimePort.subscribe((message) => responses.push(message));
     session.runtimePort.postMessage({
-      protocol: "placekeeper.review-runtime",
+      protocol: "placekeeper.document-runtime",
       version: 4,
       kind: "request",
       runtimeId: connectionId,
@@ -654,7 +654,7 @@ describe("embedded Chrome review runtime", () => {
 
   it("delivers a runtime response before its related invalidation", async () => {
     const port = runtimePort({ resultThenInvalidation: true, refreshes: [revisionProjection()] });
-    const session: NativeEmbeddedReviewSession = await opener(port)({
+    const session: NativeEmbeddedDocumentSession = await opener(port)({
       originalUrl: "https://papers.example.test/Review.pdf",
       streamUrl: "blob:chrome-authorized-stream",
     });
@@ -662,7 +662,7 @@ describe("embedded Chrome review runtime", () => {
     const messages: Array<Record<string, unknown>> = [];
     session.runtimePort.subscribe((message) => messages.push(message as Record<string, unknown>));
     session.runtimePort.postMessage({
-      protocol: "placekeeper.review-runtime",
+      protocol: "placekeeper.document-runtime",
       version: 4,
       kind: "request",
       runtimeId: connectionId,
@@ -701,7 +701,7 @@ describe("embedded Chrome review runtime", () => {
     expect(revokeObjectURL).not.toHaveBeenCalled();
 
     session.runtimePort.postMessage({
-      protocol: "placekeeper.review-runtime",
+      protocol: "placekeeper.document-runtime",
       version: 4,
       kind: "request",
       runtimeId: connectionId,
@@ -936,7 +936,7 @@ describe("embedded Chrome review runtime", () => {
       expect(port.sent.filter(({ type }) => type === "refresh")).toHaveLength(1);
 
       session.runtimePort.postMessage({
-        protocol: "placekeeper.review-runtime", version: 4, kind: "request",
+        protocol: "placekeeper.document-runtime", version: 4, kind: "request",
         runtimeId: connectionId, requestId: "review-finalize-queued", sessionId,
         generation: 1, revision: 0, method: "finalizeInteraction",
         payload: {
@@ -1171,7 +1171,7 @@ describe("embedded Chrome review runtime", () => {
     expect(revokeObjectURL).toHaveBeenCalledExactlyOnceWith(`blob:${extensionOrigin}/document-1`);
 
     session.runtimePort.postMessage({
-      protocol: "placekeeper.review-runtime", version: 4, kind: "request",
+      protocol: "placekeeper.document-runtime", version: 4, kind: "request",
       runtimeId: connectionId, requestId: "review-bootstrap-generation-3",
       method: "bootstrap", payload: {},
     });
@@ -1217,7 +1217,7 @@ describe("embedded Chrome review runtime", () => {
     })));
     expect(createObjectURL).toHaveBeenCalledOnce();
     session.runtimePort.postMessage({
-      protocol: "placekeeper.review-runtime", version: 4, kind: "request",
+      protocol: "placekeeper.document-runtime", version: 4, kind: "request",
       runtimeId: connectionId, requestId: "review-bootstrap-presence",
       method: "bootstrap", payload: {},
     });
@@ -1237,7 +1237,7 @@ describe("embedded Chrome review runtime", () => {
     const responses: Array<Record<string, unknown>> = [];
     session.runtimePort.subscribe((message) => responses.push(message as Record<string, unknown>));
     session.runtimePort.postMessage({
-      protocol: "placekeeper.review-runtime",
+      protocol: "placekeeper.document-runtime",
       version: 4,
       kind: "request",
       runtimeId: connectionId,
@@ -1265,7 +1265,7 @@ describe("embedded Chrome review runtime", () => {
     const responses: Array<Record<string, unknown>> = [];
     session.runtimePort.subscribe((message) => responses.push(message as Record<string, unknown>));
     const send = (requestId: string) => session.runtimePort.postMessage({
-      protocol: "placekeeper.review-runtime", version: 4, kind: "request",
+      protocol: "placekeeper.document-runtime", version: 4, kind: "request",
       runtimeId: connectionId, requestId, sessionId, generation: 1, revision: 0,
       method: "exportReviewedCopy", payload: {},
     });
@@ -1308,7 +1308,7 @@ describe("embedded Chrome review runtime", () => {
     const messages: Array<Record<string, unknown>> = [];
     session.runtimePort.subscribe((message) => messages.push(message as Record<string, unknown>));
     session.runtimePort.postMessage({
-      protocol: "placekeeper.review-runtime", version: 4, kind: "request",
+      protocol: "placekeeper.document-runtime", version: 4, kind: "request",
       runtimeId: connectionId, requestId: `review-${method}`, sessionId,
       generation: 1, revision: 0, method, payload,
     });
@@ -1377,7 +1377,7 @@ describe("embedded Chrome review runtime", () => {
     expect(session.protected).toBe(true);
   });
 
-  it.each([undefined, 1])("rejects review runtime version %s before consuming the one-shot stream", async (reviewRuntimeVersion) => {
+  it.each([undefined, 1])("rejects review runtime version %s before consuming the one-shot stream", async (documentRuntimeVersion) => {
     const onMessage = new ReplyEvent<unknown>();
     const port: NativePort = {
       onMessage,
@@ -1386,7 +1386,7 @@ describe("embedded Chrome review runtime", () => {
       postMessage() {
         queueMicrotask(() => onMessage.emit({
           type: "hello-ack",
-          ...(reviewRuntimeVersion === undefined ? {} : { reviewRuntimeVersion }),
+          ...(documentRuntimeVersion === undefined ? {} : { reviewRuntimeVersion: documentRuntimeVersion }),
           protocol: "placekeeper.chrome-runtime",
           protocolVersion: 2,
           connectionId,
@@ -1407,7 +1407,7 @@ describe("embedded Chrome review runtime", () => {
 
   it("does not consume the MIME stream when the registered native host is absent", async () => {
     const fetchStream = vi.fn(async () => new Response(pdf));
-    const open = createNativeEmbeddedReview({
+    const open = createNativeEmbeddedDocument({
       connectNative: () => { throw new Error("native-host-missing"); },
       fetchStream,
       createId: () => connectionId,

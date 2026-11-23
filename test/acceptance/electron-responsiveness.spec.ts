@@ -88,7 +88,7 @@ test('targeted renderer responsiveness observations in an isolated packaged app'
       candidate = await InstalledCandidate.create('large-text-heavy.pdf');
       const page = await candidate.launch();
       await page.bringToFront();
-      await page.locator('[data-review-chrome]').waitFor({ state: 'visible', timeout: 30_000 });
+      await page.locator('[data-reader-chrome]').waitFor({ state: 'visible', timeout: 30_000 });
       await page.evaluate(() => new Promise<void>(accept => requestAnimationFrame(() => requestAnimationFrame(() => accept()))));
       const shellScreenshotPath = info.outputPath(`observed-shell-${sample}.png`);
       await page.screenshot({ path: shellScreenshotPath });

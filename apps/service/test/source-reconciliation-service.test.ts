@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import type { ReviewItem } from "../../../packages/core/src/review-model.js";
+import type { Annotation } from "../../../packages/core/src/document-model.js";
 import {
   SourceReconciliationService,
   type SourceReplacementProposalV1,
@@ -21,7 +21,7 @@ afterEach(async () => {
 const id = (suffix: number) =>
   `00000000-0000-4000-8000-${suffix.toString().padStart(12, "0")}`;
 
-function item(suffix: number, proposedText = `replacement ${suffix}`): ReviewItem {
+function item(suffix: number, proposedText = `replacement ${suffix}`): Annotation {
   const rect = { x: 72, y: 100 + suffix * 20, width: 100, height: 14 };
   return {
     id: id(suffix),
@@ -51,7 +51,7 @@ interface Fixture {
 
 async function fixture(
   source = "prefix old suffix\nuntouched\n",
-  items: readonly ReviewItem[] = [item(1)],
+  items: readonly Annotation[] = [item(1)],
 ): Promise<Fixture> {
   const directory = await mkdtemp(join(tmpdir(), "placekeeper-reconciliation-"));
   temporaryDirectories.push(directory);
@@ -66,16 +66,16 @@ async function fixture(
     portableReader: async () => [],
     rewriteAssessor: async () => ({ eligible: true }),
   });
-  const opened = await broker.openReview({ pdfPath, sourceRootPath: directory, surface: "codex" });
+  const opened = await broker.openDocument({ pdfPath, sourceRootPath: directory, surface: "codex" });
   if (opened.kind !== "opened" || opened.launch.bindProof === undefined) {
     throw new Error("Expected a bindable Codex launch");
   }
   let revision = 0;
-  for (const reviewItem of items) {
+  for (const annotation of items) {
     await broker.acceptMutation(opened.launch.sessionId, {
       type: "add",
       expectedRevision: revision,
-      item: reviewItem,
+      item: annotation,
     });
     revision += 1;
   }
@@ -83,7 +83,7 @@ async function fixture(
   expect(broker.taskBindings.claim({
     bindProof: opened.launch.bindProof,
     taskSessionId: "task-a",
-    reviewSessionId: opened.launch.sessionId,
+    documentSessionId: opened.launch.sessionId,
     documentGeneration: opened.launch.documentGeneration,
   }).status).toBe("pending");
   expect(broker.exchangeBootstrap(opened.launch.sessionId, capability)).toBeTypeOf("string");

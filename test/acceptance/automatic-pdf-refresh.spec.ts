@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test';
 
 test.describe('automatic PDF refresh annotation lifecycle', () => {
   test('consumes a durable annotation receipt after the editor closes and restores focus', async ({ page }) => {
-    await page.goto('/test/acceptance/review-harness/index.html?interaction-lifecycle=1');
+    await page.goto('/test/acceptance/reader-harness/index.html?interaction-lifecycle=1');
     const highlight = page.getByRole('button', { name: 'Highlight', exact: true });
     await highlight.focus();
     await highlight.click();
@@ -36,7 +36,7 @@ test.describe('automatic PDF refresh annotation lifecycle', () => {
   });
 
   test('durably discards a cancelled draft before releasing its generation hold', async ({ page }) => {
-    await page.goto('/test/acceptance/review-harness/index.html?interaction-lifecycle=1');
+    await page.goto('/test/acceptance/reader-harness/index.html?interaction-lifecycle=1');
     await page.getByRole('button', { name: 'Highlight', exact: true }).click();
     const composer = page.getByRole('region', { name: 'Highlight Comment' });
     await composer.getByRole('textbox', { name: 'Comment (optional)' }).fill('Do not apply this draft.');
@@ -51,7 +51,7 @@ test.describe('automatic PDF refresh annotation lifecycle', () => {
   });
 
   test('reacquires an actively typed editor before a replacement can publish after reconnect', async ({ page }) => {
-    await page.goto('/test/acceptance/review-harness/index.html?interaction-lifecycle=1&interaction-reconnect=1');
+    await page.goto('/test/acceptance/reader-harness/index.html?interaction-lifecycle=1&interaction-reconnect=1');
     await page.getByRole('button', { name: 'Highlight', exact: true }).click();
     const composer = page.getByRole('region', { name: 'Highlight Comment' });
     const editor = composer.getByRole('textbox', { name: 'Comment (optional)' });
@@ -72,7 +72,7 @@ test.describe('automatic PDF refresh annotation lifecycle', () => {
   });
 
   test('releases an admission that resolves after its authoring surface unmounts', async ({ page }) => {
-    await page.goto('/test/acceptance/review-harness/index.html?interaction-lifecycle=1&begin-delayed=1&host-export=1');
+    await page.goto('/test/acceptance/reader-harness/index.html?interaction-lifecycle=1&begin-delayed=1&host-export=1');
     await page.getByRole('button', { name: 'Highlight', exact: true }).click();
     await expect(page.getByRole('region', { name: 'Highlight Comment' })).toHaveCount(0);
     await page.getByRole('button', { name: 'Remount review shell' }).click();
@@ -86,7 +86,7 @@ test.describe('automatic PDF refresh annotation lifecycle', () => {
   });
 
   test('recovers a fresh editor after begin fails before admission', async ({ page }) => {
-    await page.goto('/test/acceptance/review-harness/index.html?interaction-lifecycle=1&begin-preaccept-fails=1');
+    await page.goto('/test/acceptance/reader-harness/index.html?interaction-lifecycle=1&begin-preaccept-fails=1');
     const highlight = page.getByRole('button', { name: 'Highlight', exact: true });
     await highlight.click();
     await expect(page.getByRole('region', { name: 'Highlight Comment' })).toHaveCount(0);
@@ -106,7 +106,7 @@ test.describe('automatic PDF refresh annotation lifecycle', () => {
   });
 
   test('releases a lost accepted begin before a fresh user retry can open', async ({ page }) => {
-    await page.goto('/test/acceptance/review-harness/index.html?interaction-lifecycle=1&begin-response-lost=1');
+    await page.goto('/test/acceptance/reader-harness/index.html?interaction-lifecycle=1&begin-response-lost=1');
     const highlight = page.getByRole('button', { name: 'Highlight', exact: true });
     await highlight.click();
     await expect(page.getByRole('region', { name: 'Highlight Comment' })).toHaveCount(0);
@@ -135,7 +135,7 @@ test.describe('automatic PDF refresh annotation lifecycle', () => {
   });
 
   test('recovers an abandoned release in the background before the next user action', async ({ page }) => {
-    await page.goto('/test/acceptance/review-harness/index.html?interaction-lifecycle=1&begin-delayed=1&release-fails-twice=1&host-export=1');
+    await page.goto('/test/acceptance/reader-harness/index.html?interaction-lifecycle=1&begin-delayed=1&release-fails-twice=1&host-export=1');
     await page.getByRole('button', { name: 'Highlight', exact: true }).click();
     await page.getByRole('button', { name: 'Remount review shell' }).click();
     await page.getByRole('button', { name: 'Finish interaction begin' }).click();
@@ -163,7 +163,7 @@ test.describe('automatic PDF refresh annotation lifecycle', () => {
   });
 
   test('retries an abandoned unmount release with the exact request', async ({ page }) => {
-    await page.goto('/test/acceptance/review-harness/index.html?interaction-lifecycle=1&begin-delayed=1&release-response-lost=1&host-export=1');
+    await page.goto('/test/acceptance/reader-harness/index.html?interaction-lifecycle=1&begin-delayed=1&release-response-lost=1&host-export=1');
     await page.getByRole('button', { name: 'Highlight', exact: true }).click();
     await page.getByRole('button', { name: 'Remount review shell' }).click();
     await page.getByRole('button', { name: 'Finish interaction begin' }).click();
@@ -176,7 +176,7 @@ test.describe('automatic PDF refresh annotation lifecycle', () => {
   });
 
   test('retries the exact terminal request after a lost response and an already-published successor', async ({ page }) => {
-    await page.goto('/test/acceptance/review-harness/index.html?interaction-lifecycle=1&finalize-response-lost=1');
+    await page.goto('/test/acceptance/reader-harness/index.html?interaction-lifecycle=1&finalize-response-lost=1');
     await page.getByRole('button', { name: 'Highlight', exact: true }).click();
     const composer = page.getByRole('region', { name: 'Highlight Comment' });
     await composer.getByRole('textbox', { name: 'Comment (optional)' }).fill('Committed before reconnect.');
@@ -204,7 +204,7 @@ test.describe('automatic PDF refresh annotation lifecycle', () => {
 
   test('finalizes manual reattachment through a protected draft and cannot reuse predecessor geometry', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 760 });
-    await page.goto('/test/acceptance/review-harness/index.html?reconciliation=default&interaction-lifecycle=1');
+    await page.goto('/test/acceptance/reader-harness/index.html?reconciliation=default&interaction-lifecycle=1');
     await page.getByRole('button', { name: 'Show Workspace' }).click();
     const annotations = page.getByRole('tab', { name: 'Annotations', exact: true });
     if (await annotations.getAttribute('aria-selected') !== 'true') await annotations.click();
@@ -226,7 +226,7 @@ test.describe('automatic PDF refresh annotation lifecycle', () => {
 
   test('reacquires a manual reattachment before replacement can publish after reconnect', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 760 });
-    await page.goto('/test/acceptance/review-harness/index.html?reconciliation=default&interaction-lifecycle=1&interaction-reconnect=1');
+    await page.goto('/test/acceptance/reader-harness/index.html?reconciliation=default&interaction-lifecycle=1&interaction-reconnect=1');
     await page.getByRole('button', { name: 'Show Workspace' }).click();
     const annotations = page.getByRole('tab', { name: 'Annotations', exact: true });
     if (await annotations.getAttribute('aria-selected') !== 'true') await annotations.click();
@@ -255,7 +255,7 @@ test.describe('automatic PDF refresh annotation lifecycle', () => {
 
   test('releases a manual reattachment when its selected record vanishes elsewhere', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 760 });
-    await page.goto('/test/acceptance/review-harness/index.html?reconciliation=default&interaction-lifecycle=1&external-reconciliation-removal=1');
+    await page.goto('/test/acceptance/reader-harness/index.html?reconciliation=default&interaction-lifecycle=1&external-reconciliation-removal=1');
     await page.getByRole('button', { name: 'Show Workspace' }).click();
     const annotations = page.getByRole('tab', { name: 'Annotations', exact: true });
     if (await annotations.getAttribute('aria-selected') !== 'true') await annotations.click();
@@ -279,7 +279,7 @@ test.describe('automatic PDF refresh annotation lifecycle', () => {
 
   test('reconciles an uncertain manual reattachment before cancel can orphan its hold', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 760 });
-    await page.goto('/test/acceptance/review-harness/index.html?reconciliation=default&interaction-lifecycle=1&finalize-response-lost=1');
+    await page.goto('/test/acceptance/reader-harness/index.html?reconciliation=default&interaction-lifecycle=1&finalize-response-lost=1');
     await page.getByRole('button', { name: 'Show Workspace' }).click();
     const annotations = page.getByRole('tab', { name: 'Annotations', exact: true });
     if (await annotations.getAttribute('aria-selected') !== 'true') await annotations.click();

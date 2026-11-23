@@ -23,10 +23,10 @@ test('native toolbar hover follows scaled window bounds without DOM movement and
     });
     const dispose = trackTitlebarHover(window as unknown as BrowserWindow, cursor);
     try {
-        assert.deepEqual(send.mock.lastCall, ['review:shell', { type: 'toolbar-hover', hovered: false }]);
+        assert.deepEqual(send.mock.lastCall, ['document:shell', { type: 'toolbar-hover', hovered: false }]);
         point = { x: 500, y: 125 };
         vi.advanceTimersByTime(50);
-        assert.deepEqual(send.mock.lastCall, ['review:shell', { type: 'toolbar-hover', hovered: true }]);
+        assert.deepEqual(send.mock.lastCall, ['document:shell', { type: 'toolbar-hover', hovered: true }]);
         vi.advanceTimersByTime(1000);
         assert.equal(send.mock.calls.length, 2);
         point.y = 180;

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { createReviewState, type ReviewItem } from '../../../packages/core/src/review-model.js';
+import { createDocumentState, type Annotation } from '../../../packages/core/src/document-model.js';
 import {
   authoringAuthorityFor,
   authoringAnchorSnapshot,
@@ -10,24 +10,24 @@ import {
   canStartAuthoringSession,
   createAuthoringSession,
   pendingDraftForAuthoring,
-  beginReviewInteraction,
+  beginDocumentInteraction,
   attachmentOrderedInteractionTransport,
   type AuthoringSessionSeed,
-} from '../src/review/authoring-session.js';
+} from '../src/reader/authoring-session.js';
 import { PdfZoomMode } from '@embedpdf/models';
-import { resolveReattachmentDiscardIntent } from '../src/review/ReconciliationWorkspace.js';
+import { resolveReattachmentDiscardIntent } from '../src/reader/ReconciliationWorkspace.js';
 import {
   authoringSaveDisposition,
   canonicalStateForFinalizedInteraction,
   interactionReceiptRequiresPersistence,
-} from '../src/review/use-authoring-session.js';
+} from '../src/reader/use-authoring-session.js';
 import {
   pendingDestinationAttemptIsCurrent,
   pendingDestinationDisposition,
   pendingDestinationIsCurrent,
 } from "../src/save/destination-attempt.js";
 
-const state = createReviewState({
+const state = createDocumentState({
   sessionId: 'authoring-session',
   source: { fileId: 'paper', digest: 'a'.repeat(64), byteLength: 12 },
 });
@@ -74,7 +74,7 @@ describe('authoring save authority', () => {
   });
 
   it('accepts a finalized same-session successor before the viewer generation observer catches up', () => {
-    const source = createReviewState({
+    const source = createDocumentState({
       sessionId: 'successor-session',
       source: { fileId: 'before', digest: 'a'.repeat(64), byteLength: 12 },
       documentGeneration: 7,
@@ -90,7 +90,7 @@ describe('authoring save authority', () => {
       interactionToken: 'terminal-successor',
       generation: 7,
       outcome: 'applied' as const,
-      reviewRevision: 4,
+      annotationRevision: 4,
     };
 
     expect(canonicalStateForFinalizedInteraction(
@@ -143,7 +143,7 @@ const caret = {
   reliable: true as const,
 };
 
-const editedItem: ReviewItem = {
+const editedItem: Annotation = {
   id: 'annotation-2',
   kind: 'highlight',
   pageIndex: 4,
@@ -183,7 +183,7 @@ describe('frozen authoring-session contract', () => {
       async releaseInteraction() { return { status: 'released' }; },
       async acknowledgeInteraction() { throw new Error('unused'); },
     };
-    const interaction = await beginReviewInteraction(transport, 7, 'authoring', 1, 'draft-frozen');
+    const interaction = await beginDocumentInteraction(transport, 7, 'authoring', 1, 'draft-frozen');
     await interaction.reacquire();
     await interaction.release();
 
@@ -215,10 +215,10 @@ describe('frozen authoring-session contract', () => {
       },
     };
     const identity = {};
-    const authoring = await beginReviewInteraction(attachmentOrderedInteractionTransport(identity, transport), 7, 'authoring');
+    const authoring = await beginDocumentInteraction(attachmentOrderedInteractionTransport(identity, transport), 7, 'authoring');
     const receipt = await authoring.finalize('applied', 'draft-a', 0);
     await authoring.acknowledge(receipt);
-    const reattachment = await beginReviewInteraction(attachmentOrderedInteractionTransport(identity, transport), 7, 'reattach');
+    const reattachment = await beginDocumentInteraction(attachmentOrderedInteractionTransport(identity, transport), 7, 'reattach');
     await reattachment.release();
 
     expect(calls).toEqual([
@@ -252,8 +252,8 @@ describe('frozen authoring-session contract', () => {
       },
     };
     const ordered = attachmentOrderedInteractionTransport({}, transport);
-    const first = await beginReviewInteraction(ordered, 7, 'first');
-    const second = await beginReviewInteraction(ordered, 7, 'second');
+    const first = await beginDocumentInteraction(ordered, 7, 'first');
+    const second = await beginDocumentInteraction(ordered, 7, 'second');
     await first.release();
     await second.release();
 
@@ -281,8 +281,8 @@ describe('frozen authoring-session contract', () => {
       async acknowledgeInteraction() { return { status: 'released' }; },
     });
 
-    await expect(beginReviewInteraction(ordered, 7, 'reused')).rejects.toThrow('Current generation: 8');
-    const accepted = await beginReviewInteraction(ordered, 7, 'reused');
+    await expect(beginDocumentInteraction(ordered, 7, 'reused')).rejects.toThrow('Current generation: 8');
+    const accepted = await beginDocumentInteraction(ordered, 7, 'reused');
     await accepted.release();
     expect(orders).toEqual([1, 2]);
   });
@@ -307,8 +307,8 @@ describe('frozen authoring-session contract', () => {
       async acknowledgeInteraction() { return { status: 'released' }; },
     });
 
-    await expect(beginReviewInteraction(ordered, 7, 'lost-admission')).rejects.toThrow('after admission');
-    const accepted = await beginReviewInteraction(ordered, 7, 'fresh-admission');
+    await expect(beginDocumentInteraction(ordered, 7, 'lost-admission')).rejects.toThrow('after admission');
+    const accepted = await beginDocumentInteraction(ordered, 7, 'fresh-admission');
     await accepted.release();
     expect(calls).toEqual([
       { method: 'begin', token: 'lost-admission', order: 1 },
@@ -333,8 +333,8 @@ describe('frozen authoring-session contract', () => {
       async acknowledgeInteraction() { return { status: 'released' }; },
     });
 
-    await expect(beginReviewInteraction(ordered, 7, 'reused-after-error')).rejects.toThrow('connection reset');
-    const accepted = await beginReviewInteraction(ordered, 7, 'reused-after-error');
+    await expect(beginDocumentInteraction(ordered, 7, 'reused-after-error')).rejects.toThrow('connection reset');
+    const accepted = await beginDocumentInteraction(ordered, 7, 'reused-after-error');
     await accepted.release();
     expect(orders).toEqual([1, 3]);
   });
@@ -415,7 +415,7 @@ describe('frozen authoring-session contract', () => {
         },
         async acknowledgeInteraction() { throw new Error('unused'); },
       });
-      const interaction = await beginReviewInteraction(successor, 8, 'successor');
+      const interaction = await beginDocumentInteraction(successor, 8, 'successor');
       await interaction.release();
       expect(successorCalls).toEqual([
         { method: 'begin', order: 1 },
@@ -446,7 +446,7 @@ describe('frozen authoring-session contract', () => {
     const survivor = attachmentOrderedInteractionTransport(identity, transport);
     first.dispose();
 
-    const interaction = await beginReviewInteraction(survivor, 7, 'survivor');
+    const interaction = await beginDocumentInteraction(survivor, 7, 'survivor');
     await interaction.release();
     expect(orders).toEqual([1, 2]);
     survivor.dispose();
@@ -455,7 +455,7 @@ describe('frozen authoring-session contract', () => {
   it('reacquires with the exact begin request and recovers a matching finalized receipt', async () => {
     const beginRequests: Array<{ interactionToken: string; order: number; generation: number }> = [];
     let beginAttempts = 0;
-    const interaction = await beginReviewInteraction({
+    const interaction = await beginDocumentInteraction({
       async beginInteraction(input) {
         beginRequests.push(input);
         beginAttempts += 1;
@@ -480,7 +480,7 @@ describe('frozen authoring-session contract', () => {
       interactionToken: 'reacquired-interaction',
       generation: 7,
       outcome: 'applied',
-      reviewRevision: 4,
+      annotationRevision: 4,
     });
     expect(beginRequests).toEqual([
       { interactionToken: 'reacquired-interaction', order: 5, generation: 7 },
@@ -490,7 +490,7 @@ describe('frozen authoring-session contract', () => {
 
   it('accepts a current reacquired hold and rejects a stale one', async () => {
     let beginAttempts = 0;
-    const interaction = await beginReviewInteraction({
+    const interaction = await beginDocumentInteraction({
       async beginInteraction(input) {
         beginAttempts += 1;
         if (beginAttempts < 3) {
@@ -523,7 +523,7 @@ describe('frozen authoring-session contract', () => {
       },
       async acknowledgeInteraction() { throw new Error('unused'); },
     });
-    const interaction = await beginReviewInteraction(ordered, 7, 'replayed-hold', 2);
+    const interaction = await beginDocumentInteraction(ordered, 7, 'replayed-hold', 2);
 
     await expect(interaction.reacquire()).rejects.toThrow('connection lost during replay');
     expect(releaseAttempts).toBe(0);
@@ -533,7 +533,7 @@ describe('frozen authoring-session contract', () => {
   it('keeps the exact finalization identity across failure and acknowledges only after receipt consumption', async () => {
     const calls: Array<{ method: string; input: unknown }> = [];
     let finalizeAttempts = 0;
-    const interaction = await beginReviewInteraction({
+    const interaction = await beginDocumentInteraction({
       beginInteraction: async (input) => {
         calls.push({ method: 'begin', input });
         return { status: 'accepted', generation: 7, ownerViewId: 'attachment-a' };
@@ -580,7 +580,7 @@ describe('frozen authoring-session contract', () => {
   it('settles a failed applied finalization before Delete can enter discard', async () => {
     const methods: string[] = [];
     let finalizeAttempts = 0;
-    const interaction = await beginReviewInteraction({
+    const interaction = await beginDocumentInteraction({
       async beginInteraction(input) {
         methods.push('begin');
         return { status: 'accepted', generation: input.generation, ownerViewId: 'attachment-a' };
@@ -761,15 +761,15 @@ describe('frozen authoring-session contract', () => {
     expect(authoringPreviewAnnotations(
       session,
       kind === 'replace' ? 'replacement' : 'comment',
-    ).map(({ id, reviewItemId, pageIndex }) => ({ id, reviewItemId, pageIndex }))).toEqual([
+    ).map(({ id, annotationItemId: annotationId, pageIndex }) => ({ id, annotationItemId: annotationId, pageIndex }))).toEqual([
       {
         id: 'authoring-preview:1:projection:1',
-        reviewItemId: 'authoring-preview:1',
+        annotationItemId: 'authoring-preview:1',
         pageIndex: 2,
       },
       {
         id: 'authoring-preview:1:projection:2',
-        reviewItemId: 'authoring-preview:1',
+        annotationItemId: 'authoring-preview:1',
         pageIndex: 3,
       },
     ]);
@@ -1004,5 +1004,25 @@ describe('pending Save Destination authoring handoff', () => {
       ...state,
       source: { ...state.source, digest: 'b'.repeat(64) },
     }, 7)).toBe(false);
+  });
+});
+
+describe('finalized receipt revision alias', () => {
+  it.each([
+    ['legacy reviewRevision', { reviewRevision: 5 }],
+    ['annotationRevision', { annotationRevision: 5 }],
+  ])('normalizes a receipt sent with %s', async (_name, revision) => {
+    const transport = {
+      beginInteraction: async (input: { generation: number }) => ({ status: 'accepted', generation: input.generation, ownerViewId: 'view' }),
+      finalizeInteraction: async (input: { interactionToken: string; outcome: 'applied' | 'discarded' }) => ({
+        status: 'finalized', interactionToken: input.interactionToken, generation: 3, outcome: input.outcome, ...revision,
+      }),
+      releaseInteraction: async () => ({ status: 'released' }),
+      acknowledgeInteraction: async () => ({ status: 'released' }),
+    };
+    const handle = await beginDocumentInteraction(transport, 3, 'alias-token');
+    const receipt = await handle.finalize('applied', 'draft_1234', 1) as unknown as Record<string, unknown>;
+    expect(receipt).toMatchObject({ status: 'finalized', annotationRevision: 5 });
+    expect(receipt).not.toHaveProperty('reviewRevision');
   });
 });

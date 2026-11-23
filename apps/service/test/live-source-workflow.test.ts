@@ -4,7 +4,7 @@ import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import type { LiveDispositionItemV1 } from "../../../packages/core/src/disposition.js";
-import type { ReviewItem } from "../../../packages/core/src/review-model.js";
+import type { Annotation } from "../../../packages/core/src/document-model.js";
 import { LiveContextService } from "../src/context/live-context-service.js";
 import { LiveSourceWorkflowService } from "../src/context/live-source-workflow-service.js";
 import { DraftSnapshotStore } from "../src/recovery/draft-snapshot.js";
@@ -23,7 +23,7 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
-function item(suffix: number): ReviewItem {
+function item(suffix: number): Annotation {
   const rect = { x: 72, y: 100 + suffix * 20, width: 100, height: 14 };
   return {
     id: id(suffix),
@@ -75,7 +75,7 @@ async function fixture(options: {
       pages: [{ pageIndex: 0, text: "rebuilt" }],
     }),
   });
-  const opened = await broker.openReview({
+  const opened = await broker.openDocument({
     pdfPath,
     sourceRootPath: root,
     surface: "codex",
@@ -87,7 +87,7 @@ async function fixture(options: {
   expect(broker.taskBindings.claim({
     bindProof,
     taskSessionId,
-    reviewSessionId: launch.sessionId,
+    documentSessionId: launch.sessionId,
     documentGeneration: launch.documentGeneration,
   }).status).toBe("pending");
   expect(broker.exchangeBootstrap(launch.sessionId, launch.fragment.slice("#cap=".length))).toBeTypeOf("string");
@@ -341,7 +341,7 @@ describe("same-task live source workflow", () => {
       handle: plan.freshness.evidenceHandle,
       executionId: begun.result.executionId,
       planId: plan.result.planId,
-    })).rejects.toThrow(/review annotations/u);
+    })).rejects.toThrow(/Placekeeper annotations/u);
 
     const current = await dirty.context.refresh({ taskSessionId });
     if (current.status !== "current") throw new Error("Expected current context");
@@ -387,7 +387,7 @@ describe("same-task live source workflow", () => {
         handle: plan.freshness.evidenceHandle,
         executionId: begun.result.executionId,
         planId: plan.result.planId,
-      })).rejects.toThrow(/review annotations/u);
+      })).rejects.toThrow(/Placekeeper annotations/u);
 
       const external = await fixture({
         inspectRebuild: async () => ({

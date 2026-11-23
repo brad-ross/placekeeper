@@ -1,4 +1,4 @@
-import type { ReviewItem } from './review-model.js';
+import type { Annotation } from './document-model.js';
 
 /** Standard reviewer annotations whose comments can be changed without redrawing them. */
 const COMMENT_SUBTYPES = new Set([
@@ -44,15 +44,15 @@ export function nativePdfAnnotationId(pageIndex: number, annotationIndex: number
   return `5e14134c-6d1b-4bbd-8000-${pageIndex.toString(16).padStart(6, '0')}${annotationIndex.toString(16).padStart(6, '0')}`;
 }
 
-export function nativePdfAnnotationSubtype(item: ReviewItem): string | undefined {
+export function nativePdfAnnotationSubtype(item: Annotation): string | undefined {
   return item.kind === 'pdfAnnotation' && typeof item.payload.subtype === 'string'
     ? item.payload.subtype : undefined;
 }
 
-export function canEditPdfAnnotationComment(item: ReviewItem): boolean {
+export function canEditPdfAnnotationComment(item: Annotation): boolean {
   return item.kind !== 'pdfAnnotation' || item.payload.contentsLocked !== true;
 }
 
-export function canDeletePdfAnnotation(item: ReviewItem): boolean {
+export function canDeletePdfAnnotation(item: Annotation): boolean {
   return item.kind !== 'pdfAnnotation' || item.payload.deletionLocked !== true;
 }

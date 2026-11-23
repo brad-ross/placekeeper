@@ -1,9 +1,9 @@
 import { createHash } from 'node:crypto';
 import { readFile, realpath } from 'node:fs/promises';
 import { resolve, sep } from 'node:path';
-import type { ReviewBridge } from './review-bridge.js';
+import type { DocumentBridge } from './document-bridge.js';
 /** Streams bounded service chunks; adoption happens only after digest and length verification. */
-export function documentResponse(bridge: ReviewBridge, generation: number): Response {
+export function documentResponse(bridge: DocumentBridge, generation: number): Response {
     const p = bridge.projection;
     if (p === undefined || p.generation !== generation || bridge.resourceId === undefined)
         return new Response(null, { status: 404 });

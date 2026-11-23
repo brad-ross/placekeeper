@@ -1,16 +1,16 @@
 import { createRoot } from 'react-dom/client';
 import { useRef } from 'react';
-import { RuntimeProductionReviewApp } from '../../../apps/web/src/production-entry.js';
+import { RuntimeProductionReaderApp } from '../../../apps/web/src/production-entry.js';
 import type { HostRuntime, HostRuntimeBootstrap, HostRuntimeCommand } from '../../../apps/web/src/host/runtime.js';
-import { MemoryReviewLocationHistory } from '../../../apps/web/src/review/review-location-history.js';
-import '../../../apps/web/src/app/review-layout.css';
+import { MemoryDocumentLocationHistory } from '../../../apps/web/src/reader/document-location-history.js';
+import '../../../apps/web/src/app/reader-layout.css';
 import { useHostSyncTex } from '../../../apps/web/src/host/use-host-synctex.js';
-import { createReviewState } from '../../../packages/core/src/review-model.js';
+import { createDocumentState } from '../../../packages/core/src/document-model.js';
 import type { HostForwardSyncTexRequest } from '../../../apps/web/src/host/session-contracts.js';
 import type { PdfViewerNavigation } from '../../../apps/web/src/pdf/viewer-navigation-adapter.js';
 
 const root = createRoot(document.getElementById('root')!);
-const state = createReviewState({ sessionId: '00000000-0000-4000-8000-000000000301',
+const state = createDocumentState({ sessionId: '00000000-0000-4000-8000-000000000301',
   source: { fileId: '00000000-0000-4000-8000-000000000302', digest: 'a'.repeat(64), byteLength: 12 } });
 const observations = { calls: 0, cancellations: 0, focuses: [] as number[], acknowledgements: [] as string[], errors: [] as (string | null)[] };
 const pending: Array<(result: boolean) => void> = [];
@@ -43,7 +43,7 @@ if (new URLSearchParams(location.search).has('runtime')) {
     session: { sessionId: state.sessionId }, state, scope, saveStatus,
     viewerAssets: { documentUrl: '/test/fixtures/pdfs/multi-page-text.pdf',
       pdfiumWasm: '/dist/web/pdfium.wasm', workerUrl: '/dist/web/pdfium-worker.js' },
-    resourcePolicy: { host: 'browser', origin: location.origin }, locationHistory: new MemoryReviewLocationHistory() };
+    resourcePolicy: { host: 'browser', origin: location.origin }, locationHistory: new MemoryDocumentLocationHistory() };
   let listener: ((command: HostRuntimeCommand) => void) | undefined;
   let reverseCalls = 0;
   const forwardAcks: unknown[] = [];
@@ -53,8 +53,8 @@ if (new URLSearchParams(location.search).has('runtime')) {
     subscribeHostCommands: next => { listener = next; return () => { listener = undefined; }; },
     scope: async () => scope, saveStatus: async () => saveStatus,
     command: unavailable, saveProposal: unavailable, chooseCopy: unavailable, chooseFolder: unavailable,
-    chooseOriginal: unavailable, retrySave: unavailable, locateSave: unavailable, exportReviewedCopy: unavailable,
+    chooseOriginal: unavailable, retrySave: unavailable, locateSave: unavailable, exportAnnotatedCopy: unavailable,
     forwardSyncTex: async input => { forwardAcks.push(input); return { status: "ok" }; }, reverseSyncTex: async () => { reverseCalls++; return { status: 'ok' }; }, dispose: () => undefined };
   Object.assign(window, { runtimeFixture: { send: (command: HostRuntimeCommand) => listener!(command), reverseCalls: () => reverseCalls, forwardAcks: () => forwardAcks } });
-  root.render(<RuntimeProductionReviewApp runtime={runtime} />);
+  root.render(<RuntimeProductionReaderApp runtime={runtime} />);
 } else render();

@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
-import { CodexContextStatus } from "../src/review/CodexContextStatus.js";
+import { CodexContextStatus } from "../src/reader/CodexContextStatus.js";
 
 describe("Codex live context status", () => {
   it("renders a quiet current state only from verified context", () => {

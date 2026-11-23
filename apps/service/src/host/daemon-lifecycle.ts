@@ -39,7 +39,7 @@ export class DaemonLifecycleCoordinator {
     return {
       lifecycle: this.#lifecycle,
       activity: {
-        reviewPresence: activity.reviewPresence,
+        documentPresence: activity.documentPresence,
         codexTasks: activity.codexTasks,
         transientWork: activity.transientWork + this.#routeSettlements.size,
       },
@@ -131,9 +131,9 @@ export class DaemonLifecycleCoordinator {
 }
 
 function hasNonDrainableActivity(activity: DaemonAggregateActivity, activeRoutes: number): boolean {
-  return activity.reviewPresence > 0 || activity.codexTasks > 0 || activeRoutes > 0;
+  return activity.documentPresence > 0 || activity.codexTasks > 0 || activeRoutes > 0;
 }
 
 function hasAnyActivity(activity: DaemonAggregateActivity): boolean {
-  return activity.reviewPresence > 0 || activity.codexTasks > 0 || activity.transientWork > 0;
+  return activity.documentPresence > 0 || activity.codexTasks > 0 || activity.transientWork > 0;
 }

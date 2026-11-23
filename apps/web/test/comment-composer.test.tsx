@@ -5,7 +5,7 @@ import {
   boundedTextAreaHeight,
   CommentComposer,
   focusCommentComposerEditor,
-} from '../src/review/CommentComposer.js';
+} from '../src/reader/CommentComposer.js';
 
 function renderComposer(overrides: Partial<Parameters<typeof CommentComposer>[0]> = {}) {
   return renderToStaticMarkup(

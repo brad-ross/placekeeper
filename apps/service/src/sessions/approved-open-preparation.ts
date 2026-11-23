@@ -1,21 +1,21 @@
 import { readFile, stat } from "node:fs/promises";
-import { createImportedReviewState } from "../../../../packages/core/src/portable-annotation.js";
-import { createReviewState, type ReviewItem } from "../../../../packages/core/src/review-model.js";
+import { createImportedDocumentState } from "../../../../packages/core/src/portable-annotation.js";
+import { createDocumentState, type Annotation } from "../../../../packages/core/src/document-model.js";
 import type { PdfRewriteEligibility } from "../../../../packages/core/src/pdf-writer.js";
-import { reviewStateDigest, type DurableSaveDestination, type DurableSaveSync } from "../recovery/draft-snapshot.js";
+import { documentStateDigest, type DurableSaveDestination, type DurableSaveSync } from "../recovery/draft-snapshot.js";
 import { createSourceSnapshot, snapshotGenerationSyncTexSidecar } from "../recovery/source-snapshot.js";
-import type { OpenReviewRequest } from "./session-contracts.js";
+import type { OpenDocumentRequest } from "./session-contracts.js";
 
 // Prepare private source bytes and initial review data. Activation and persistence
 // remain with the broker after this candidate is complete.
 export async function prepareApprovedOpen(input: {
-  readonly request: OpenReviewRequest;
+  readonly request: OpenDocumentRequest;
   readonly approvedFile: { readonly id: string; readonly canonicalPath: string };
   readonly approvedRoot: { readonly id: string } | undefined;
   readonly sessionId: string;
   readonly sessionDirectory: string;
   readonly rewriteEligibility: PdfRewriteEligibility;
-  readonly portableReader: (bytes: Uint8Array) => Promise<readonly ReviewItem[]>;
+  readonly portableReader: (bytes: Uint8Array) => Promise<readonly Annotation[]>;
 }) {
   const { request, approvedFile, approvedRoot, sessionId, sessionDirectory, rewriteEligibility, portableReader } = input;
   const sourceSnapshot = await createSourceSnapshot(
@@ -28,7 +28,7 @@ export async function prepareApprovedOpen(input: {
     byteLength: sourceSnapshot.byteLength,
   };
   const initialOutputInfo = await stat(approvedFile.canonicalPath);
-  let importedItems: readonly ReviewItem[] = [];
+  let importedItems: readonly Annotation[] = [];
   let nativeAnnotationsImported = false;
   try {
     importedItems = await portableReader(
@@ -58,13 +58,13 @@ export async function prepareApprovedOpen(input: {
       }).catch(() => undefined)
     : undefined;
   const initialState = importedItems.length === 0
-    ? createReviewState({
+    ? createDocumentState({
         sessionId,
         source,
         ...(approvedRoot === undefined ? {} : { sourceRootId: approvedRoot.id }),
         ...(workflowMode === undefined ? {} : { workflowMode }),
       })
-    : createImportedReviewState({
+    : createImportedDocumentState({
         sessionId,
         source,
         ...(approvedRoot === undefined ? {} : { sourceRootId: approvedRoot.id }),
@@ -72,7 +72,7 @@ export async function prepareApprovedOpen(input: {
         ...(workflowMode === undefined ? {} : { workflowMode }),
       });
   const state = { ...initialState, ...(nativeAnnotationsImported ? { nativeAnnotationImportDigest: source.digest } : {}) };
-  const digest = reviewStateDigest(state);
+  const digest = documentStateDigest(state);
   const destination: DurableSaveDestination = request.recoveryDecision === "fork" || state.workflow.mode === "generated-output" || importedItems.length === 0 || !rewriteEligibility.eligible
     ? { phase: "none", generation: 0 }
     : {

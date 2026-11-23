@@ -39,17 +39,17 @@ test('actual public AppKit service work survives the exact guarded DMG migration
   await expect.poll(async()=>{if(startupError)throw startupError;if(daemon.exitCode!==null)throw Error(`Old service exited ${daemon.exitCode}`);return lstat(socket).then(info=>info.isSocket(),()=>false);},{timeout:30_000}).toBe(true);
   console.log('Legacy service ready; opening isolated browser review');
   const opened=JSON.parse((await execute(old,['open','--json','--surface','finder','--pdf',pdf],{env:environment})).stdout);
-  expect(opened.ok).toBe(true);const reviewPage=await browser.newPage();page=reviewPage;await reviewPage.goto(opened.url);
-  await expect(reviewPage.locator('[data-production-review]')).toHaveAttribute('data-initial-view-ready','true',{timeout:30_000});
+  expect(opened.ok).toBe(true);const documentPage=await browser.newPage();page=documentPage;await documentPage.goto(opened.url);
+  await expect(documentPage.locator('[data-production-review]')).toHaveAttribute('data-initial-view-ready','true',{timeout:30_000});
   await test.step('choose the disposable legacy PDF as the real save destination',async()=>{
-   await reviewPage.getByRole('button',{name:/Open automatic save options$/u}).click();
-   const dialog=reviewPage.getByRole('dialog',{name:'Choose where to save annotations'});
+   await documentPage.getByRole('button',{name:/Open automatic save options$/u}).click();
+   const dialog=documentPage.getByRole('dialog',{name:'Choose where to save annotations'});
    await dialog.getByRole('radio',{name:'Modify the original PDF'}).check();await dialog.getByRole('button',{name:'Save',exact:true}).click();await expect(dialog).toHaveCount(0);
   });
   const note=async(text:string,save:boolean)=>{
-   const target=reviewPage.locator('.pdf-workspace:not(.pdf-workspace--reference) .pdf-workspace__page[data-page-index="0"]').first();const box=await target.boundingBox();expect(box).toBeTruthy();
-   await target.click({button:'right',position:{x:box!.width*.7,y:box!.height*(save?.55:.75)}});await reviewPage.getByRole('menuitem',{name:'Add Page Note'}).click();
-   const composer=reviewPage.getByRole('region',{name:/^Page Note(?: · 1)?$/u});await composer.getByRole('textbox',{name:'Comment',exact:true}).fill(text);if(save)await composer.getByRole('button',{name:'Save',exact:true}).click();
+   const target=documentPage.locator('.pdf-workspace:not(.pdf-workspace--reference) .pdf-workspace__page[data-page-index="0"]').first();const box=await target.boundingBox();expect(box).toBeTruthy();
+   await target.click({button:'right',position:{x:box!.width*.7,y:box!.height*(save?.55:.75)}});await documentPage.getByRole('menuitem',{name:'Add Page Note'}).click();
+   const composer=documentPage.getByRole('region',{name:/^Page Note(?: · 1)?$/u});await composer.getByRole('textbox',{name:'Comment',exact:true}).fill(text);if(save)await composer.getByRole('button',{name:'Save',exact:true}).click();
   };
   await test.step('save an annotation through the actual old service writer',async()=>{
    await note('Accepted by real public 0.2.4',true);await expect.poll(()=>comments(pdf),{timeout:20_000}).toContain('Accepted by real public 0.2.4');
@@ -75,10 +75,10 @@ test('actual public AppKit service work survives the exact guarded DMG migration
   const incumbent=await status();
   // Actual browser navigation releases the view while retaining this tab's
   // native back-navigation/sessionStorage semantics. No state is synthesized.
-  await reviewPage.goto('about:blank');
+  await documentPage.goto('about:blank');
   const afterBrowserNavigation=await boundary('after-browser-navigation');
   await expect.poll(async()=>{
-   const current=await status();return current.activity.reviewPresence+current.activity.codexTasks+current.activity.transientWork;
+   const current=await status();return current.activity.documentPresence+current.activity.codexTasks+current.activity.transientWork;
   },{timeout:20_000}).toBe(0);
   console.log('Legacy view released; exact candidate must refuse unsafe legacy retirement');
   await execute('/usr/bin/hdiutil',['attach','-readonly','-nobrowse','-mountpoint',mount,resolve(artifact!)]);mounted=true;
@@ -89,24 +89,24 @@ test('actual public AppKit service work survives the exact guarded DMG migration
   expect(await status()).toMatchObject({daemonIdentity:incumbent.daemonIdentity,lifecycle:'accepting'});
   expect(JSON.parse((await execute('/usr/bin/plutil',['-convert','json','-o','-',join(destination,'Contents/Info.plist')])).stdout)).toMatchObject({CFBundleExecutable:'PlacekeeperMac',CFBundleShortVersionString:'0.2.4'});
   console.log('Candidate refusal preserved actual legacy process and draft; return to legacy UI to save it');
-  await reviewPage.goBack();
-  await expect(reviewPage.locator('[data-production-review]')).toHaveAttribute('data-initial-view-ready','true',{timeout:30_000});
+  await documentPage.goBack();
+  await expect(documentPage.locator('[data-production-review]')).toHaveAttribute('data-initial-view-ready','true',{timeout:30_000});
   await test.step('explicitly finish the protected legacy draft through its original browser UI',async()=>{
-   const composer=reviewPage.getByRole('region',{name:/^Page Note(?: · 1)?$/u});
+   const composer=documentPage.getByRole('region',{name:/^Page Note(?: · 1)?$/u});
    if(await composer.isVisible()){
     await expect(composer.getByRole('textbox',{name:'Comment',exact:true})).toHaveValue('Protected input from real public 0.2.4');
     await composer.getByRole('button',{name:'Save',exact:true}).click();
    }else{
-    const workspace=reviewPage.getByRole('button',{name:'Show workspace',exact:true});if(await workspace.isVisible())await workspace.click();
-    await reviewPage.getByRole('tab',{name:'Annotations',exact:true}).click();
-    const draft=reviewPage.locator('[data-reconciliation-draft]').filter({hasText:'Protected input from real public 0.2.4'});
+    const workspace=documentPage.getByRole('button',{name:'Show workspace',exact:true});if(await workspace.isVisible())await workspace.click();
+    await documentPage.getByRole('tab',{name:'Annotations',exact:true}).click();
+    const draft=documentPage.locator('[data-reconciliation-draft]').filter({hasText:'Protected input from real public 0.2.4'});
     await draft.getByRole('button',{name:/Apply previous Page Note annotation on page 1/u}).click();
-    await reviewPage.locator('[data-apply-confirmation]').getByRole('button',{name:'Apply',exact:true}).click();
+    await documentPage.locator('[data-apply-confirmation]').getByRole('button',{name:'Apply',exact:true}).click();
    }
    await expect.poll(()=>comments(pdf),{timeout:20_000}).toContain('Protected input from real public 0.2.4');
    await expect.poll(async()=>(await snapshots()).every(snapshot=>JSON.parse(snapshot.bytes).payload.state.pendingDrafts.length===0),{timeout:15_000}).toBe(true);
   });
-  const beforeRetirement=await snapshots();const beforeInstallPdf=await readFile(pdf);await reviewPage.close();
+  const beforeRetirement=await snapshots();const beforeInstallPdf=await readFile(pdf);await documentPage.close();
   console.log('Both legacy notes explicitly saved and no pending draft remains; requesting idle retirement');
   await expect(async()=>{const result=await requestControl(socket,{kind:'management',protocolVersion:MANAGEMENT_PROTOCOL_VERSION,operation:'shutdown-if-idle'});expect(result).toMatchObject({result:{status:'accepted'}});}).toPass({timeout:20_000});
   await expect.poll(()=>lstat(socket).then(()=>false,()=>true),{timeout:10_000}).toBe(true);

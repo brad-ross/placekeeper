@@ -32,7 +32,7 @@ it("starts a selected packaged daemon with its verified PDFium asset and no inhe
   });
   mocks.inspect.mockImplementation(async () => ({ kind: "exact", status: {
     protocolVersion: 1, daemonIdentity: manifest.daemonIdentity, readinessToken: environment.PLACEKEEPER_READINESS_TOKEN,
-    lifecycle: "accepting", activity: { reviewPresence: 0, codexTasks: 0, transientWork: 0 },
+    lifecycle: "accepting", activity: { documentPresence: 0, codexTasks: 0, transientWork: 0 },
   } }));
   await ensureServiceDaemonReady({ appSupportRoot: root, recoveryRoot: join(root, "recovery"), socketPath: join(root, "control.sock"),
     isolatedTestRoot: root, httpPort: 43123, webAssetsRoot: join(root, "web"), packagedRuntime: { root, manifest, expectedIdentity: manifest } }, "isolated-test-lease");

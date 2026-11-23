@@ -1,0 +1,283 @@
+import {
+  decodePlacekeeperLinkFragment,
+  encodePlacekeeperLinkFragment,
+  type PlacekeeperLinkLocation,
+} from '../../../../packages/core/src/placekeeper-link.js';
+
+export interface DocumentLocationHistorySnapshot {
+  readonly canBack: boolean;
+  readonly canForward: boolean;
+}
+
+export type DocumentLocationRestore = (direction: 'back' | 'forward' | 'unknown') => void | boolean | Promise<void | boolean>;
+
+export interface DocumentLocationHistoryPort {
+  start(onPop: DocumentLocationRestore): void;
+  read(): PlacekeeperLinkLocation;
+  replace(location: PlacekeeperLinkLocation): void;
+  push(location: PlacekeeperLinkLocation): void;
+  back(): boolean;
+  forward(): boolean;
+  snapshot(): DocumentLocationHistorySnapshot;
+  subscribe(listener: (snapshot: DocumentLocationHistorySnapshot) => void): () => void;
+  dispose(): void;
+}
+
+export interface DocumentLocationHistoryEnvironment {
+  readonly location: { hash: string };
+  readonly history: Pick<History, 'state' | 'length' | 'replaceState' | 'pushState' | 'back' | 'forward'>;
+  addEventListener(type: 'popstate', listener: () => void): void;
+  removeEventListener(type: 'popstate', listener: () => void): void;
+}
+
+export class MemoryDocumentLocationHistory implements DocumentLocationHistoryPort {
+  private readonly entries: PlacekeeperLinkLocation[];
+  private index = 0;
+  private onPop: DocumentLocationRestore | null = null;
+  private readonly listeners = new Set<(snapshot: DocumentLocationHistorySnapshot) => void>();
+  private lastPublishedSnapshot: DocumentLocationHistorySnapshot = {
+    canBack: false,
+    canForward: false,
+  };
+
+  constructor(initial: PlacekeeperLinkLocation = { kind: 'page', page: 1 }) {
+    this.entries = [structuredClone(initial)];
+  }
+
+  start(onPop: DocumentLocationRestore): void {
+    this.onPop = onPop;
+    this.publish();
+  }
+
+  read(): PlacekeeperLinkLocation {
+    return structuredClone(this.entries[this.index]!);
+  }
+
+  replace(location: PlacekeeperLinkLocation): void {
+    this.entries[this.index] = structuredClone(location);
+  }
+
+  push(location: PlacekeeperLinkLocation): void {
+    this.entries.splice(this.index + 1, Infinity, structuredClone(location));
+    this.index += 1;
+    this.publish();
+  }
+
+  /** Native focused opens use the same settled restoration as Back/Forward. */
+  async navigate(location: PlacekeeperLinkLocation): Promise<void> {
+    const restore = this.onPop;
+    if (restore === null) throw new Error('Reader navigation is not ready.');
+    this.entries.splice(this.index + 1, Infinity, structuredClone(location));
+    this.index += 1;
+    const restored = await restore('unknown');
+    if (this.onPop !== restore || restored === false) throw new Error('Reader navigation was superseded.');
+    this.publish();
+  }
+
+  back(): boolean {
+    return this.move(-1, 'back');
+  }
+
+  forward(): boolean {
+    return this.move(1, 'forward');
+  }
+
+  snapshot(): DocumentLocationHistorySnapshot {
+    return { canBack: this.index > 0, canForward: this.index < this.entries.length - 1 };
+  }
+
+  subscribe(listener: (snapshot: DocumentLocationHistorySnapshot) => void): () => void {
+    this.listeners.add(listener);
+    listener(this.snapshot());
+    return () => this.listeners.delete(listener);
+  }
+
+  dispose(): void {
+    this.onPop = null;
+    this.listeners.clear();
+  }
+
+  private move(offset: -1 | 1, direction: 'back' | 'forward'): boolean {
+    const next = this.index + offset;
+    if (next < 0 || next >= this.entries.length) return false;
+    this.index = next;
+    const restoring = this.onPop?.(direction);
+    if (restoring === undefined) this.publish();
+    else void Promise.resolve(restoring).then(
+      () => this.publish(),
+      () => this.publish(),
+    );
+    return true;
+  }
+
+  private publish(): void {
+    const snapshot = this.snapshot();
+    if (
+      snapshot.canBack === this.lastPublishedSnapshot.canBack
+      && snapshot.canForward === this.lastPublishedSnapshot.canForward
+    ) return;
+    this.lastPublishedSnapshot = snapshot;
+    for (const listener of this.listeners) listener(snapshot);
+  }
+}
+
+interface DocumentHistoryEntry {
+  readonly index: number;
+  readonly baseline: number;
+}
+
+/**
+ * Marker key of the browser `history.state` entries this class owns. Entries
+ * survive reloads, so a page reloaded into a newer build must still recognize
+ * entries an earlier build pushed: the key is frozen. `historyState` and
+ * `historyEntryState` are the only places that read or write it.
+ */
+export const DOCUMENT_HISTORY_STATE_MARKER = 'placekeeperReviewLocation' as const;
+
+type StoredHistoryState = { readonly [DOCUMENT_HISTORY_STATE_MARKER]: 1 } & DocumentHistoryEntry;
+
+export function historyState(value: unknown): DocumentHistoryEntry | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const candidate = value as Partial<StoredHistoryState>;
+  return candidate[DOCUMENT_HISTORY_STATE_MARKER] === 1
+    && Number.isSafeInteger(candidate.index)
+    && (candidate.index ?? -1) >= 0
+    && Number.isSafeInteger(candidate.baseline)
+    && (candidate.baseline ?? -1) >= 0
+    ? { index: candidate.index!, baseline: candidate.baseline! }
+    : null;
+}
+
+export function historyEntryState(entry: DocumentHistoryEntry): StoredHistoryState {
+  return { [DOCUMENT_HISTORY_STATE_MARKER]: 1, index: entry.index, baseline: entry.baseline };
+}
+
+export class BrowserDocumentLocationHistory implements DocumentLocationHistoryPort {
+  private index = 0;
+  private maximumIndex = 0;
+  private baseline = 0;
+  private onPop: DocumentLocationRestore | null = null;
+  private readonly listeners = new Set<(snapshot: DocumentLocationHistorySnapshot) => void>();
+  private lastPublishedSnapshot: DocumentLocationHistorySnapshot = {
+    canBack: false,
+    canForward: false,
+  };
+  private started = false;
+
+  constructor(private readonly environment: DocumentLocationHistoryEnvironment) {}
+
+  start(onPop: DocumentLocationRestore): void {
+    this.onPop = onPop;
+    if (this.started) return;
+    this.started = true;
+    const existing = historyState(this.environment.history.state);
+    if (existing === null) {
+      this.index = 0;
+      this.baseline = Math.max(0, this.environment.history.length - 1);
+      this.maximumIndex = 0;
+      this.environment.history.replaceState(this.entryState(), '', this.currentHash());
+    } else {
+      this.index = existing.index;
+      this.baseline = existing.baseline;
+      this.maximumIndex = Math.max(
+        this.index,
+        this.environment.history.length - this.baseline - 1,
+      );
+    }
+    this.environment.addEventListener('popstate', this.handlePop);
+    this.publish();
+  }
+
+  read(): PlacekeeperLinkLocation {
+    return decodePlacekeeperLinkFragment(this.environment.location.hash.replace(/^#/u, ''));
+  }
+
+  replace(location: PlacekeeperLinkLocation): void {
+    const fragment = encodePlacekeeperLinkFragment(location);
+    if (this.currentHash() === `#${fragment}` && historyState(this.environment.history.state) !== null) {
+      return;
+    }
+    this.environment.history.replaceState(this.entryState(), '', `#${fragment}`);
+  }
+
+  push(location: PlacekeeperLinkLocation): void {
+    this.index += 1;
+    this.maximumIndex = this.index;
+    this.environment.history.pushState(
+      this.entryState(),
+      '',
+      `#${encodePlacekeeperLinkFragment(location)}`,
+    );
+    this.publish();
+  }
+
+  back(): boolean {
+    if (this.index <= 0) return false;
+    this.environment.history.back();
+    return true;
+  }
+
+  forward(): boolean {
+    if (this.index >= this.maximumIndex) return false;
+    this.environment.history.forward();
+    return true;
+  }
+
+  snapshot(): DocumentLocationHistorySnapshot {
+    return { canBack: this.index > 0, canForward: this.index < this.maximumIndex };
+  }
+
+  subscribe(listener: (snapshot: DocumentLocationHistorySnapshot) => void): () => void {
+    this.listeners.add(listener);
+    listener(this.snapshot());
+    return () => this.listeners.delete(listener);
+  }
+
+  dispose(): void {
+    if (this.started) this.environment.removeEventListener('popstate', this.handlePop);
+    this.started = false;
+    this.onPop = null;
+    this.listeners.clear();
+  }
+
+  private readonly handlePop = () => {
+    const state = historyState(this.environment.history.state);
+    if (state === null || state.baseline !== this.baseline) return;
+    const direction = state.index < this.index
+      ? 'back'
+      : state.index > this.index ? 'forward' : 'unknown';
+    this.index = state.index;
+    this.maximumIndex = Math.max(
+      this.maximumIndex,
+      this.environment.history.length - this.baseline - 1,
+    );
+    const restoring = this.onPop?.(direction);
+    // Do not expose the newly available opposite-direction control until the
+    // exact viewer location has settled. Otherwise a fast Forward after Back
+    // can race the coordinator's live geometry mirror and degrade to a coarse
+    // page-top restore.
+    if (restoring === undefined) this.publish();
+    else void Promise.resolve(restoring).then(
+      () => this.publish(),
+      () => this.publish(),
+    );
+  };
+
+  private entryState(): StoredHistoryState {
+    return historyEntryState({ index: this.index, baseline: this.baseline });
+  }
+
+  private currentHash(): string {
+    return this.environment.location.hash || '';
+  }
+
+  private publish(): void {
+    const snapshot = this.snapshot();
+    if (
+      snapshot.canBack === this.lastPublishedSnapshot.canBack &&
+      snapshot.canForward === this.lastPublishedSnapshot.canForward
+    ) return;
+    this.lastPublishedSnapshot = snapshot;
+    for (const listener of this.listeners) listener(snapshot);
+  }
+}

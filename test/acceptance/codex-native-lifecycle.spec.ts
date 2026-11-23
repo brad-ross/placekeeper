@@ -40,7 +40,7 @@ test('test MCP bridge composes protected work, delayed save, peer replacement, r
       createdAt: timestamp, updatedAt: timestamp, payload: { quote: anchor.quote, prefix: '', suffix: '', rect: anchor.rect, segmentRects: anchor.segmentRects, reliable: true, comment: 'Before refresh' } } });
     await reached.promise;
     await peer.call('command', { type: 'edit', expectedRevision: initialRevision + 1, id: itemId, updatedAt: timestamp, payload: { comment: 'Accepted while saving' } });
-    await expect(peerPage.locator(`[data-review-item="${itemId}"]`)).toContainText('Accepted while saving');
+    await expect(peerPage.locator(`[data-annotation-item="${itemId}"]`)).toContainText('Accepted while saving');
     const savingState = observe('accepted-edit-saving');
     expect(savingState.items[0]?.id).toBe(itemId);
     expect(bridge.broker.saveStatus(bridge.sessionId)?.sync).toMatchObject({ phase: 'saving', desiredRevision: initialRevision + 2, savedRevision: initialRevision });
@@ -91,7 +91,7 @@ test('test MCP bridge composes protected work, delayed save, peer replacement, r
     // A separate recovery root cannot reuse this session's journal/snapshot.
     const portableBroker = new SessionBroker({ recoveryRoot: join(bridge.root, 'portable-recovery') });
     try {
-      const portable = await portableBroker.openReview({ pdfPath: join(bridge.root, 'reviewed.pdf'), surface: 'codex-native' });
+      const portable = await portableBroker.openDocument({ pdfPath: join(bridge.root, 'reviewed.pdf'), surface: 'codex-native' });
       if (portable.kind === 'recovery-offered') throw new Error('Portable PDF unexpectedly needed this review recovery');
       expect(portableBroker.state(portable.launch.sessionId)?.items[0]).toMatchObject({ id: itemId, payload: { comment: 'Recover this unsaved comment' } });
       expect(portableBroker.state(portable.launch.sessionId)?.pendingDrafts).toEqual([]);
@@ -108,7 +108,7 @@ test('test MCP bridge isolates two chats, pending-save observations and obsolete
     const first = await bridge.panel();
     const otherPath = join(bridge.root, 'other.pdf');
     await writeFile(otherPath, await readFile('test/fixtures/pdfs/reference-navigation.pdf'));
-    const opened = await bridge.broker.openReview({ pdfPath: otherPath, surface: 'codex-native' });
+    const opened = await bridge.broker.openDocument({ pdfPath: otherPath, surface: 'codex-native' });
     if (opened.kind === 'recovery-offered') throw new Error('Unexpected recovery');
     const otherTask = `other-${randomUUID()}`;
     const second = await bridge.panel(undefined, { sessionId: opened.launch.sessionId, task: otherTask });
@@ -122,7 +122,7 @@ test('test MCP bridge isolates two chats, pending-save observations and obsolete
     const handle = initial.evidence.handle.value;
     expect(await bridge.liveContext.evidence.retrieve({ taskSessionId: otherTask, handle, request: { kind: 'page-text', pageIndex: 0 } })).toMatchObject({ status: 'unavailable' });
     const conflict = bridge.manager.stageLaunch({ sessionId: bridge.sessionId, kind: 'opened' })!;
-    expect(bridge.manager.claimLaunch({ bindProof: conflict.bindProof, reviewSessionId: bridge.sessionId, documentGeneration: 1, taskSessionId: otherTask })).toBe(false);
+    expect(bridge.manager.claimLaunch({ bindProof: conflict.bindProof, documentSessionId: bridge.sessionId, documentGeneration: 1, taskSessionId: otherTask })).toBe(false);
     await first.call('chooseCopy', { filename: 'chat-copy.pdf' }); await bridge.saving.drain();
     const gate = Promise.withResolvers<void>(), reached = Promise.withResolvers<void>(); unblock = gate.resolve;
     bridge.setBeforeWrite(async () => { reached.resolve(); await gate.promise; });
@@ -151,29 +151,29 @@ for (const editsExistingItem of [true, false]) {
     await page.route('**/reattachment-identity-test', route => route.fulfill({ contentType: 'text/html', body: '<!doctype html><div id="root"></div>' }));
     await page.goto('/reattachment-identity-test');
     await page.evaluate(async (editsExistingItem) => {
-      const { ReconciliationWorkspace } = await import(/* @vite-ignore */ ('/apps/web/src/review/ReconciliationWorkspace.tsx' as string)) as typeof import('../../apps/web/src/review/ReconciliationWorkspace.js');
-      const { createReviewState, canonicalizeReviewItem } = await import(/* @vite-ignore */ ('/packages/core/src/review-model.ts' as string)) as typeof import('../../packages/core/src/review-model.js');
-      const { reduceReview } = await import(/* @vite-ignore */ ('/packages/core/src/review-reducer.ts' as string)) as typeof import('../../packages/core/src/review-reducer.js');
+      const { ReconciliationWorkspace } = await import(/* @vite-ignore */ ('/apps/web/src/reader/ReconciliationWorkspace.tsx' as string)) as typeof import('../../apps/web/src/reader/ReconciliationWorkspace.js');
+      const { createDocumentState, canonicalizeAnnotation } = await import(/* @vite-ignore */ ('/packages/core/src/document-model.ts' as string)) as typeof import('../../packages/core/src/document-model.js');
+      const { reduceDocument } = await import(/* @vite-ignore */ ('/packages/core/src/document-reducer.ts' as string)) as typeof import('../../packages/core/src/document-reducer.js');
       const { default: { createElement } } = await import(/* @vite-ignore */ ('/@id/react' as string)) as { default: typeof import('react') };
       const { default: { createRoot } } = await import(/* @vite-ignore */ ('/@id/react-dom/client' as string)) as { default: typeof import('react-dom/client') };
       const itemId = '00000000-0000-4000-8000-000000000001', draftId = '00000000-0000-4000-8000-000000000002';
       const now = '2026-10-06T23:35:08.522Z';
       const anchor = { kind: 'selection' as const, pageIndex: 0, quote: 'old quote', prefix: '', suffix: '', rect: { x: 72, y: 92, width: 130, height: 12 }, segmentRects: [{ x: 72, y: 92, width: 130, height: 12 }] };
-      const original = canonicalizeReviewItem({ id: itemId, kind: 'highlight', pageIndex: 0, createdAt: now, updatedAt: now, payload: { ...anchor, reliable: true, comment: 'Peer accepted edit' } }, { ownerViewId: 'peer', baseGeneration: 1 });
-      let state = { ...createReviewState({ sessionId: 'identity-test', source: { fileId: 'source', digest: 'a'.repeat(64), byteLength: 10 }, documentGeneration: 2 }),
+      const original = canonicalizeAnnotation({ id: itemId, kind: 'highlight', pageIndex: 0, createdAt: now, updatedAt: now, payload: { ...anchor, reliable: true, comment: 'Peer accepted edit' } }, { ownerViewId: 'peer', baseGeneration: 1 });
+      let state = { ...createDocumentState({ sessionId: 'identity-test', source: { fileId: 'source', digest: 'a'.repeat(64), byteLength: 10 }, documentGeneration: 2 }),
         items: editsExistingItem ? [{ ...original, reconciliation: { ...original.reconciliation!, disposition: { kind: 'missing' as const, reason: 'semantic-anchor-not-found' } } }] : [],
         pendingDrafts: [{ id: draftId, ownerViewId: 'disconnected-editor', baseGeneration: 1, revision: 27, kind: 'highlight' as const,
           ...(editsExistingItem ? { targetItemId: itemId } : {}), pageIndex: 0, text: 'Protected edit', anchor,
           disposition: { kind: 'missing' as const, reason: 'semantic-anchor-not-found' }, status: 'frozen' as const, createdAt: now, updatedAt: now }] };
-      const commands: import('../../packages/core/src/review-model.js').ReviewCommand[] = [];
+      const commands: import('../../packages/core/src/document-model.js').DocumentCommand[] = [];
       const events: string[] = [];
       const mounted = createRoot(document.getElementById('root')!);
       const publish = () => { (window as unknown as { identityResult: unknown }).identityResult = { state, commands, events }; };
-      const transport: import('../../apps/web/src/review/authoring-session.js').ReviewInteractionTransport = {
+      const transport: import('../../apps/web/src/reader/authoring-session.js').DocumentInteractionTransport = {
         async beginInteraction(input) { events.push('begin'); return { status: 'accepted', generation: input.generation, ownerViewId: 'fresh-editor' }; },
         async finalizeInteraction(input) {
           events.push('finalize');
-          state = reduceReview(state, { type: 'apply-draft', expectedRevision: state.revision, id: input.draftId,
+          state = reduceDocument(state, { type: 'apply-draft', expectedRevision: state.revision, id: input.draftId,
             expectedDraftRevision: input.expectedDraftRevision, ownerViewId: 'fresh-editor', updatedAt: now }) as typeof state;
           render(); publish();
           return { status: 'finalized', interactionToken: input.interactionToken, generation: 2, outcome: input.outcome, reviewRevision: state.revision };
@@ -185,7 +185,7 @@ for (const editsExistingItem of [true, false]) {
         mounted.render(createElement(ReconciliationWorkspace, { state, refreshStatus: 'idle',
           selectionUpdate: { kind: 'reliable', generation: 1, anchor: { ...anchor, quote: 'New reattachment target', reliable: true } },
           interactionLifecycle: transport, interactionLifecycleRequired: true,
-          onCommand: async command => { commands.push(command); events.push(command.type); state = reduceReview(state, command) as typeof state; render(); publish(); return state; },
+          onCommand: async command => { commands.push(command); events.push(command.type); state = reduceDocument(state, command) as typeof state; render(); publish(); return state; },
           renderSummary: summary => createElement('div', null, createElement('ul', null, summary.rows), summary.editor, summary.message),
         }));
       }
@@ -194,7 +194,7 @@ for (const editsExistingItem of [true, false]) {
     await page.locator('[data-reconciliation-entry^="draft:"]').getByRole('button', { name: /Reattach previous/ }).click();
     await page.getByRole('button', { name: 'Attach', exact: true }).click();
     await expect.poll(() => page.evaluate(() => (window as unknown as { identityResult: { events: string[] } }).identityResult.events)).toEqual(['begin', 'put-draft', 'finalize', 'acknowledge']);
-    const result = await page.evaluate(() => (window as unknown as { identityResult: { state: import('../../packages/core/src/review-model.js').ReviewState; commands: import('../../packages/core/src/review-model.js').ReviewCommand[] } }).identityResult);
+    const result = await page.evaluate(() => (window as unknown as { identityResult: { state: import('../../packages/core/src/document-model.js').DocumentState; commands: import('../../packages/core/src/document-model.js').DocumentCommand[] } }).identityResult);
     expect(result.state.pendingDrafts).toEqual([]);
     expect(result.state.items).toHaveLength(1);
     expect(result.state.items[0]).toMatchObject({ id: editsExistingItem ? '00000000-0000-4000-8000-000000000001' : '00000000-0000-4000-8000-000000000002', payload: { quote: 'New reattachment target', comment: 'Protected edit' }, reconciliation: { disposition: { kind: 'resolved', generation: 2 } } });

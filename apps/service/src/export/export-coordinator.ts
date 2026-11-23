@@ -9,14 +9,14 @@ import { dirname, join } from "node:path";
 
 import type {
   PdfWriter,
-  ReviewAnnotation,
+  PdfWriterAnnotation,
 } from "../../../../packages/core/src/pdf-writer.js";
 import type {
-  ReviewItem,
-  ReviewSourceIdentity,
-  ReviewWorkflowMode,
-} from "../../../../packages/core/src/review-model.js";
-import type { ReviewStateSummaryV1 } from "../../../../packages/core/src/live-context.js";
+  Annotation,
+  DocumentSourceIdentity,
+  DocumentWorkflowMode,
+} from "../../../../packages/core/src/document-model.js";
+import type { DocumentStateSummaryV1 } from "../../../../packages/core/src/live-context.js";
 import {
   runPdfBackend,
   type PdfBackendRunOptions,
@@ -28,38 +28,38 @@ import {
 import { syncDirectory } from "../files/durability.js";
 import { preserveReplacementPermissions, publishFile, stagePublication, syncPublishedFile, type FilePublication } from "../platform/file-publication.js";
 import { SessionControlRegistry } from "../sessions/control-socket.js";
-import { reviewedPdfFilename } from "./output-names.js";
+import { annotatedPdfFilename } from "./output-names.js";
 import {
-  verifyReviewedPdf,
+  verifyAnnotatedPdf,
   type PdfExportVerifier,
   type PdfVerificationReport,
 } from "./pdf-verifier.js";
 
-export interface FrozenReviewDelivery {
+export interface FrozenDocumentDelivery {
   readonly manageNativeAnnotations?: boolean;
   readonly sessionId: string;
-  readonly source: ReviewSourceIdentity;
+  readonly source: DocumentSourceIdentity;
   readonly originalDigest: string;
   readonly revision: number;
   readonly sourceSnapshotPath: string;
-  readonly annotations: readonly ReviewAnnotation[];
+  readonly annotations: readonly PdfWriterAnnotation[];
   /** Canonical semantic evidence from the same frozen revision as annotations. */
-  readonly items: readonly ReviewItem[];
+  readonly items: readonly Annotation[];
   readonly sourceRootId?: string;
   readonly sourceRootPath?: string;
-  readonly workflowMode: ReviewWorkflowMode;
+  readonly workflowMode: DocumentWorkflowMode;
   readonly documentGeneration: number;
   readonly dispositionDigest: string;
   readonly stateDigest: string;
-  readonly exportEligibility: ReviewStateSummaryV1["export"];
+  readonly exportEligibility: DocumentStateSummaryV1["export"];
   readonly staleConfirmed?: true;
 }
 
 export type FrozenPdfDelivery = Omit<
-  FrozenReviewDelivery,
+  FrozenDocumentDelivery,
   "items" | "sourceRootId" | "sourceRootPath" | "workflowMode" | "documentGeneration" | "dispositionDigest" | "stateDigest" | "exportEligibility" | "staleConfirmed"
 > &
-  Partial<Pick<FrozenReviewDelivery, "items" | "sourceRootId" | "sourceRootPath" | "workflowMode" | "documentGeneration" | "dispositionDigest" | "stateDigest" | "exportEligibility" | "staleConfirmed">>;
+  Partial<Pick<FrozenDocumentDelivery, "items" | "sourceRootId" | "sourceRootPath" | "workflowMode" | "documentGeneration" | "dispositionDigest" | "stateDigest" | "exportEligibility" | "staleConfirmed">>;
 
 export interface PdfExportResult {
   readonly kind: "reviewed-copy" | "original-replacement";
@@ -158,7 +158,7 @@ export class ExportCoordinator {
     this.#writer = options.writer;
     this.#capabilities = options.capabilities;
     this.#controls = options.controls ?? new SessionControlRegistry();
-    this.#verify = options.verify ?? verifyReviewedPdf;
+    this.#verify = options.verify ?? verifyAnnotatedPdf;
     this.#backend = options.backend ?? {};
     this.#recordSuccessfulExport =
       options.recordSuccessfulExport ?? (async () => undefined);
@@ -168,7 +168,7 @@ export class ExportCoordinator {
     this.#validateFrozenDelivery = options.validateFrozenDelivery ?? (() => true);
   }
 
-  exportReviewedCopy(delivery: FrozenPdfDelivery, assertAuthority?: () => void): Promise<PdfExportResult> {
+  exportAnnotatedCopy(delivery: FrozenPdfDelivery, assertAuthority?: () => void): Promise<PdfExportResult> {
     assertAuthority?.();
     this.#assertDeliverable(delivery);
     return this.#runOnce(delivery, "copy", () => this.#runCopy(delivery, assertAuthority));
@@ -251,7 +251,7 @@ export class ExportCoordinator {
     if (delivery.annotations.length === 0) {
       throw new ExportCoordinatorError(
         "EMPTY_REVIEW",
-        "There is no review feedback to deliver. Add an annotation first.",
+        "There are no annotations to deliver. Add an annotation first.",
       );
     }
   }
@@ -269,7 +269,7 @@ export class ExportCoordinator {
     if (!await this.#validateFrozenDelivery(delivery)) {
       throw new ExportCoordinatorError(
         "EXPORT_FENCE_STALE",
-        "The PDF generation or review state changed during export. Refresh and export again.",
+        "The PDF generation or annotation state changed during export. Refresh and export again.",
       );
     }
   }
@@ -279,7 +279,7 @@ export class ExportCoordinator {
     if (path === undefined) {
       throw new ExportCoordinatorError(
         "SESSION_CAPABILITY_REVOKED",
-        "The review session no longer has access to its original PDF.",
+        "This document no longer has access to its original PDF.",
       );
     }
     return path;
@@ -366,7 +366,7 @@ export class ExportCoordinator {
       for (;;) {
         outputPath = join(
           directory,
-          reviewedPdfFilename(originalPath, collisionIndex),
+          annotatedPdfFilename(originalPath, collisionIndex),
         );
         try {
           lease.signal.throwIfAborted();
@@ -401,6 +401,7 @@ export class ExportCoordinator {
         warning ??= committedWarning("reviewed-copy");
       }
       return {
+        // Legacy wire kind: see LEGACY_ANNOTATED_COPY_EXPORT_KIND for when it can flip.
         kind: "reviewed-copy",
         path: outputPath,
         revision: delivery.revision,
@@ -442,7 +443,7 @@ export class ExportCoordinator {
       if (validatedPath !== originalPath) {
         throw new ExportCoordinatorError(
           "SOURCE_SNAPSHOT_INVALID",
-          "The original PDF target changed after the review opened.",
+          "The original PDF target changed after the document opened.",
         );
       }
       const originalInfo = await stat(validatedPath);

@@ -16,19 +16,19 @@ import { Viewport } from '@embedpdf/plugin-viewport/react';
 import { AnchoredZoomGestureWrapper as ZoomGestureWrapper } from './AnchoredZoomGestureWrapper.js';
 import { useContext, useMemo, useRef, useSyncExternalStore } from 'react';
 import { readingLayoutPadding, readingPageOffset, type TextFitLayout } from './text-fit-layout.js';
-import type { ReviewAnnotation } from '../../../../packages/core/src/pdf-writer.js';
+import type { PdfWriterAnnotation } from '../../../../packages/core/src/pdf-writer.js';
 import type { PdfSearchResult } from './pdf-search-model.js';
 import { combinePageRotation, positionOwnedRect, selectionLayerStyle } from './owned-overlay.js';
 import { groupOwnedMarkGeometryByPage, hitTestOwnedMark } from './owned-mark-hit-test.js';
 import {
   mergeAuthoringPreviewProjections,
-} from '../review/annotation-projection.js';
+} from '../reader/annotation-projection.js';
 import {
   pageLinkAnnotationsFromRegistry,
   sourceAnnotationLinkRenderers,
 } from './PdfLinkControl.js';
 import { DestinationBandLayer, ReferencePdfViewport } from './ReferencePdfViewport.js';
-import type { DestinationBand } from '../review/navigation-coordinator.js';
+import type { DestinationBand } from '../reader/navigation-coordinator.js';
 import {
   buildAnnotationRenderingState,
   PdfAnnotationLayers,
@@ -70,10 +70,10 @@ export interface PdfWorkspaceProps {
   plugins: PluginBatchRegistrations;
   documentLabel?: string;
   onInitialized?: (registry: PluginRegistry) => Promise<void>;
-  ownedAnnotations?: readonly ReviewAnnotation[];
+  ownedAnnotations?: readonly PdfWriterAnnotation[];
   sourceNativeAnnotations?: readonly SourceNativeAnnotation[];
   sourceAnnotations?: readonly ExistingAnnotation[];
-  authoringPreview?: readonly ReviewAnnotation[] | null;
+  authoringPreview?: readonly PdfWriterAnnotation[] | null;
   keyboardPageNoteCursor?: ViewerPagePoint | null;
   keyboardPageNoteSurface?: PdfAnnotationSurface;
   onKeyboardPageNoteKey?: (key: string) => void;
@@ -102,7 +102,7 @@ export interface PdfWorkspaceProps {
 }
 
 const PDF_TEXT_SELECTION_STYLE = {
-  background: 'var(--review-pdf-selection-bg)',
+  background: 'var(--reader-pdf-selection-bg)',
 } as const;
 const noReadingLayout = () => null;
 const noReadingSubscription = () => () => undefined;
@@ -535,8 +535,8 @@ export function PdfWorkspace({
                     position: 'absolute',
                     left: 0,
                     top: 0,
-                    width: `calc(100% + ${(previewLimit === null ? runway.right : 0)}px + var(--review-scrollport-trailing-space, 0px))`,
-                    height: `calc(100% + ${(previewLimit === null ? runway.bottom : 0)}px + ${previewLimit === null && runway.bottom > 0 ? 'var(--review-page-bottom-clearance, 64px)' : '0px'})`,
+                    width: `calc(100% + ${(previewLimit === null ? runway.right : 0)}px + var(--reader-scrollport-trailing-space, 0px))`,
+                    height: `calc(100% + ${(previewLimit === null ? runway.bottom : 0)}px + ${previewLimit === null && runway.bottom > 0 ? 'var(--reader-page-bottom-clearance, 64px)' : '0px'})`,
                     pointerEvents: 'none',
                     visibility: 'hidden',
                   }}

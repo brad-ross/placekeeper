@@ -5,22 +5,22 @@ import {
   createExecutionBaseline,
   createPdfEvidenceCatalog,
   createReconciliationOutcome,
-  createReviewSnapshot,
-  createReviewStateSummary,
+  createDocumentSnapshot,
+  createDocumentStateSummary,
   createUnavailableLiveContextObservation,
-  diffReviewSnapshots,
-  reviewSemanticDigest,
+  diffDocumentSnapshots,
+  documentSemanticDigest,
   type ExistingPdfAnnotation,
 } from "../src/live-context.js";
 import { createCompleteDisposition } from "../src/disposition.js";
-import type { ReviewItem } from "../src/review-model.js";
+import type { Annotation } from "../src/document-model.js";
 
 const id = (suffix: number) =>
   `00000000-0000-4000-8000-${suffix.toString().padStart(12, "0")}`;
 
 const rect = (x: number, y: number) => ({ x, y, width: 80, height: 14 });
 
-function replaceItem(suffix: number, pageIndex: number, y: number, proposedText: string): ReviewItem {
+function replaceItem(suffix: number, pageIndex: number, y: number, proposedText: string): Annotation {
   const geometry = rect(72, y);
   return {
     id: id(suffix),
@@ -40,7 +40,7 @@ function replaceItem(suffix: number, pageIndex: number, y: number, proposedText:
   };
 }
 
-function crossPageReplaceItem(): ReviewItem {
+function crossPageReplaceItem(): Annotation {
   const pages = [
     {
       pageIndex: 1,
@@ -80,9 +80,9 @@ const source = { fileId: id(90), digest: "a".repeat(64), byteLength: 400 };
 function snapshot(
   cursor: string,
   revision: number,
-  items: readonly ReviewItem[],
+  items: readonly Annotation[],
 ) {
-  return createReviewSnapshot({
+  return createDocumentSnapshot({
     cursor,
     revision,
     items,
@@ -126,15 +126,15 @@ describe("live PDF context contracts", () => {
       second.id,
       first.id,
     ]);
-    expect(reviewSemanticDigest(reordered)).toBe(reviewSemanticDigest(timestampOnlyChange));
-    expect(reviewSemanticDigest(reordered)).not.toBe(
-      reviewSemanticDigest([{ ...first, payload: { ...first.payload, proposedText: "different" } }, second]),
+    expect(documentSemanticDigest(reordered)).toBe(documentSemanticDigest(timestampOnlyChange));
+    expect(documentSemanticDigest(reordered)).not.toBe(
+      documentSemanticDigest([{ ...first, payload: { ...first.payload, proposedText: "different" } }, second]),
     );
   });
 
   it("reports prompt-safe generated-output reconciliation and export eligibility", () => {
     const resolved = replaceItem(1, 0, 50, "replacement");
-    const unresolved: ReviewItem = {
+    const unresolved: Annotation = {
       ...replaceItem(2, 0, 80, "uncertain"),
       reconciliation: {
         schemaVersion: 1,
@@ -154,7 +154,7 @@ describe("live PDF context contracts", () => {
         previousAnchors: [],
       },
     };
-    const summary = createReviewStateSummary({
+    const summary = createDocumentStateSummary({
       workflow: {
         schemaVersion: 1,
         mode: "generated-output",
@@ -181,7 +181,7 @@ describe("live PDF context contracts", () => {
     const removed = replaceItem(2, 0, 100, "remove me");
     const initial = snapshot("cursor-1", 2, [removed, first]);
 
-    expect(diffReviewSnapshots({ current: initial })).toEqual({
+    expect(diffDocumentSnapshots({ current: initial })).toEqual({
       mode: "full",
       reason: "initial",
       cursor: "cursor-1",
@@ -190,7 +190,7 @@ describe("live PDF context contracts", () => {
       itemCount: 2,
       items: initial.items,
     });
-    expect(diffReviewSnapshots({ previous: initial, current: initial, cursorStatus: "known" })).toEqual({
+    expect(diffDocumentSnapshots({ previous: initial, current: initial, cursorStatus: "known" })).toEqual({
       mode: "unchanged",
       baseCursor: "cursor-1",
       cursor: "cursor-1",
@@ -202,7 +202,7 @@ describe("live PDF context contracts", () => {
     const edited = { ...first, payload: { ...first.payload, proposedText: "edited replacement" } };
     const added = replaceItem(3, 1, 30, "new item");
     const current = snapshot("cursor-2", 5, [added, edited]);
-    const delta = diffReviewSnapshots({ previous: initial, current, cursorStatus: "known" });
+    const delta = diffDocumentSnapshots({ previous: initial, current, cursorStatus: "known" });
 
     expect(delta).toMatchObject({
       mode: "delta",
@@ -222,7 +222,7 @@ describe("live PDF context contracts", () => {
     const previous = snapshot("cursor-old", 1, [replaceItem(1, 0, 10, "old")]);
     const current = snapshot("cursor-current", 2, [replaceItem(2, 1, 10, "new")]);
 
-    expect(diffReviewSnapshots({ previous, current, cursorStatus: "unknown" })).toEqual({
+    expect(diffDocumentSnapshots({ previous, current, cursorStatus: "unknown" })).toEqual({
       mode: "full",
       reason: "unknown-cursor",
       cursor: "cursor-current",
@@ -234,7 +234,7 @@ describe("live PDF context contracts", () => {
   });
 
   it("keeps canonical Review Items separate from read-only existing PDF annotations", () => {
-    const review = snapshot("cursor-1", 1, [replaceItem(1, 0, 10, "replacement")]);
+    const documentSession = snapshot("cursor-1", 1, [replaceItem(1, 0, 10, "replacement")]);
     const existing: ExistingPdfAnnotation = {
       id: id(1),
       origin: "source-pdf",
@@ -251,7 +251,7 @@ describe("live PDF context contracts", () => {
         schemaVersion: 1,
         value: "evidence_handle_1234567890",
         documentGeneration: 3,
-        observationDigest: review.semanticDigest,
+        observationDigest: documentSession.semanticDigest,
         expiresAt: "2026-08-12T12:05:00.000Z",
         maxBytes: 1_000_000,
       },
@@ -264,13 +264,13 @@ describe("live PDF context contracts", () => {
         documentGeneration: 3,
         source,
         reviewRevision: 1,
-        stateDigest: review.semanticDigest,
+        stateDigest: documentSession.semanticDigest,
       },
       saveStatus: {
         destination: { phase: "active", generation: 1, kind: "copy" },
         sync: { phase: "not-saved", desiredRevision: 1, savedRevision: 0, failure: "write-failed" },
       },
-      reviewItems: diffReviewSnapshots({ current: review }),
+      reviewItems: diffDocumentSnapshots({ current: documentSession }),
       existingPdfAnnotations: { items: [existing], warnings: [] },
       evidence,
     });
@@ -408,7 +408,7 @@ describe("live PDF context contracts", () => {
   });
 });
 
-function pagesRect(item: ReviewItem, index: number): Record<string, number> {
+function pagesRect(item: Annotation, index: number): Record<string, number> {
   const pages = item.payload.pages;
   if (!Array.isArray(pages)) throw new Error("Expected canonical page evidence");
   const page = pages[index];

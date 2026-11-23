@@ -2,12 +2,12 @@ import { externalWebUrl } from "../../../packages/core/src/external-web-url.js";
 import { chromeAutoOpenPorts, connectPlacekeeper } from "./chrome-api.js";
 import {
   createHandlerController,
-  type EmbeddedReviewSession,
+  type EmbeddedDocumentSession,
 } from "./handler-controller.js";
 import {
   chromePdfDisplayName,
   createChromeInteractionOwnerClaimStore,
-  createNativeEmbeddedReview,
+  createNativeEmbeddedDocument,
 } from "./chrome-runtime.js";
 import { readAutoOpenState } from "./opt-in.js";
 import { bytesToBase64 } from "./native-protocol.js";
@@ -22,9 +22,9 @@ const launchShell = document.querySelector<HTMLElement>("#launch-shell");
 const handlerActions = document.querySelector<HTMLElement>("#handler-actions");
 const title = document.querySelector<HTMLElement>("#title");
 const reopen = document.querySelector<HTMLButtonElement>("#reopen");
-const reviewRoot = document.querySelector<HTMLElement>("#root");
+const readerRoot = document.querySelector<HTMLElement>("#root");
 if (bypass === null || status === null || launchShell === null || handlerActions === null ||
-  title === null || reopen === null || reviewRoot === null) {
+  title === null || reopen === null || readerRoot === null) {
   throw new Error("Incomplete Placekeeper handler page");
 }
 
@@ -95,7 +95,7 @@ async function loadSharedStylesheet(signal: AbortSignal): Promise<void> {
       signal.removeEventListener("abort", onAbort);
     };
     const onLoad = () => { cleanup(); resolve(); };
-    const onError = () => { cleanup(); reject(new Error("Shared review styles failed to load.")); };
+    const onError = () => { cleanup(); reject(new Error("Shared reader styles failed to load.")); };
     const onAbort = () => { cleanup(); reject(signal.reason); };
     stylesheet.addEventListener("load", onLoad, { once: true });
     stylesheet.addEventListener("error", onError, { once: true });
@@ -191,7 +191,7 @@ async function chooseProtectedRecovery(
   });
 }
 
-const openNativeReview = createNativeEmbeddedReview({
+const openNativeDocument = createNativeEmbeddedDocument({
   connectNative: () => connectPlacekeeper(chrome),
   fetchStream: async (url, signal) => signal === undefined ? fetch(url) : fetch(url, { signal }),
   createId: () => crypto.randomUUID().replaceAll("-", "_"),
@@ -207,16 +207,16 @@ const openNativeReview = createNativeEmbeddedReview({
   chooseRecovery: chooseProtectedRecovery,
 });
 
-async function openEmbeddedReview(
-  info: Parameters<typeof openNativeReview>[0],
+async function openEmbeddedDocument(
+  info: Parameters<typeof openNativeDocument>[0],
   signal: AbortSignal,
-): Promise<EmbeddedReviewSession> {
-  const native = await openNativeReview(info, signal);
+): Promise<EmbeddedDocumentSession> {
+  const native = await openNativeDocument(info, signal);
   document.title = native.displayName;
   let shared: SharedChromeClient | undefined;
   let released = false;
   let runtimeFailurePublished = false;
-  const lifecycleListeners = new Set<Parameters<EmbeddedReviewSession["subscribeLifecycle"]>[0]>();
+  const lifecycleListeners = new Set<Parameters<EmbeddedDocumentSession["subscribeLifecycle"]>[0]>();
   const unsubscribeNativeLifecycle = native.subscribeLifecycle((event) => {
     for (const listener of lifecycleListeners) listener(event);
   });
@@ -289,7 +289,7 @@ const controller = createHandlerController({
   isOptedIn: async () => (await readAutoOpenState(autoOpen)).enabled,
   getStreamInfo: async () => chrome.mimeHandler.getStreamInfo(),
   reloadTab: async (tabId) => chrome.tabs.reload(tabId),
-  openEmbedded: openEmbeddedReview,
+  openEmbedded: openEmbeddedDocument,
   fallback: () => {
     void chrome.mimeHandler.abortAndFallbackToNativeHandler();
   },
@@ -302,13 +302,13 @@ const controller = createHandlerController({
     status.textContent = message;
     if (message === "Document ready.") {
       document.body.dataset.documentLoading = "false";
-      reviewRoot.inert = false;
+      readerRoot.inert = false;
       launchShell.hidden = true;
       return;
     }
     if (message.includes("disconnected") || message.includes("updated")) {
       document.body.dataset.documentLoading = "false";
-      reviewRoot.inert = true;
+      readerRoot.inert = true;
       launchShell.hidden = false;
       reopen.hidden = false;
       handlerActions.replaceChildren(reopen);

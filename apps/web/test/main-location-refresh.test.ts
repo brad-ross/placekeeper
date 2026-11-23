@@ -2,8 +2,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   createTrailingTaskScheduler,
-  waitForReviewNavigationReady,
-} from '../src/review/main-location-refresh.js';
+  waitForDocumentNavigationReady,
+} from '../src/reader/main-location-refresh.js';
 
 afterEach(() => vi.useRealTimers());
 
@@ -44,7 +44,7 @@ describe('main location refresh scheduling', () => {
 
   it('keeps waiting past a fixed frame budget until navigation is actually ready', async () => {
     let attempts = 0;
-    const ready = await waitForReviewNavigationReady({
+    const ready = await waitForDocumentNavigationReady({
       isCurrent: () => true,
       isReady: () => attempts > 120,
       wait: async () => { attempts += 1; },
@@ -56,7 +56,7 @@ describe('main location refresh scheduling', () => {
 
   it('stops waiting when the document generation is no longer current', async () => {
     let current = true;
-    const ready = await waitForReviewNavigationReady({
+    const ready = await waitForDocumentNavigationReady({
       isCurrent: () => current,
       isReady: () => false,
       wait: async () => { current = false; },

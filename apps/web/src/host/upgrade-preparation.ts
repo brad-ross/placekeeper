@@ -1,14 +1,14 @@
-import type { UpgradeReviewStatus, UpgradeReviewSettlement } from '../../../../packages/core/src/upgrade-review-protocol.js';
+import type { UpgradeDocumentStatus, UpgradeDocumentSettlement } from '../../../../packages/core/src/upgrade-document-protocol.js';
 
 /** One serial poll owns each mounted view. Stale completions cannot close a successor. */
-export class ReviewUpgradePreparation {
+export class DocumentUpgradePreparation {
   #attempt: string | undefined;
   #protectedAttempt: string | undefined;
   #stopped = false;
   #running = false;
   constructor(readonly port: {
-    poll(): Promise<UpgradeReviewStatus>;
-    settle(request: UpgradeReviewSettlement): Promise<UpgradeReviewStatus>;
+    poll(): Promise<UpgradeDocumentStatus>;
+    settle(request: UpgradeDocumentSettlement): Promise<UpgradeDocumentStatus>;
     protectInput(): Promise<void>;
     frozen(value: boolean, reason?: string): void;
     /** False leaves host-owned native closure pending, so cancellation remains observable. */
@@ -53,7 +53,7 @@ export class ReviewUpgradePreparation {
 /** Freeze consumes queued host tokens, so cancellation cannot replay a command. */
 export class UpgradeCommandGate {
   readonly #discarded = new Map<'native' | 'host', number>();
-  filter(invocation: import('../review/review-command-surface.js').ReviewCommandInvocation | undefined, frozen: boolean, source: 'native' | 'host') {
+  filter(invocation: import('../reader/document-command-surface.js').DocumentCommandInvocation | undefined, frozen: boolean, source: 'native' | 'host') {
     if (invocation === undefined) return undefined;
     if (frozen) {
       this.#discarded.set(source, Math.max(this.#discarded.get(source) ?? 0, invocation.token));

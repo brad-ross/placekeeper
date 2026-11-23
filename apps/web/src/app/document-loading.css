@@ -6,9 +6,9 @@
   display: grid;
   place-items: center;
   padding: 24px;
-  background: var(--review-surface-canvas);
-  color: var(--review-ink-muted);
-  font: 400 13px/1.5 var(--review-font-ui);
+  background: var(--reader-surface-canvas);
+  color: var(--reader-ink-muted);
+  font: 400 13px/1.5 var(--reader-font-ui);
 }
 .document-loading__content {
   display: flex;
@@ -20,7 +20,7 @@
   box-sizing: border-box;
   width: 16px;
   height: 16px;
-  border: 1.5px solid var(--review-border-subtle);
+  border: 1.5px solid var(--reader-border-subtle);
   border-top-color: currentColor;
   border-radius: 50%;
   animation: document-loading-spin 900ms linear infinite;

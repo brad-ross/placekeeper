@@ -35,7 +35,7 @@ describe("Chrome extension static contract", () => {
       readFile(resolve(extensionRoot, "handler.html"), "utf8"),
       readFile(resolve(extensionRoot, "popup.html"), "utf8"),
     ]);
-    expect(handler).toContain('class="handler-dialog review-choice-dialog compact-editorial-modal"');
+    expect(handler).toContain('class="handler-dialog reader-choice-dialog compact-editorial-modal"');
     expect(handler).toContain('role="dialog"');
     expect(handler).toContain('class="handler-dialog__header compact-editorial-modal__header"');
     expect(handler).toContain('class="handler-dialog__body compact-editorial-modal__body"');
@@ -82,7 +82,7 @@ describe("Chrome extension static contract", () => {
     ]);
     expect(handlerEntry).toContain('chrome.runtime.getURL("shared/app.js")');
     expect(handlerEntry).toContain('chrome.runtime.getURL("shared/app.css")');
-    expect(handlerEntry).toContain("createNativeEmbeddedReview");
+    expect(handlerEntry).toContain("createNativeEmbeddedDocument");
     expect(handler).toContain('<div id="root"');
   });
 
@@ -107,9 +107,9 @@ describe("Chrome extension static contract", () => {
     expect(handlerUi).toContain('["circle", { cx: "12", cy: "18", r: "3" }]');
     expect(handlerUi).toContain('fill: "currentColor"');
     expect(handlerUi).toContain('stroke: "none"');
-    expect(styles).toContain("@import '../../web/src/app/review-modal-surface.css'");
+    expect(styles).toContain("@import '../../web/src/app/reader-modal-surface.css'");
     expect(styles).toContain("justify-content: flex-end");
-    expect(handlerUi).toContain("review-button--");
+    expect(handlerUi).toContain("reader-button--");
     expect(styles).toContain("width: 14px");
     expect(styles).toContain('.handler-button[data-icon="chrome"] .handler-icon');
     expect(styles).toContain('.handler-button[data-icon="git-fork"] .handler-icon');

@@ -11,15 +11,15 @@ describe('Codex viewer resources', () => {
 });
 
 import { vi } from 'vitest';
-import { createReviewState } from '../../../packages/core/src/review-model.js';
+import { createDocumentState } from '../../../packages/core/src/document-model.js';
 import { NativeOperationError } from '../../../packages/core/src/codex-mcp-protocol.js';
 import { createCodexHostRuntime } from '../src/host/codex-runtime.js';
 import { loadRuntimeDocumentSource } from '../src/host/runtime-document-source.js';
-import { setAnnotationName } from '../../../packages/core/src/review-commands.js';
+import { setAnnotationName } from '../../../packages/core/src/document-commands.js';
 
 const sessionId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
-const state = createReviewState({ sessionId, source: { fileId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', digest: 'a'.repeat(64), byteLength: 3 } });
-function fixture(contextOwner?: 'app', reviewedCopyExport?: boolean) {
+const state = createDocumentState({ sessionId, source: { fileId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', digest: 'a'.repeat(64), byteLength: 3 } });
+function fixture(contextOwner?: 'app', annotatedCopyExport?: boolean) {
   let revision = 0;
   let generation = 1;
   let invalidate: ((event: any) => void) | undefined;
@@ -39,7 +39,7 @@ function fixture(contextOwner?: 'app', reviewedCopyExport?: boolean) {
   const revokeObjectURL = vi.fn();
   let urlIndex = 0;
   const created: string[] = [];
-  const runtime = createCodexHostRuntime({ runtimeId: 'runtime_identifier_1234', ...(reviewedCopyExport === undefined ? {} : { reviewedCopyExport }), ...(contextOwner === undefined ? {} : { contextOwner }), call, subscribeInvalidations: listener => { invalidate = listener; return () => { invalidate = undefined; }; } }, { digest: async bytes => String.fromCharCode(bytes[0]!).repeat(64), createObjectURL: () => { const url = `blob:https://native/${++urlIndex}`; created.push(url); return url; }, revokeObjectURL });
+  const runtime = createCodexHostRuntime({ runtimeId: 'runtime_identifier_1234', ...(annotatedCopyExport === undefined ? {} : { annotatedCopyExport: annotatedCopyExport }), ...(contextOwner === undefined ? {} : { contextOwner }), call, subscribeInvalidations: listener => { invalidate = listener; return () => { invalidate = undefined; }; } }, { digest: async bytes => String.fromCharCode(bytes[0]!).repeat(64), createObjectURL: () => { const url = `blob:https://native/${++urlIndex}`; created.push(url); return url; }, revokeObjectURL });
   return { runtime, call, revokeObjectURL, created, replace() { generation++; invalidate?.({ sessionId, generation, revision, reason: "generation" }); }, changeEngine(digest: string) { engineDigest = digest; }, failWorker() { failResource = 'worker'; }, changeDocument(digest = 'b') { documentDigest = digest; nextHandle = `document_handle_${digest.repeat(8)}`; }, fail() { failResource = true; }, recover() { failResource = false; } };
 }
 
@@ -47,9 +47,9 @@ describe('admitted Codex production runtime', () => {
   it('keeps unsupported host downloads disabled through bootstrap', async () => {
     const f = fixture('app', false);
     try {
-      expect(f.runtime.capabilities?.reviewedCopyExport).toBe(false);
+      expect(f.runtime.capabilities?.annotatedCopyExport).toBe(false);
       await f.runtime.bootstrap();
-      expect(f.runtime.capabilities?.reviewedCopyExport).toBe(false);
+      expect(f.runtime.capabilities?.annotatedCopyExport).toBe(false);
       expect(f.runtime.capabilities?.interactionLifecycleVersion).toBe(1);
     } finally { f.runtime.dispose(); }
   });
@@ -221,8 +221,8 @@ it('restarts same-generation pending manifests and retains only fulfilled verifi
 it('maps only typed current native export conflicts to shared recovery guidance', async () => {
   const f = fixture(); await f.runtime.bootstrap();
   f.call.mockRejectedValueOnce(new NativeOperationError());
-  await expect(f.runtime.exportReviewedCopy?.(undefined, { expectedRevision: 0, documentGeneration: 1 })).rejects.toThrow('Document changed. Confirm the annotation name again to export the latest version.');
+  await expect(f.runtime.exportAnnotatedCopy?.(undefined, { expectedRevision: 0, documentGeneration: 1 })).rejects.toThrow('Document changed. Confirm the annotation name again to export the latest version.');
   f.call.mockRejectedValueOnce(new Error('/private/service/path'));
-  await expect(f.runtime.exportReviewedCopy?.(undefined, { expectedRevision: 0, documentGeneration: 1 })).rejects.toThrow('The native review action or resource could not be verified.');
+  await expect(f.runtime.exportAnnotatedCopy?.(undefined, { expectedRevision: 0, documentGeneration: 1 })).rejects.toThrow('The native document action or resource could not be verified.');
   f.runtime.dispose();
 });

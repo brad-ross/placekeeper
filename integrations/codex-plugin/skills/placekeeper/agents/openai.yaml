@@ -4,4 +4,4 @@ interface:
   icon_small: "./assets/placekeeper.svg"
   icon_large: "./assets/placekeeper.svg"
   brand_color: "#264F7D"
-  default_prompt: "Use $placekeeper to open this local PDF for review."
+  default_prompt: "Use $placekeeper to open and annotate this local PDF."

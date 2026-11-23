@@ -1,7 +1,7 @@
 import type { PdfDocumentObject, PdfEngine, PdfPageObject, Rotation } from '@embedpdf/models';
-import type { ReviewAnnotation } from '../../../../packages/core/src/pdf-writer.js';
-import { ReviewIcon } from '../review/ReviewIcon.js';
-import { reviewItemIdForAnnotation } from '../review/annotation-projection.js';
+import type { PdfWriterAnnotation } from '../../../../packages/core/src/pdf-writer.js';
+import { ReaderIcon } from '../reader/ReaderIcon.js';
+import { annotationIdForPdfAnnotation } from '../reader/annotation-projection.js';
 import type { ExistingAnnotation, SourceNativeAnnotation } from './existing-annotations.js';
 import { existingAnnotationKey } from './existing-annotations.js';
 import { OwnedTextMark } from './OwnedTextMark.js';
@@ -23,7 +23,7 @@ export interface AnnotationRenderingState {
 
 /** Keep source ownership frozen to the inventory that was captured for this document. */
 export function buildAnnotationRenderingState(
-  ownedAnnotations: readonly ReviewAnnotation[],
+  ownedAnnotations: readonly PdfWriterAnnotation[],
   sourceNativeAnnotations: readonly SourceNativeAnnotation[],
   sourceAnnotations: readonly ExistingAnnotation[],
 ): AnnotationRenderingState {
@@ -46,7 +46,7 @@ export function buildAnnotationRenderingState(
         style: source.readerStyle,
         contents: annotation.contents,
         pageIndex: source.pageIndex,
-        ownedAnnotationId: reviewItemIdForAnnotation(annotation),
+        ownedAnnotationId: annotationIdForPdfAnnotation(annotation),
       });
     }
   }
@@ -97,7 +97,7 @@ export interface PdfAnnotationLayersProps {
   readonly document: PdfDocumentObject;
   readonly documentRotation: Rotation;
   readonly layout: PageLayout;
-  readonly annotations: readonly ReviewAnnotation[];
+  readonly annotations: readonly PdfWriterAnnotation[];
   readonly geometry: readonly OwnedMarkGeometry[];
   readonly authoringPreviewIds: ReadonlySet<string>;
   readonly sourceRendering: AnnotationRenderingState;
@@ -116,7 +116,7 @@ export function OwnedNativeAnnotationGeometryTargets({
   layout,
   documentRotation,
 }: {
-  readonly annotations: readonly ReviewAnnotation[];
+  readonly annotations: readonly PdfWriterAnnotation[];
   readonly page: PdfPageObject;
   readonly layout: PageLayout;
   readonly documentRotation: Rotation;
@@ -128,7 +128,7 @@ export function OwnedNativeAnnotationGeometryTargets({
       return <span
         key={`${annotation.id}:${index}`}
         data-owned-native-geometry="true"
-        data-review-id={reviewItemIdForAnnotation(annotation)}
+        data-annotation-id={annotationIdForPdfAnnotation(annotation)}
         data-page-index={layout.pageIndex}
         style={{
           position: 'absolute',
@@ -191,13 +191,13 @@ export function PdfAnnotationLayers({
             data-pdf-mark-style={annotation.kind}
             data-page-index={layout.pageIndex}
             data-has-attached-text={annotation.contents.trim().length > 0 ? 'true' : 'false'}
-            data-review-id={reviewItemIdForAnnotation(annotation)}
+            data-annotation-id={annotationIdForPdfAnnotation(annotation)}
             data-authoring-preview={authoringPreviewIds.has(annotation.id) ? 'true' : undefined}
-            data-corresponding={correspondingOwnedAnnotationId === reviewItemIdForAnnotation(annotation) ? 'true' : 'false'}
-            data-active={activeOwnedAnnotationId === reviewItemIdForAnnotation(annotation) ? 'true' : 'false'}
+            data-corresponding={correspondingOwnedAnnotationId === annotationIdForPdfAnnotation(annotation) ? 'true' : 'false'}
+            data-active={activeOwnedAnnotationId === annotationIdForPdfAnnotation(annotation) ? 'true' : 'false'}
             style={ownedMarkStyle(page, layout, documentRotation, rect)}
           >
-            {annotation.kind === 'pageNote' ? <ReviewIcon name="note" size={14} /> : null}
+            {annotation.kind === 'pageNote' ? <ReaderIcon name="note" size={14} /> : null}
           </OwnedTextMark>
         ));
       })}
@@ -205,7 +205,7 @@ export function PdfAnnotationLayers({
     <div className="owned-mark-focus-layer" data-owned-focus-layer>
       {geometry.map((group) => {
         const annotation = annotations.find(
-          (candidate) => reviewItemIdForAnnotation(candidate) === group.id,
+          (candidate) => annotationIdForPdfAnnotation(candidate) === group.id,
         );
         const rect = group.rects[0];
         if (!annotation || !rect) return null;
@@ -254,7 +254,7 @@ export function PdfAnnotationLayers({
             className="owned-mark-focus-proxy"
             data-source-focus-id={annotationKey}
             data-page-index={layout.pageIndex}
-            data-review-contextual-ui
+            data-reader-contextual-ui
             aria-label={`Source annotation on page ${layout.pageNumber}`}
             title={mark.contents.trim().length > 0
               ? `Open source annotation on page ${layout.pageNumber}`
@@ -317,7 +317,7 @@ export function PdfAnnotationLayers({
         type="button"
         autoFocus
         className="page-note-placement-cursor"
-        data-review-contextual-ui
+        data-reader-contextual-ui
         data-page-index={layout.pageIndex}
         aria-label="Page Note placement cursor. Use arrow keys to move, Enter to place, or Escape to cancel."
         title="Place Page Note"
@@ -328,7 +328,7 @@ export function PdfAnnotationLayers({
           onKeyboardPageNoteKey?.(event.key);
         }}
         style={{ left: transformed.origin.x, top: transformed.origin.y }}
-      ><ReviewIcon name="plus" /></button>;
+      ><ReaderIcon name="plus" /></button>;
     })() : null}
     <div
       aria-hidden="true"

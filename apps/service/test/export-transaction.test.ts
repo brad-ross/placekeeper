@@ -7,11 +7,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
   PdfWriteResult,
   PdfWriter,
-  ReviewAnnotation,
+  PdfWriterAnnotation,
 } from "../../../packages/core/src/pdf-writer.js";
-import { addHighlight, setAnnotationName } from "../../../packages/core/src/review-commands.js";
-import type { ReviewSourceIdentity } from "../../../packages/core/src/review-model.js";
-import { createReviewState } from "../../../packages/core/src/review-model.js";
+import { addHighlight, setAnnotationName } from "../../../packages/core/src/document-commands.js";
+import type { DocumentSourceIdentity } from "../../../packages/core/src/document-model.js";
+import { createDocumentState } from "../../../packages/core/src/document-model.js";
 import { FileCapabilityRegistry } from "../src/files/file-capabilities.js";
 import { ExportCoordinator } from "../src/export/export-coordinator.js";
 import { DraftSnapshotStore } from "../src/recovery/draft-snapshot.js";
@@ -36,7 +36,7 @@ async function temporaryDirectory(): Promise<string> {
   return path;
 }
 
-function annotation(): ReviewAnnotation {
+function annotation(): PdfWriterAnnotation {
   return {
     kind: "highlight",
     id: randomUUID(),
@@ -56,24 +56,24 @@ async function exportFixture() {
   const originalPath = join(directory, "paper.pdf");
   const snapshotPath = join(directory, "snapshot.pdf");
   const original = Buffer.from("%PDF-1.7\noriginal immutable bytes\n%%EOF");
-  const reviewed = Buffer.from("%PDF-1.7\nreviewed bytes\n%%EOF");
+  const annotated = Buffer.from("%PDF-1.7\nreviewed bytes\n%%EOF");
   await writeFile(originalPath, original);
   await writeFile(snapshotPath, original);
   const capabilities = new FileCapabilityRegistry();
   const approved = await capabilities.approvePdf(originalPath);
-  const source: ReviewSourceIdentity = {
+  const source: DocumentSourceIdentity = {
     fileId: approved.id,
     digest: sha256(original),
     byteLength: original.byteLength,
   };
   const item = annotation();
   const result: PdfWriteResult = {
-    pdfBytes: reviewed,
+    pdfBytes: annotated,
     evidence: {
       backend: "embedpdf",
       backendVersion: "2.14.4",
       originalSha256: source.digest,
-      outputSha256: sha256(reviewed),
+      outputSha256: sha256(annotated),
       pageCount: 1,
       structurallyValid: true,
       preexistingAnnotationIds: [],
@@ -85,13 +85,13 @@ async function exportFixture() {
     originalPath,
     snapshotPath,
     original,
-    reviewed,
+    reviewed: annotated,
     capabilities,
     approved,
     source,
     item,
     result,
-    delivery: (revision = 1, annotations: readonly ReviewAnnotation[] = [item]) => ({
+    delivery: (revision = 1, annotations: readonly PdfWriterAnnotation[] = [item]) => ({
       sessionId: "00000000-0000-4000-8000-000000000099",
       source,
       originalDigest: source.digest,
@@ -118,7 +118,7 @@ describe("reviewed PDF export transaction", () => {
       hooks: { beforeFinalize: async () => { entered.resolve(); await release.promise; } },
       recordSuccessfulExport: recorded,
     });
-    const pending = coordinator.exportReviewedCopy(fixture.delivery(), () => {
+    const pending = coordinator.exportAnnotatedCopy(fixture.delivery(), () => {
       if (!authorized) throw new Error("presentation-unavailable");
     });
     const rejected = expect(pending).rejects.toThrow("presentation-unavailable");
@@ -140,15 +140,15 @@ describe("reviewed PDF export transaction", () => {
       verify: async () => ({ pageCount: 1, annotationIds: [fixture.item.id] }),
     });
     const delivery = fixture.delivery();
-    const first = await coordinator.exportReviewedCopy(delivery);
-    await expect(coordinator.exportReviewedCopy(delivery)).resolves.toBe(first);
+    const first = await coordinator.exportAnnotatedCopy(delivery);
+    await expect(coordinator.exportAnnotatedCopy(delivery)).resolves.toBe(first);
     expect(write).toHaveBeenCalledOnce();
     expect(coordinator.retentionStatus()).toEqual({ sessions: 1, completed: 1, inFlight: 0 });
 
     fixture.capabilities.revokeFile(delivery.source.fileId);
     coordinator.releaseSession(delivery.sessionId);
     expect(coordinator.retentionStatus()).toEqual({ sessions: 0, completed: 0, inFlight: 0 });
-    await expect(coordinator.exportReviewedCopy(delivery)).rejects.toMatchObject({ code: "SESSION_CAPABILITY_REVOKED" });
+    await expect(coordinator.exportAnnotatedCopy(delivery)).rejects.toMatchObject({ code: "SESSION_CAPABILITY_REVOKED" });
     expect(coordinator.retentionStatus()).toEqual({ sessions: 0, completed: 0, inFlight: 0 });
     expect(write).toHaveBeenCalledOnce();
   });
@@ -163,7 +163,7 @@ describe("reviewed PDF export transaction", () => {
       verify: async () => ({ pageCount: 1, annotationIds: [fixture.item.id] }),
       recordSuccessfulExport: async () => { entered.resolve(); await resume.promise; },
     });
-    const pending = coordinator.exportReviewedCopy(fixture.delivery());
+    const pending = coordinator.exportAnnotatedCopy(fixture.delivery());
     await entered.promise;
     coordinator.releaseSession(fixture.delivery().sessionId);
     resume.resolve();
@@ -187,7 +187,7 @@ describe("reviewed PDF export transaction", () => {
       },
     };
 
-    expect(() => coordinator.exportReviewedCopy(generated)).toThrow(/reconciliation/iu);
+    expect(() => coordinator.exportAnnotatedCopy(generated)).toThrow(/reconciliation/iu);
     expect(() => coordinator.replaceOriginal({
       ...generated,
       exportEligibility: { eligible: true as const, requiresStaleConfirmation: false },
@@ -203,8 +203,8 @@ describe("reviewed PDF export transaction", () => {
       capabilities: fixture.capabilities,
       verify: async () => ({ pageCount: 1, annotationIds: [fixture.item.id] }),
     });
-    await coordinator.exportReviewedCopy(fixture.delivery(7));
-    await coordinator.exportReviewedCopy({
+    await coordinator.exportAnnotatedCopy(fixture.delivery(7));
+    await coordinator.exportAnnotatedCopy({
       ...fixture.delivery(7),
       documentGeneration: 2,
       dispositionDigest: "e".repeat(64),
@@ -216,14 +216,14 @@ describe("reviewed PDF export transaction", () => {
     const originalPath = join(directory, "paper.pdf");
     const snapshotPath = join(directory, "snapshot.pdf");
     const original = Buffer.from("%PDF-1.7\noriginal immutable bytes\n%%EOF");
-    const reviewed = Buffer.from("%PDF-1.7\nreviewed bytes\n%%EOF");
+    const annotated = Buffer.from("%PDF-1.7\nreviewed bytes\n%%EOF");
     await writeFile(originalPath, original);
     await writeFile(snapshotPath, original);
 
     const capabilities = new FileCapabilityRegistry();
     const approved = await capabilities.approvePdf(originalPath);
     const state = {
-      ...createReviewState({
+      ...createDocumentState({
         sessionId: randomUUID(),
         source: {
           fileId: approved.id,
@@ -235,12 +235,12 @@ describe("reviewed PDF export transaction", () => {
     };
     const item = annotation();
     const result: PdfWriteResult = {
-      pdfBytes: reviewed,
+      pdfBytes: annotated,
       evidence: {
         backend: "embedpdf",
         backendVersion: "2.14.4",
         originalSha256: sha256(original),
-        outputSha256: sha256(reviewed),
+        outputSha256: sha256(annotated),
         pageCount: 1,
         structurallyValid: true,
         preexistingAnnotationIds: [],
@@ -258,7 +258,7 @@ describe("reviewed PDF export transaction", () => {
       },
     });
 
-    const exported = await coordinator.exportReviewedCopy({
+    const exported = await coordinator.exportAnnotatedCopy({
       sessionId: state.sessionId,
       source: state.source,
       originalDigest: state.source.digest,
@@ -270,7 +270,7 @@ describe("reviewed PDF export transaction", () => {
     expect(exported.path).toBe(
       join(dirname(approved.canonicalPath), "paper-reviewed.pdf"),
     );
-    expect(await readFile(exported.path)).toEqual(reviewed);
+    expect(await readFile(exported.path)).toEqual(annotated);
     expect(await readFile(originalPath)).toEqual(original);
     expect(recorded).toBe(1);
   });
@@ -296,11 +296,11 @@ describe("reviewed PDF export transaction", () => {
     });
 
     const [first, duplicate] = await Promise.all([
-      coordinator.exportReviewedCopy(fixture.delivery()),
-      coordinator.exportReviewedCopy(fixture.delivery()),
+      coordinator.exportAnnotatedCopy(fixture.delivery()),
+      coordinator.exportAnnotatedCopy(fixture.delivery()),
     ]);
-    const repeated = await coordinator.exportReviewedCopy(fixture.delivery());
-    const laterRevision = await coordinator.exportReviewedCopy(fixture.delivery(2));
+    const repeated = await coordinator.exportAnnotatedCopy(fixture.delivery());
+    const laterRevision = await coordinator.exportAnnotatedCopy(fixture.delivery(2));
 
     expect(first.path).toBe(duplicate.path);
     expect(repeated.path).toBe(first.path);
@@ -336,7 +336,7 @@ describe("reviewed PDF export transaction", () => {
       });
 
       await expect(
-        coordinator.exportReviewedCopy(fixture.delivery()),
+        coordinator.exportAnnotatedCopy(fixture.delivery()),
       ).rejects.toThrow(`${failure === "verification" ? "verification" : "finalize"} failed`);
       expect(await readFile(fixture.originalPath)).toEqual(fixture.original);
       expect(await readFile(priorPath, "utf8")).toBe("stable prior artifact");
@@ -358,8 +358,8 @@ describe("reviewed PDF export transaction", () => {
       capabilities: fixture.capabilities,
     });
 
-    expect(() => coordinator.exportReviewedCopy(fixture.delivery(0, []))).toThrow(
-      "There is no review feedback to deliver",
+    expect(() => coordinator.exportAnnotatedCopy(fixture.delivery(0, []))).toThrow(
+      "There are no annotations to deliver",
     );
     expect(writes).toBe(0);
   });
@@ -368,11 +368,11 @@ describe("reviewed PDF export transaction", () => {
     const directory = await temporaryDirectory();
     const originalPath = join(directory, "paper.pdf");
     const original = Buffer.from("%PDF-1.7\nrecoverable original\n%%EOF");
-    const reviewed = Buffer.from("%PDF-1.7\nrecoverable reviewed\n%%EOF");
+    const annotated = Buffer.from("%PDF-1.7\nrecoverable reviewed\n%%EOF");
     await writeFile(originalPath, original);
     const recoveryRoot = join(directory, "recovery");
     const broker = new SessionBroker({ recoveryRoot });
-    const opened = await broker.openReview({ pdfPath: originalPath });
+    const opened = await broker.openDocument({ pdfPath: originalPath });
     if (opened.kind !== "opened") throw new Error("Expected opened review");
     const state = broker.state(opened.launch.sessionId)!;
     await broker.acceptMutation(
@@ -412,12 +412,12 @@ describe("reviewed PDF export transaction", () => {
       setAnnotationName(broker.state(opened.launch.sessionId)!, "Later Name"));
     expect(frozen.stateDigest).not.toBe((await broker.freezeDelivery(opened.launch.sessionId)).stateDigest);
     const result: PdfWriteResult = {
-      pdfBytes: reviewed,
+      pdfBytes: annotated,
       evidence: {
         backend: "embedpdf",
         backendVersion: "2.14.4",
         originalSha256: frozen.source.digest,
-        outputSha256: sha256(reviewed),
+        outputSha256: sha256(annotated),
         pageCount: 1,
         structurallyValid: true,
         preexistingAnnotationIds: [],
@@ -435,7 +435,7 @@ describe("reviewed PDF export transaction", () => {
       recordSuccessfulExport: (sessionId) => broker.recordSuccessfulExport(sessionId),
     });
 
-    await coordinator.exportReviewedCopy(frozen);
+    await coordinator.exportAnnotatedCopy(frozen);
 
     const recovered = await new DraftSnapshotStore(
       join(recoveryRoot, opened.launch.sessionId),
@@ -461,8 +461,8 @@ describe("reviewed PDF export transaction", () => {
       },
     });
 
-    await expect(coordinator.exportReviewedCopy(fixture.delivery())).rejects.toThrow(
-      "Review session ended",
+    await expect(coordinator.exportAnnotatedCopy(fixture.delivery())).rejects.toThrow(
+      "Document session ended",
     );
     expect((await readdir(fixture.directory)).filter((name) => /reviewed.*\.pdf$/u.test(name))).toEqual([]);
     expect(await readFile(fixture.originalPath)).toEqual(fixture.original);
@@ -485,7 +485,7 @@ describe("reviewed PDF export transaction", () => {
       },
     });
 
-    const result = await coordinator.exportReviewedCopy(fixture.delivery());
+    const result = await coordinator.exportAnnotatedCopy(fixture.delivery());
 
     expect(result.warning).toContain("reviewed copy was created");
     expect(await readFile(result.path)).toEqual(fixture.reviewed);
@@ -504,7 +504,7 @@ describe("reviewed PDF export transaction", () => {
       },
     });
 
-    const result = await coordinator.exportReviewedCopy(fixture.delivery());
+    const result = await coordinator.exportAnnotatedCopy(fixture.delivery());
 
     expect(result.warning).toContain("reviewed copy was created");
     expect(await readFile(result.path)).toEqual(fixture.reviewed);

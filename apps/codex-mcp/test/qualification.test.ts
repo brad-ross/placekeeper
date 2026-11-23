@@ -97,7 +97,7 @@ async function qualificationShellFixture(withControl: boolean, action: "bridge-c
     else queueMicrotask(onReady);
     return () => { clear(); element.textContent = ""; detachPresence?.(); mountedRuntime.dispose(); };
   });
-  vi.doMock("../../web/src/codex-entry.js", () => ({ mountCodexProductionReview: mount }));
+  vi.doMock("../../web/src/codex-entry.js", () => ({ mountCodexProductionDocument: mount }));
   const fixtureRuntimeId = realRuntime ? "runtime_1234567890" : "runtime-1";
   let grantSent = false;
   const calls: string[] = [];
@@ -114,7 +114,7 @@ async function qualificationShellFixture(withControl: boolean, action: "bridge-c
       const method = input.arguments.request.method; calls.push(method);
       const realBootstrap = realRuntime && method === "bootstrap" ? {
         sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", generation: 1, revision: 0,
-        state: createReviewState({ sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", source: { fileId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", digest: "a".repeat(64), byteLength: 3 } }),
+        state: createDocumentState({ sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", source: { fileId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", digest: "a".repeat(64), byteLength: 3 } }),
         scope: { documentTitle: "Closed.pdf", launchSurface: "codex" },
         saveStatus: { destination: { phase: "none", generation: 0 }, sync: { phase: "clean", desiredRevision: 0, savedRevision: 0 } },
         resources: { document: "document_handle_1234", pdfiumWasm: "wasm_handle_1234", worker: "worker_handle_1234" },
@@ -416,7 +416,7 @@ it.each(["renew", "watermark"])("late normal %s success after bridge disconnect 
   expect(f.app.callServerTool).toHaveBeenCalledTimes(calls);
 });
 
-import { createReviewState } from "../../../packages/core/src/review-model.js";
+import { createDocumentState } from "../../../packages/core/src/document-model.js";
 it("host teardown owns the sole detach when real Codex runtime presence cleans up during unmount", async () => {
   const f = await qualificationShellFixture(false, "bridge-close", false, true);
   await vi.waitFor(() => expect(f.calls).toContain("presence"));

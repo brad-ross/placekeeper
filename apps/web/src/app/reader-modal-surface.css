@@ -1,0 +1,228 @@
+:is(:is(#root[data-production-root="true"], .handler) .reader-button, .terminal-recovery button) {
+  display: inline-flex;
+  min-height: 32px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  margin: 0;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 10px;
+  color: var(--reader-ink-primary);
+  background: transparent;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.2;
+  text-align: center;
+  transition: color var(--reader-motion-fast) ease, border-color var(--reader-motion-fast) ease, background-color var(--reader-motion-fast) ease, box-shadow var(--reader-motion-fast) ease;
+}
+
+:is(:is(#root[data-production-root="true"], .handler) .reader-button, .terminal-recovery button):hover:not(:disabled) {
+  border-color: var(--reader-border-strong);
+  background: var(--reader-surface-interactive);
+}
+
+:is(:is(#root[data-production-root="true"], .handler) .reader-button, .terminal-recovery button):active:not(:disabled) {
+  box-shadow: none;
+}
+
+:is(
+  :is(#root[data-production-root="true"], .handler) .reader-button--primary,
+  :is(#root[data-production-root="true"], .handler) .reader-button[data-primary-action="true"],
+  .terminal-recovery .terminal-recovery__primary
+) {
+  border-color: var(--reader-ink-primary);
+  color: var(--reader-surface-panel);
+  background: var(--reader-ink-primary);
+}
+
+:is(
+  :is(#root[data-production-root="true"], .handler) .reader-button--primary,
+  :is(#root[data-production-root="true"], .handler) .reader-button[data-primary-action="true"],
+  .terminal-recovery .terminal-recovery__primary
+):hover:not(:disabled) {
+  border-color: var(--reader-ink-primary);
+  color: var(--reader-surface-panel);
+  background: #222;
+}
+
+.compact-editorial-modal {
+  position: relative;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  box-sizing: border-box;
+  overflow: hidden;
+  border: 0;
+  border-radius: 17px;
+  color: var(--reader-ink-primary);
+  background: var(--reader-surface-panel);
+  box-shadow: 0 12px 48px #00000018;
+}
+
+.compact-editorial-modal__header {
+  padding: 23px 23px 19px;
+  border: 0;
+}
+
+.compact-editorial-modal__header h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 500;
+  line-height: 1.4;
+  letter-spacing: 0;
+}
+
+.compact-editorial-modal__description {
+  margin: 5px 0 0;
+  color: var(--reader-ink-muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.compact-editorial-modal__body {
+  min-height: 0;
+  padding: 0 23px 23px;
+  overflow: auto;
+}
+
+.compact-editorial-modal__footer {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--reader-action-group-gap);
+  padding: 12px 18px 14px;
+  border-top: 1px solid var(--reader-border-subtle);
+  background: color-mix(in srgb, var(--reader-surface-subtle) 42%, var(--reader-surface-panel));
+}
+
+.compact-editorial-modal .reader-button .reader-icon {
+  width: 16px;
+  height: 16px;
+}
+
+.compact-editorial-modal .lucide-loader-circle {
+  animation: reader-loader-spin .8s linear infinite;
+}
+
+.reader-choice-dialog {
+  --reader-choice-padding: 23px;
+  display: block;
+  width: min(414px, 100%);
+  max-height: calc(100dvh - 185px);
+  padding: var(--reader-choice-padding);
+  overflow: auto;
+  border: 0;
+  border-radius: 17px;
+  background: var(--reader-surface-panel);
+  box-shadow: 0 12px 48px #00000018;
+}
+
+.reader-choice-dialog .compact-editorial-modal__header,
+.reader-choice-dialog .compact-editorial-modal__body,
+.reader-choice-dialog .compact-editorial-modal__footer {
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.reader-choice-dialog .compact-editorial-modal__header h2 {
+  margin: 0 0 11px;
+  color: var(--reader-ink-primary);
+  font-size: 15px;
+  line-height: 1.4;
+  letter-spacing: 0;
+}
+
+.reader-choice-dialog .compact-editorial-modal__description {
+  margin: 0 0 14px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.reader-choice-dialog .compact-editorial-modal__footer {
+  margin-top: 12px;
+  gap: 6px;
+}
+
+.save-destination-dialog .compact-editorial-modal__footer {
+  margin-top: var(--reader-choice-padding);
+}
+
+:is(#root[data-production-root="true"], .handler) .reader-choice-dialog .compact-editorial-modal__footer .reader-button {
+  min-height: 32px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.2;
+}
+
+:is(#root[data-production-root="true"], .handler) .reader-choice-dialog .compact-editorial-modal__footer .reader-button--primary {
+  color: #fff;
+  background: #3c3c3c;
+}
+
+:is(#root[data-production-root="true"], .handler) .reader-choice-dialog .compact-editorial-modal__footer .reader-button:not(.reader-button--primary) {
+  color: var(--reader-ink-primary);
+  background: transparent;
+}
+
+:is(#root[data-production-root="true"], .handler) .reader-choice-dialog .compact-editorial-modal__footer .reader-button:not(.reader-button--primary):hover:not(:disabled),
+:is(#root[data-production-root="true"], .handler) .compact-editorial-modal .reader-button:focus-visible {
+  background: var(--reader-surface-interactive);
+}
+
+:is(#root[data-production-root="true"], .handler) .reader-choice-dialog .compact-editorial-modal__footer .reader-button--primary:hover:not(:disabled),
+:is(#root[data-production-root="true"], .handler) .compact-editorial-modal .reader-button--primary:focus-visible {
+  background: #252525;
+}
+
+@media (max-width: 620px) {
+  .reader-choice-dialog {
+    max-height: calc(100dvh - 115px);
+    --reader-choice-padding: 18px;
+  }
+}
+
+:is(#root[data-production-root="true"], .handler) .compact-editorial-modal .reader-button:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
+.handler .compact-editorial-modal .reader-button:disabled {
+  cursor: default;
+  opacity: .35;
+}
+
+.context-note-composer {
+  width: min(340px, calc(100vw - 24px));
+  max-height: calc(100dvh - 24px);
+  padding: 0;
+  border: 0;
+  border-radius: 16px;
+  background: transparent;
+  overflow: visible;
+}
+
+.context-note-composer::backdrop {
+  background: #0003;
+}
+
+.context-note-composer .comment-composer {
+  width: 100%;
+  max-height: calc(100dvh - 24px);
+}
+
+.context-note-composer__excerpt {
+  margin: 0;
+  color: var(--pk-muted);
+  font: 400 12px/1.5 var(--pk-font-ui);
+  overflow-wrap: anywhere;
+}
+
+.context-note-composer [role="alert"] {
+  margin: 0;
+  font: 400 12px/1.5 var(--pk-font-ui);
+}

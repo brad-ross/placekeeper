@@ -1,11 +1,11 @@
 import { useId, useLayoutEffect, useRef, useState } from "react";
 
 import { AnnotationNameField } from "./AnnotationNameField.js";
-import { DEFAULT_ANNOTATION_NAME } from "../../../../packages/core/src/review-model.js";
+import { DEFAULT_ANNOTATION_NAME } from "../../../../packages/core/src/document-model.js";
 
 import { trapDialogFocus } from "../app/dialog-focus.js";
 import type { SaveCopyProposal } from "../host/session-contracts.js";
-import { ReviewIcon } from "../review/ReviewIcon.js";
+import { ReaderIcon } from "../reader/ReaderIcon.js";
 import type { PdfRewriteEligibility } from "../../../../packages/core/src/pdf-writer.js";
 import type { SaveFailureReason } from "../../../../packages/core/src/save-status.js";
 
@@ -70,7 +70,7 @@ export function SaveDestinationDialog(props: SaveDestinationDialogProps) {
     <div className="save-destination-backdrop" data-save-destination-backdrop>
       <section
         ref={dialogRef}
-        className="save-destination-dialog review-choice-dialog compact-editorial-modal"
+        className="save-destination-dialog reader-choice-dialog compact-editorial-modal"
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
@@ -102,12 +102,12 @@ export function SaveDestinationDialog(props: SaveDestinationDialogProps) {
               </div>
               <div className="save-destination-recovery__actions">
                 <button
-                  className="review-button review-button--primary"
+                  className="reader-button reader-button--primary"
                   type="button"
                   title="Return to annotations"
                   onClick={props.onCancel}
                 >
-                  <ReviewIcon name="arrow-left" />
+                  <ReaderIcon name="arrow-left" />
                   <span>Return to annotations</span>
                 </button>
               </div>
@@ -120,23 +120,23 @@ export function SaveDestinationDialog(props: SaveDestinationDialogProps) {
               </div>
               <div className="save-destination-recovery__actions">
                 <button
-                  className="review-button review-button--primary"
+                  className="reader-button reader-button--primary"
                   type="button"
                   title="Retry saving"
                   disabled={props.establishing}
                   onClick={() => void props.onRetry?.()}
                 >
-                  <ReviewIcon name="redo" />
+                  <ReaderIcon name="redo" />
                   <span>Retry</span>
                 </button>
                 <button
-                  className="review-button"
+                  className="reader-button"
                   type="button"
                   title="Locate the PDF"
                   disabled={props.establishing}
                   onClick={() => void props.onLocate?.()}
                 >
-                  <ReviewIcon name="locate" />
+                  <ReaderIcon name="locate" />
                   <span>Locate PDF…</span>
                 </button>
               </div>
@@ -215,7 +215,7 @@ export function SaveDestinationDialog(props: SaveDestinationDialogProps) {
         </div>
         <footer className="compact-editorial-modal__footer">
           <button
-            className="review-button"
+            className="reader-button"
             type="button"
             title="Cancel save setup"
             disabled={props.establishing}
@@ -225,7 +225,7 @@ export function SaveDestinationDialog(props: SaveDestinationDialogProps) {
           </button>
           <button
             type="button"
-            className="review-button review-button--primary"
+            className="reader-button reader-button--primary"
             title="Save annotations"
             disabled={
               restricted ||
@@ -237,7 +237,7 @@ export function SaveDestinationDialog(props: SaveDestinationDialogProps) {
             }
             onClick={() => void props.onConfirm(choice, filename, annotationName)}
           >
-            {props.establishing ? <ReviewIcon name="loading" /> : null}
+            {props.establishing ? <ReaderIcon name="loading" /> : null}
             <span>Save</span>
           </button>
         </footer>

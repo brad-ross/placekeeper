@@ -7,7 +7,7 @@ import { writePrivateFile, readPrivateFile, readPrivateFileRange } from '../plat
 import { publishFile, stagePublication, syncPublishedFile } from '../platform/file-publication.js';
 import type { SessionBroker } from '../sessions/session-broker.js';
 import type { PdfSaveCoordinator } from '../saving/pdf-save-coordinator.js';
-import type { OpenReviewResult } from '../sessions/session-contracts.js';
+import type { OpenDocumentResult } from '../sessions/session-contracts.js';
 const secret = () => randomBytes(32).toString('base64url');
 type Begin = Extract<HostResourceRequest, {
     operation: 'begin';
@@ -131,7 +131,7 @@ export class HostResourcePersistence {
         return await this.broker.findHostCopyRecovery(match, this.#isCopyRecoveryHost) === match.sessionId;
     }
     async finish(transfer: string): Promise<{
-        opened: OpenReviewResult;
+        opened: OpenDocumentResult;
         file?: HostResourceFile;
     } | { copyRecovery: HostCopyRecoveryMatch } | HostResourceResult> {
         const t = this.#transfers.get(transfer);
@@ -208,7 +208,7 @@ export class HostResourcePersistence {
                         throw Error('Host authority retired');
                     await this.#persist(opened.launch.sessionId, { schemaVersion: 1, writable: t.input.writable, ...(t.input.etag ? { etag: t.input.etag } : {}), digest: t.input.sha256 });
                     await this.broker.configureImportedDestination(opened.launch.sessionId, t.input.writable && !!t.input.etag);
-                    await this.broker.protectChromeReview(opened.launch.sessionId);
+                    await this.broker.protectChromeDocument(opened.launch.sessionId);
                     if (!t.current())
                         throw Error('Host authority retired');
                 }
@@ -224,7 +224,7 @@ export class HostResourcePersistence {
             await rm(t.path, { force: true });
         }
     }
-    async fork(id: string, expectedDigest?: string): Promise<OpenReviewResult> {
+    async fork(id: string, expectedDigest?: string): Promise<OpenDocumentResult> {
         const state = await this.state(id), activeBytes = await this.broker.documentBytes(id), scope = await this.broker.sessionScope(id);
         const recoveryPath = activeBytes ? undefined : await this.broker.importedRecoveryPath(id);
         const bytes = activeBytes ?? (recoveryPath ? await readPrivateFile(recoveryPath, HOST_RESOURCE_MAX_BYTES) : undefined);
@@ -237,10 +237,10 @@ export class HostResourcePersistence {
             if (expectedDigest !== undefined && digest !== expectedDigest) throw Error('Host recovery source changed');
             const opened = await this.broker.openHostResourceSource({ protocolVersion: 1, sourceHandle: handle, displayName: scope?.sourceDisplayName ?? 'Independent review.pdf', byteLength: bytes.length, sha256: digest }, sources);
             if (opened.kind !== 'opened')
-                throw Error('Independent host review unavailable');
+                throw Error('Independent host document unavailable');
             await this.#persist(opened.launch.sessionId, { schemaVersion: 1, writable: false, digest, forked: true });
             await this.broker.configureImportedDestination(opened.launch.sessionId, false);
-            await this.broker.protectChromeReview(opened.launch.sessionId);
+            await this.broker.protectChromeDocument(opened.launch.sessionId);
             return opened;
         }
         finally {

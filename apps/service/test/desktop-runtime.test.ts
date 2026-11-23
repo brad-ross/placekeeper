@@ -6,8 +6,8 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { reduceReview } from "../../../packages/core/src/review-reducer.js";
-import type { PendingReviewDraftV1, ReviewCommand, ReviewState } from "../../../packages/core/src/review-model.js";
+import { reduceDocument } from "../../../packages/core/src/document-reducer.js";
+import type { PendingDocumentDraftV1, DocumentCommand, DocumentState } from "../../../packages/core/src/document-model.js";
 
 import { DraftSnapshotStore } from "../src/recovery/draft-snapshot.js";
 
@@ -146,7 +146,7 @@ describe.each(["electron"] as const)("%s canonical review runtime", (host) => {
     await establishPrivateDirectory(directory);
     let manager: NativeRuntimeManager | undefined;
     try {
-      let state = projection().state as ReviewState;
+      let state = projection().state as DocumentState;
       let store = new DraftSnapshotStore(directory);
       const current = () => ({ ...projection(state.revision), state });
       const service = backend();
@@ -158,7 +158,7 @@ describe.each(["electron"] as const)("%s canonical review runtime", (host) => {
       vi.mocked(service.current).mockImplementation(async () => current());
       vi.mocked(service.invoke).mockImplementation(async (_key, method, payload) => {
         expect(method).toBe("command");
-        const next = reduceReview(state, payload as ReviewCommand);
+        const next = reduceDocument(state, payload as DocumentCommand);
         await store.persist({
           schemaVersion: 3,
           source: { disposition: "local", canonicalSourcePath: paperPath,
@@ -182,7 +182,7 @@ describe.each(["electron"] as const)("%s canonical review runtime", (host) => {
         } });
         expect(response).toHaveProperty("projection.state.history", { length: state.history.length });
       };
-      const command = async (payload: ReviewCommand) => {
+      const command = async (payload: DocumentCommand) => {
         const response = await manager!.handle("helper_12345678", {
           ...envelope, requestId: `request_command_${++request}`, type: "invoke", generation: 1,
           revision: state.revision, method: "command", payload, idempotencyKey: `operation_command_${request}`,
@@ -194,7 +194,7 @@ describe.each(["electron"] as const)("%s canonical review runtime", (host) => {
         expect(Buffer.byteLength(JSON.stringify(state.history), "utf8")).toBeLessThanOrEqual(4 * 1024 * 1024);
       };
       await activate();
-      const draft: PendingReviewDraftV1 = {
+      const draft: PendingDocumentDraftV1 = {
         id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", ownerViewId: "attachment_native_1234",
         baseGeneration: 1, revision: 0, kind: "highlight", pageIndex: 0,
         text: "", anchor: {

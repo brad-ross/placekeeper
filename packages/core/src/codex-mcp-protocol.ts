@@ -1,14 +1,30 @@
 import { encodePlacekeeperLinkFragment, decodePlacekeeperLinkFragment, type PlacekeeperLinkLocation } from "./placekeeper-link.js";
-import { isReviewRuntimeMethodForHost, sanitizeChromeReviewRuntimeRequest, type ReviewRuntimeMethod, } from "./review-runtime-protocol.js";
+import { canonicalDocumentRuntimeMethodForHost, sanitizeChromeDocumentRuntimeRequest, type DocumentRuntimeMethod, } from "./document-runtime-protocol.js";
 export const CODEX_MCP_PROTOCOL = "placekeeper.codex-mcp" as const;
 export const CODEX_MCP_PROTOCOL_VERSION = 1 as const;
-export const CODEX_DISPLAY_TOOL = "mcp__placekeeper__display_review" as const;
-export const CODEX_REVIEW_UI_RESOURCE = "ui://placekeeper/review-v1.html" as const;
+/** MCP tool name (as the placekeeper server registers it) that displays a claimed launch. */
+export const CODEX_DISPLAY_TOOL_NAME = "display_document" as const;
+/**
+ * Deprecated alias of CODEX_DISPLAY_TOOL_NAME. Codex keeps an installed copy of
+ * the plugin skill and hooks that can be older than the app, and those name
+ * this tool, so the server keeps registering it and the hook keeps attesting it.
+ */
+export const CODEX_LEGACY_DISPLAY_TOOL_NAME = "display_review" as const;
+/** Fully qualified tool names as Codex reports them in hook events. */
+export const CODEX_DISPLAY_TOOL = `mcp__placekeeper__${CODEX_DISPLAY_TOOL_NAME}` as const;
+export const CODEX_LEGACY_DISPLAY_TOOL = `mcp__placekeeper__${CODEX_LEGACY_DISPLAY_TOOL_NAME}` as const;
+export function isCodexDisplayToolName(value: unknown): value is typeof CODEX_DISPLAY_TOOL_NAME | typeof CODEX_LEGACY_DISPLAY_TOOL_NAME {
+  return value === CODEX_DISPLAY_TOOL_NAME || value === CODEX_LEGACY_DISPLAY_TOOL_NAME;
+}
+export function isCodexDisplayTool(value: unknown): value is typeof CODEX_DISPLAY_TOOL | typeof CODEX_LEGACY_DISPLAY_TOOL {
+  return value === CODEX_DISPLAY_TOOL || value === CODEX_LEGACY_DISPLAY_TOOL;
+}
+export const CODEX_DOCUMENT_UI_RESOURCE = "ui://placekeeper/review-v1.html" as const;
 export const CODEX_RESOURCE_CHUNK_BYTES = 256 * 1024;
 export const CODEX_MAX_ENCODED_RESPONSE_BYTES = 1024 * 1024;
 const ID = /^[A-Za-z0-9_-]{8,128}$/u;
 const SECRET = /^[A-Za-z0-9_-]{43}$/u;
-const REVIEW_ID = /^[A-Za-z0-9_-]{1,256}$/u;
+const DOCUMENT_ID = /^[A-Za-z0-9_-]{1,256}$/u;
 function record(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -55,7 +71,7 @@ export function parseCodexNativeLaunchSuccess(value: unknown): CodexNativeLaunch
       value.kind !== "focused") ||
     value.surface !== "codex-native" ||
     typeof value.sessionId !== "string" ||
-    !REVIEW_ID.test(value.sessionId) ||
+    !DOCUMENT_ID.test(value.sessionId) ||
     !generation(value.documentGeneration) ||
     !isCodexCapability(value.bindProof) ||
     !record(value.handoff) ||
@@ -155,7 +171,7 @@ export type CodexAppRequest = AppEnvelope & ({
   readonly payload: Record<string, never>;
 } | {
   readonly authority: "presentation";
-  readonly method: ReviewRuntimeMethod | "resource" | "watermark" | "renew" | "createLink";
+  readonly method: DocumentRuntimeMethod | "resource" | "watermark" | "renew" | "createLink";
   readonly payload: unknown;
 } | {
   readonly authority: "continuation";
@@ -231,11 +247,12 @@ export function parseCodexAppRequest(value: unknown): CodexAppRequest | undefine
       payload: { handle: p.handle, offset: p.offset, length: p.length },
     };
   }
-  if (!isReviewRuntimeMethodForHost("codex", value.method)) {
+  const method = canonicalDocumentRuntimeMethodForHost("codex", value.method);
+  if (method === undefined) {
     return undefined;
   }
-  const payload = sanitizeChromeReviewRuntimeRequest(value.method, value.payload);
-  return payload === undefined ? undefined : { ...envelope, authority: "presentation", method: value.method, payload };
+  const payload = sanitizeChromeDocumentRuntimeRequest(method, value.payload);
+  return payload === undefined ? undefined : { ...envelope, authority: "presentation", method, payload };
 }
 
 export type CodexAdmissionFailure =

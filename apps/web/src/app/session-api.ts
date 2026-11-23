@@ -1,19 +1,19 @@
 import type { SaveDestinationResult } from "../host/session-contracts.js";
 import type { SaveStatus } from "../../../../packages/core/src/save-status.js";
-import type { ReviewCommand, ReviewStateView } from "../../../../packages/core/src/review-model.js";
+import type { DocumentCommand, DocumentStateView } from "../../../../packages/core/src/document-model.js";
 import type {
   ProductionSession,
   ProductionSessionApi,
   ProductionScope,
   ProductionExportResult,
-  ReviewInteractionAttachment,
+  DocumentInteractionAttachment,
   SaveCopyProposal,
 } from "../host/session-contracts.js";
-import type { RejectedReviewCommand } from "../review/review-command-result.js";
+import type { RejectedDocumentCommand } from "../reader/document-command-result.js";
 import type {
   ReadingLocationResolutionRequestV1,
   ReadingLocationResolutionV1,
-} from "../../../../packages/core/src/review-runtime-protocol.js";
+} from "../../../../packages/core/src/document-runtime-protocol.js";
 
 export type ReopenRecoveryChoice = "resume" | "discard" | "fork";
 
@@ -48,7 +48,7 @@ function activeAuthoringDraftIds(value: unknown): readonly string[] {
   return Object.freeze([...value]) as readonly string[];
 }
 
-class LocalReviewRequestError extends Error {
+class LocalDocumentRequestError extends Error {
   constructor(readonly status: number) {
     super(`The local document action failed safely (${status}).`);
   }
@@ -175,7 +175,7 @@ function client(session: ProductionSession) {
           throw new Error("Document changed. Confirm the annotation name again to export the latest version.");
         }
       }
-      throw new LocalReviewRequestError(response.status);
+      throw new LocalDocumentRequestError(response.status);
     }
     return response.json() as Promise<T>;
   };
@@ -217,7 +217,7 @@ function maintainPresence(session: ProductionSession): () => void {
 }
 
 export async function loadProductionSession(session: ProductionSession): Promise<{
-  readonly state: ReviewStateView;
+  readonly state: DocumentStateView;
   readonly activeAuthoringDraftIds: readonly string[];
   readonly scope: ProductionScope;
   readonly api: ProductionSessionApi;
@@ -225,10 +225,10 @@ export async function loadProductionSession(session: ProductionSession): Promise
 }> {
   const { request, post } = client(session);
   const [runtimeState, scope, saveStatus] = await Promise.all([
-    request<{ readonly state: ReviewStateView; readonly activeAuthoringDraftIds?: unknown }>("/runtime-state")
+    request<{ readonly state: DocumentStateView; readonly activeAuthoringDraftIds?: unknown }>("/runtime-state")
       .catch(async (error: unknown) => {
-        if (!(error instanceof LocalReviewRequestError) || error.status !== 404) throw error;
-        return { state: await request<ReviewStateView>("/state"), activeAuthoringDraftIds: undefined };
+        if (!(error instanceof LocalDocumentRequestError) || error.status !== 404) throw error;
+        return { state: await request<DocumentStateView>("/state"), activeAuthoringDraftIds: undefined };
       }),
     request<ProductionScope>("/scope"),
     request<SaveStatus>("/save/status"),
@@ -244,9 +244,9 @@ export async function loadProductionSession(session: ProductionSession): Promise
     api: {
       presence: () => maintainPresence(session),
       command: async (
-        command: ReviewCommand,
-        attachment?: ReviewInteractionAttachment,
-      ): Promise<ReviewStateView | RejectedReviewCommand> => {
+        command: DocumentCommand,
+        attachment?: DocumentInteractionAttachment,
+      ): Promise<DocumentStateView | RejectedDocumentCommand> => {
         const response = await fetch(`/s/${session.sessionId}/commands`, {
           method: "POST",
           headers: {
@@ -260,7 +260,7 @@ export async function loadProductionSession(session: ProductionSession): Promise
           const rejected: unknown = await response.json().catch(() => undefined);
           const generationConflict = isObject(rejected) && rejected.ok === false &&
             isObject(rejected.error) && rejected.error.kind === "generation-conflict";
-          const currentState = await request<ReviewStateView>("/state");
+          const currentState = await request<DocumentStateView>("/state");
           commandGeneration = currentState.workflow.documentGeneration;
           return {
             accepted: false,
@@ -276,20 +276,21 @@ export async function loadProductionSession(session: ProductionSession): Promise
           if (
             isObject(rejected) && rejected.ok === false &&
             isObject(rejected.error) &&
-            rejected.error.kind === "invalid-review-command" &&
+            // "invalid-review-command" is the legacy spelling current services still send.
+            (rejected.error.kind === "invalid-review-command" || rejected.error.kind === "invalid-document-command") &&
             typeof rejected.error.message === "string" &&
             rejected.error.message.length > 0 && rejected.error.message.length <= 512
           ) {
             return {
               accepted: false,
-              state: await request<ReviewStateView>("/state"),
+              state: await request<DocumentStateView>("/state"),
               message: rejected.error.message,
               reason: "rejected",
             };
           }
         }
         if (!response.ok) throw new Error(`The local document action failed safely (${response.status}).`);
-        const nextState = await response.json() as ReviewStateView;
+        const nextState = await response.json() as DocumentStateView;
         commandGeneration = nextState.workflow.documentGeneration;
         return nextState;
       },
@@ -309,7 +310,7 @@ export async function loadProductionSession(session: ProductionSession): Promise
       locateSave: () => post<SaveStatus>("/save/locate"),
       resolveReadingLocation: (input: ReadingLocationResolutionRequestV1) =>
         post<ReadingLocationResolutionV1>("/reading-location", input),
-      exportReviewedCopy: (confirmPossiblyStale, fence) => post<ProductionExportResult>(
+      exportAnnotatedCopy: (confirmPossiblyStale, fence) => post<ProductionExportResult>(
         "/export",
         { ...(confirmPossiblyStale === true ? { confirmPossiblyStale: true } : {}),
         ...(fence === undefined ? {} : { fence }) },

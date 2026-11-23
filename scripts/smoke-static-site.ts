@@ -408,10 +408,10 @@ async function runLocalPdfJourney(browser: Browser, targetUrl: string, sourceSha
     await waitForStaticPdf(page);
     const ownedMarks = page.locator("[data-owned-mark='pageNote']");
     if (await ownedMarks.count() !== 1) throw new Error("Independent reopen did not restore exactly one owned Page Note.");
-    if (await page.locator("[data-review-item]", { hasText: comment }).count() !== 1) {
+    if (await page.locator("[data-annotation-item]", { hasText: comment }).count() !== 1) {
       throw new Error("Independent reopen did not restore the exported item as editable exactly once.");
     }
-    if (await page.locator("[data-review-item]", { hasText: "Foreign smoke annotation" }).count() !== 1) {
+    if (await page.locator("[data-annotation-item]", { hasText: "Foreign smoke annotation" }).count() !== 1) {
       throw new Error("Independent reopen did not preserve the representative foreign annotation.");
     }
   } finally {

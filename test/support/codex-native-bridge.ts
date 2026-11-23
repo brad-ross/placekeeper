@@ -29,7 +29,7 @@ export async function nativeBridge(fixture: string, options: { workflowMode?: "g
   const exporting = new ExportCoordinator({ writer, capabilities: broker.capabilities, controls: broker.controls });
   const backend = new CodexServiceRuntimeBackend({ broker, saving, exporting, assetRoot: resolve('dist/web') });
   const manager = new CodexRuntimeManager(broker, { backend });
-  const opened = await broker.openReview({ pdfPath, surface: 'codex-native', ...options });
+  const opened = await broker.openDocument({ pdfPath, surface: 'codex-native', ...options });
   if (opened.kind === 'recovery-offered') throw new Error('Fresh fixture offered recovery');
   const sessionId = opened.launch.sessionId;
   const task = `acceptance-${randomUUID()}`;
@@ -39,7 +39,7 @@ export async function nativeBridge(fixture: string, options: { workflowMode?: "g
     const sessionId = target.sessionId, task = target.task;
     const generation = broker.state(sessionId)!.workflow.documentGeneration;
     const launch = manager.stageLaunch({ sessionId, kind: 'opened' })!;
-    expect(manager.claimLaunch({ bindProof: launch.bindProof, reviewSessionId: sessionId, documentGeneration: generation, taskSessionId: task })).toBe(true);
+    expect(manager.claimLaunch({ bindProof: launch.bindProof, documentSessionId: sessionId, documentGeneration: generation, taskSessionId: task })).toBe(true);
     const display = manager.display(launch.handoff.token)!;
     expect(manager.attestDisplay(display.receipt, task)).toBe(true);
     const ready = await manager.pending({ protocolVersion: 1, runtimeId: display.privateMeta.runtimeId,
@@ -70,7 +70,7 @@ export async function nativeBridge(fixture: string, options: { workflowMode?: "g
       await page.evaluate(async runtimeId => {
         const { NativeOperationError, parseCodexAppResponse } = await import(/* @vite-ignore */ ('/packages/core/src/codex-mcp-protocol.ts' as string));
         const { createCodexHostRuntime } = await import(/* @vite-ignore */ ('/apps/web/src/host/codex-runtime.ts' as string));
-        const { mountCodexProductionReview } = await import(/* @vite-ignore */ ('/apps/web/src/codex-entry.tsx' as string));
+        const { mountCodexProductionDocument } = await import(/* @vite-ignore */ ('/apps/web/src/codex-entry.tsx' as string));
         const bridge = window as unknown as { nativeAcceptanceCall: (method: string, payload?: unknown) => Promise<any>; nativeAcceptanceDispose: () => void; nativeAcceptanceErrors: string[] };
         document.body.innerHTML = '<div id="root"></div>';
         const listeners = new Set<(event: any) => void>();
@@ -82,7 +82,7 @@ export async function nativeBridge(fixture: string, options: { workflowMode?: "g
             return result;
           },
           subscribeInvalidations(listener: (event: any) => void) { listeners.add(listener); return () => listeners.delete(listener); } });
-        const unmount = mountCodexProductionReview(document.getElementById('root')!, runtime,
+        const unmount = mountCodexProductionDocument(document.getElementById('root')!, runtime,
           (error: Error) => bridge.nativeAcceptanceErrors.push(error.message), () => {});
         const poll = async () => {
           try {

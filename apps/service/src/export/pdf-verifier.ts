@@ -3,13 +3,13 @@ import { createHash } from "node:crypto";
 
 import type {
   PdfStructuralEvidence,
-  ReviewAnnotation,
+  PdfWriterAnnotation,
 } from "../../../../packages/core/src/pdf-writer.js";
 import {
   inspectPortableAnnotationsForImport,
   inspectProjectedPortableAnnotations,
 } from "../../../../packages/core/src/portable-annotation.js";
-import type { ReviewItem } from "../../../../packages/core/src/review-model.js";
+import type { Annotation } from "../../../../packages/core/src/document-model.js";
 import {
   inspectPdfWithEmbedPdf,
   type InspectedPdf,
@@ -21,7 +21,7 @@ export interface PdfVerificationInput {
   readonly sourcePdf: Uint8Array;
   readonly candidatePdf: Uint8Array;
   readonly evidence: PdfStructuralEvidence;
-  readonly annotations: readonly ReviewAnnotation[];
+  readonly annotations: readonly PdfWriterAnnotation[];
   readonly manageNativeAnnotations?: boolean;
   readonly sourceInspection?: InspectedPdf;
   readonly candidateInspection?: InspectedPdf;
@@ -54,7 +54,7 @@ function fail(message: string): never {
 }
 
 function portableInventory(inspection: InspectedPdf): {
-  readonly items: readonly ReviewItem[];
+  readonly items: readonly Annotation[];
   readonly physicalIdentities: ReadonlySet<string>;
 } {
   const nativeIds = new Set((inspection.nativeAnnotations ?? []).map(({ item }) => item.id));
@@ -65,7 +65,7 @@ function portableInventory(inspection: InspectedPdf): {
     visible: annotation,
   })));
   if (result.status === "invalid") {
-    fail(`The reviewed PDF contains an incomplete portable annotation group (${result.reason}).`);
+    fail(`The Annotated Document contains an incomplete portable annotation group (${result.reason}).`);
   }
   if (result.status === "foreign") return { items: [], physicalIdentities: new Set() };
   return {
@@ -107,7 +107,7 @@ function sameNumber(left: number, right: number): boolean {
 
 function sameRect(
   inspected: InspectedPdfAnnotation["rect"],
-  requested: ReviewAnnotation["rect"],
+  requested: PdfWriterAnnotation["rect"],
 ): boolean {
   return (
     sameNumber(inspected.origin.x, requested.x) &&
@@ -119,7 +119,7 @@ function sameRect(
 
 function sameIconAnchor(
   inspected: InspectedPdfAnnotation["rect"],
-  requested: ReviewAnnotation["rect"],
+  requested: PdfWriterAnnotation["rect"],
 ): boolean {
   return (
     Math.abs(inspected.origin.x - requested.x) <= 20.01 &&
@@ -129,7 +129,7 @@ function sameIconAnchor(
 
 function sameSegments(
   inspected: readonly InspectedPdfAnnotation["rect"][] | undefined,
-  requested: readonly ReviewAnnotation["rect"][] | undefined,
+  requested: readonly PdfWriterAnnotation["rect"][] | undefined,
 ): boolean {
   if (requested === undefined || requested.length === 0) return true;
   return (
@@ -141,7 +141,7 @@ function sameSegments(
   );
 }
 
-const subtypeByKind: Readonly<Record<ReviewAnnotation["kind"], string>> = {
+const subtypeByKind: Readonly<Record<PdfWriterAnnotation["kind"], string>> = {
   replace: "strikeOut",
   delete: "strikeOut",
   insert: "text",
@@ -150,7 +150,7 @@ const subtypeByKind: Readonly<Record<ReviewAnnotation["kind"], string>> = {
   pdfAnnotation: "unknown",
 };
 
-export const verifyReviewedPdf: PdfExportVerifier = async ({
+export const verifyAnnotatedPdf: PdfExportVerifier = async ({
   sourcePdf,
   candidatePdf,
   evidence,
@@ -189,15 +189,15 @@ export const verifyReviewedPdf: PdfExportVerifier = async ({
   const candidatePortable = portableInventory(candidate);
   const candidatePortableItems = candidatePortable.items;
   if (source.pageCount !== candidate.pageCount || candidate.pageCount !== evidence.pageCount) {
-    fail("The reviewed PDF page inventory differs from the source.");
+    fail("The Annotated Document page inventory differs from the source.");
   }
   if (JSON.stringify(source.pageFingerprints) !== JSON.stringify(candidate.pageFingerprints)) {
-    fail("The reviewed PDF page content or geometry differs from the source.");
+    fail("The Annotated Document page content or geometry differs from the source.");
   }
 
   const requestedIdentities = new Set(annotations.map(annotationIdentity));
   if (requestedIdentities.size !== annotations.length) {
-    fail("The frozen review contains duplicate page-local annotation identities.");
+    fail("The frozen annotations contain duplicate page-local annotation identities.");
   }
   const sourceIdentities = new Set(source.annotations.map(annotationIdentity));
   const sourceOwnedIdentities = new Set(sourcePortable.physicalIdentities);
@@ -214,7 +214,7 @@ export const verifyReviewedPdf: PdfExportVerifier = async ({
   }
   if ([...requestedIdentities].some((identity) =>
     sourceIdentities.has(identity) && !sourceOwnedIdentities.has(identity))) {
-    fail("A review annotation ID collides with a pre-existing annotation.");
+    fail("A Placekeeper annotation ID collides with a pre-existing annotation.");
   }
 
   // PDFium invents IDs for annotations without /NM. IDs that independently
@@ -236,21 +236,21 @@ export const verifyReviewedPdf: PdfExportVerifier = async ({
     .map((annotation) => stableAnnotation(annotation, persistentIds))
     .sort();
   if (JSON.stringify(preservedInventory) !== JSON.stringify(sourceInventory)) {
-    fail("A pre-existing annotation changed or disappeared from the reviewed PDF.");
+    fail("A pre-existing annotation changed or disappeared from the Annotated Document.");
   }
   if (candidate.annotations.length !== sourceInventory.length + annotations.length) {
-    fail("The reviewed PDF annotation inventory contains unexpected entries.");
+    fail("The Annotated Document annotation inventory contains unexpected entries.");
   }
   const requestedPortable = inspectProjectedPortableAnnotations(annotations);
   if (requestedPortable.status === "invalid") {
-    fail(`The frozen review contains an incomplete portable annotation group (${requestedPortable.reason}).`);
+    fail(`The frozen annotations contain an incomplete portable annotation group (${requestedPortable.reason}).`);
   }
   const portableIds = candidatePortableItems.map(({ id }) => id).sort();
   const requestedPortableIds = requestedPortable.status === "owned"
     ? requestedPortable.items.map(({ id }) => id).sort()
     : [];
   if (JSON.stringify(portableIds) !== JSON.stringify(requestedPortableIds)) {
-    fail("The reviewed PDF portable annotation inventory is incomplete.");
+    fail("The Annotated Document portable annotation inventory is incomplete.");
   }
   const candidatePortableById = new Map(
     candidatePortableItems.map((item) => [item.id, JSON.stringify(item)]),
@@ -262,7 +262,7 @@ export const verifyReviewedPdf: PdfExportVerifier = async ({
       return reopened === undefined || reopened !== JSON.stringify(item);
     })
   ) {
-    fail("The reviewed PDF portable annotation payload differs from the frozen review.");
+    fail("The Annotated Document portable annotation payload differs from the frozen annotations.");
   }
 
   const candidateByIdentity = new Map<string, InspectedPdfAnnotation[]>();
@@ -288,7 +288,7 @@ export const verifyReviewedPdf: PdfExportVerifier = async ({
         : sameRect(written.rect, requested.rect)) ||
       !sameSegments(written.segmentRects, requested.quadPoints)
     ) {
-      fail(`Review annotation ${requested.id} failed structural verification.`);
+      fail(`Annotation ${requested.id} failed structural verification.`);
     }
   }
 

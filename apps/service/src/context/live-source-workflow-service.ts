@@ -9,11 +9,11 @@ import {
   type LiveDispositionItemV1,
 } from "../../../../packages/core/src/disposition.js";
 import {
-  reviewSemanticDigest,
+  documentSemanticDigest,
   type AtomicLiveContextObservationV1,
   type LiveExecutionBaselineV1,
 } from "../../../../packages/core/src/live-context.js";
-import type { ReviewItem } from "../../../../packages/core/src/review-model.js";
+import type { Annotation } from "../../../../packages/core/src/document-model.js";
 import {
   inspectPdfWithEmbedPdf,
   type InspectedPdf,
@@ -150,7 +150,7 @@ function validateDispositionAgainstReconciliation(
         throw new Error(`Disposition ${item.itemId} must preserve the ambiguous manual state`);
       case "removed":
         if (item.status === "removed-before-processing") break;
-        throw new Error(`Disposition ${item.itemId} must report the removed Review Item`);
+        throw new Error(`Disposition ${item.itemId} must report the removed annotation`);
     }
   }
 }
@@ -191,10 +191,10 @@ export class LiveSourceWorkflowService {
       if (
         baseline.identity.documentGeneration !== before.identity.documentGeneration ||
         baseline.identity.stateDigest !== before.identity.stateDigest
-      ) throw new Error("Review State changed during baseline capture; refresh and begin source work again");
+      ) throw new Error("Annotation state changed during baseline capture; refresh and begin source work again");
       const after = await this.#refresh(taskSessionId);
       if (baseline.identity.stateDigest !== after.identity.stateDigest) {
-        throw new Error("Review State changed during baseline capture; refresh and begin source work again");
+        throw new Error("Annotation state changed during baseline capture; refresh and begin source work again");
       }
       const scope = await this.#sourceScope(taskSessionId);
       this.#registerExecution(baseline.executionId, {
@@ -336,7 +336,7 @@ export class LiveSourceWorkflowService {
     const binding = this.#broker.taskBindings.bindingForTask(execution.taskSessionId);
     if (binding === undefined) throw new Error("The Codex task has no active PDF binding");
     const source = await this.#broker.projectAtomicSession(
-      binding.reviewSessionId,
+      binding.documentSessionId,
       async (snapshot) => {
         if (snapshot.documentGeneration !== binding.documentGeneration) {
           throw new Error("The PDF generation changed during rebuild verification");
@@ -353,12 +353,12 @@ export class LiveSourceWorkflowService {
       throw new Error("The rebuilt PDF could not be structurally observed");
     }
     const validatedOwnedIds = new Set(inspected.portableItems.map(({ id }) => id));
-    const inheritedReview = inspected.portableItems.some(({ id }) => plan.baselineItemIds.has(id)) ||
+    const inheritedDocument = inspected.portableItems.some(({ id }) => plan.baselineItemIds.has(id)) ||
       inspected.annotations.some((annotation) =>
         plan.baselineItemIds.has(annotation.id) ||
         validatedOwnedIds.has(annotation.id),
       );
-    if (inheritedReview) throw new Error("The rebuilt PDF still contains review annotations");
+    if (inheritedDocument) throw new Error("The rebuilt PDF still contains Placekeeper annotations");
     const verificationId = this.#id();
     execution.verifiedRebuilds.add(verificationId);
     return {
@@ -396,7 +396,7 @@ export class LiveSourceWorkflowService {
     });
     this.#assertSameObservation(observation, report);
     validateDispositionAgainstReconciliation(input.items, report, execution);
-    const currentItems = await this.#currentReviewItems(execution.taskSessionId, observation.identity.stateDigest);
+    const currentItems = await this.#currentAnnotations(execution.taskSessionId, observation.identity.stateDigest);
     const baselineIds = new Set(execution.baseline.items.map(({ id }) => id));
     const laterItems = currentItems
       .filter(({ id }) => !baselineIds.has(id))
@@ -498,7 +498,7 @@ export class LiveSourceWorkflowService {
     if (
       report.identity.documentGeneration !== observation.identity.documentGeneration ||
       report.identity.stateDigest !== observation.identity.stateDigest
-    ) throw new Error("Review State changed during reconciliation; refresh before continuing");
+    ) throw new Error("Annotation state changed during reconciliation; refresh before continuing");
   }
 
   async #sourceScope(taskSessionId: string): Promise<{
@@ -507,7 +507,7 @@ export class LiveSourceWorkflowService {
   }> {
     const binding = this.#broker.taskBindings.bindingForTask(taskSessionId);
     if (binding === undefined) throw new Error("The Codex task has no active PDF binding");
-    const scope = await this.#broker.projectAtomicSession(binding.reviewSessionId, async (snapshot) => {
+    const scope = await this.#broker.projectAtomicSession(binding.documentSessionId, async (snapshot) => {
       if (
         snapshot.documentGeneration !== binding.documentGeneration ||
         snapshot.sourceRootPath === undefined
@@ -521,14 +521,14 @@ export class LiveSourceWorkflowService {
     return scope;
   }
 
-  async #currentReviewItems(taskSessionId: string, expectedDigest: string): Promise<readonly ReviewItem[]> {
+  async #currentAnnotations(taskSessionId: string, expectedDigest: string): Promise<readonly Annotation[]> {
     const binding = this.#broker.taskBindings.bindingForTask(taskSessionId);
     if (binding === undefined) throw new Error("The Codex task has no active PDF binding");
-    const items = await this.#broker.projectAtomicSession(binding.reviewSessionId, async (snapshot) => {
+    const items = await this.#broker.projectAtomicSession(binding.documentSessionId, async (snapshot) => {
       if (
         snapshot.documentGeneration !== binding.documentGeneration ||
-        reviewSemanticDigest(snapshot.state.items) !== expectedDigest
-      ) throw new Error("Review State changed before disposition completion");
+        documentSemanticDigest(snapshot.state.items) !== expectedDigest
+      ) throw new Error("Annotation state changed before disposition completion");
       return snapshot.state.items;
     });
     if (items === undefined) throw new Error("The bound PDF session ended before disposition completion");

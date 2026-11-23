@@ -1,8 +1,0 @@
-/* Stable layout entrypoint. Recovery and portaled document actions follow responsive rules. */
-@import './review-layout-foundation.css';
-@import './review-layout-annotations.css';
-@import './review-layout-dialogs.css';
-@import './review-layout-responsive.css';
-@import './review-recovery.css';
-@import './review-document-actions.css';
-@import './document-loading.css';

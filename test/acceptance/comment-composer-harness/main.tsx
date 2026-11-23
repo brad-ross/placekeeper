@@ -1,6 +1,6 @@
 import { createRoot } from 'react-dom/client';
 
-import { CommentComposer } from '../../../apps/web/src/review/CommentComposer.js';
+import { CommentComposer } from '../../../apps/web/src/reader/CommentComposer.js';
 
 const root = document.querySelector<HTMLElement>('#root');
 if (root === null) throw new Error('Comment composer harness root is unavailable.');

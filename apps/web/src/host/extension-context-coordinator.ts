@@ -1,6 +1,6 @@
 import type { OpenAIModelContext, OpenAIModelContextHostState } from '@openai/mcp-extensions/app';
 import type { DocumentContextMember, DocumentContextPublicationStatus } from './document-in-context.js';
-import type { ReviewContextSnapshot } from './review-context-snapshot.js';
+import type { DocumentContextSnapshot } from './document-context-snapshot.js';
 
 type Block = NonNullable<NonNullable<OpenAIModelContextHostState>['content']>[number];
 export const backgroundContextUri = 'placekeeper-context:///background';
@@ -35,7 +35,7 @@ function resource(id: string, title: string, text: string): Block {
 }
 /** One serialized publisher per app invocation. The host can pause automatic publication by removing the background group. */
 export class ExtensionContextCoordinator {
-  #snapshot: ReviewContextSnapshot | undefined;
+  #snapshot: DocumentContextSnapshot | undefined;
   #paused = false;
   #attachments = new Map<string, Block>();
   #confirmedAttachments = new Map<string, Block>();
@@ -97,7 +97,7 @@ export class ExtensionContextCoordinator {
   get status(): ExtensionContextStatus { return this.#status; }
   get attachments(): readonly string[] { return [...this.#attachments.keys()].map(id => decodeURIComponent(id.slice(attachmentPrefix.length))); }
   #notify(status: ExtensionContextStatus) { this.#status = status; this.onStatus(status); }
-  publish(snapshot: ReviewContextSnapshot) { this.#retainedBackground = undefined; this.#snapshot = snapshot; this.#change(); }
+  publish(snapshot: DocumentContextSnapshot) { this.#retainedBackground = undefined; this.#snapshot = snapshot; this.#change(); }
   retry() { if (this.#status === 'unavailable') this.#change(true); }
   setDocument(member: DocumentContextMember) {
     if (this.#document?.member === member) return;
@@ -258,8 +258,9 @@ export class ExtensionContextCoordinator {
     const blocks = [...this.#foreign];
     if (this.#snapshot && !this.#paused && !this.#removed.has(backgroundContextUri)) {
       const s = this.#snapshot;
+      // Model-facing resource: its `reviewRevision` key is frozen agent-facing output.
       blocks.push(resource(backgroundContextUri, 'Current Placekeeper document', JSON.stringify({
-        documentDigest: s.source.digest, documentGeneration: s.documentGeneration, reviewRevision: s.reviewRevision, title: s.title.slice(0, 160), page: s.page, pageCount: s.pageCount,
+        documentDigest: s.source.digest, documentGeneration: s.documentGeneration, reviewRevision: s.annotationRevision, title: s.title.slice(0, 160), page: s.page, pageCount: s.pageCount,
         selection: s.selection ? { text: s.selection.text.slice(0, 1600), pages: s.selection.pages.slice(0, 8) } : null,
         annotations: s.annotations.slice(0, 20).map(item => ({ id: item.id, page: item.page, kind: item.kind, text: item.text.slice(0, 240) })),
         totalAnnotations: s.annotations.length, truncated: s.annotations.length > 20 || s.annotations.some(item => item.text.length > 240) || (s.selection?.text.length ?? 0) > 1600 || (s.selection?.pages.length ?? 0) > 8,

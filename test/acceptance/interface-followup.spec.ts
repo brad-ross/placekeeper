@@ -1,4 +1,4 @@
-import { reviewEdgeGeometry } from '../../scripts/testing/review-edge-geometry.js';
+import { documentEdgeGeometry } from '../../scripts/testing/document-edge-geometry.js';
 import { copyFile, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -33,13 +33,13 @@ test('page and zoom menus align to the right edge of their numeric groups', asyn
   for (const width of [1280, 620, 320]) {
     await page.setViewportSize({ width, height: 900 });
     for (const [openerSelector, groupSelector, label] of [
-      ['.review-chrome__page-disclosure', '.review-chrome__page-position', 'Page navigation'],
-      ['.review-chrome__zoom-disclosure', '.review-chrome__zoom-cluster', 'PDF zoom'],
+      ['.reader-chrome__page-disclosure', '.reader-chrome__page-position', 'Page navigation'],
+      ['.reader-chrome__zoom-disclosure', '.reader-chrome__zoom-cluster', 'PDF zoom'],
     ] as const) {
-      await page.locator(`[data-review-chrome] ${openerSelector}:visible`).click();
+      await page.locator(`[data-reader-chrome] ${openerSelector}:visible`).click();
       const menu = page.getByRole('menu', { name: label, exact: true });
       await expect(menu).toBeVisible();
-      const group = page.locator(`[data-review-chrome] ${groupSelector}:visible`);
+      const group = page.locator(`[data-reader-chrome] ${groupSelector}:visible`);
       const a = (await group.boundingBox())!;
       const b = (await menu.boundingBox())!;
       const expectedRight = Math.min(width - 8, Math.max(8 + b.width, a.x + a.width));
@@ -57,8 +57,8 @@ test('workspace fade follows the opening tray without another pointer or scroll 
   await page.getByRole('button', { name: 'Show Workspace', exact: true }).click();
   // Do not move the pointer after opening: the transition itself must publish geometry.
   await page.waitForTimeout(240);
-  const geometry = await page.locator('[data-review-stage]').evaluate(reviewEdgeGeometry);
-  const tray = (await page.locator('#review-tools-workspace').boundingBox())!;
+  const geometry = await page.locator('[data-reader-stage]').evaluate(documentEdgeGeometry);
+  const tray = (await page.locator('#reader-tools-workspace').boundingBox())!;
   expect(tray.x - geometry.rightStart).toBeCloseTo(12, 2);
   expect(geometry).toMatchObject({ fadeSize: 12, display: 'block' });
   const backing = (await page.locator('.pdf-workspace__scrollbar-backing').first().boundingBox())!;
@@ -77,10 +77,10 @@ test('document history keeps the other toolbar controls mounted and visible', as
     await page.getByRole('button', { name: 'Open PDF link to Primary result, Page 2', exact: true }).click();
     await page.getByRole('menuitem', { name: 'Open in main document', exact: true }).click();
     await expect(page.getByRole('textbox', { name: /^Current page/ })).toHaveValue('2');
-    await page.locator('[data-review-chrome]').hover({ position: { x: 2, y: 2 } });
+    await page.locator('[data-reader-chrome]').hover({ position: { x: 2, y: 2 } });
     await page.evaluate(() => {
       const nodes = [...document.querySelectorAll<HTMLElement>(
-        '[data-review-chrome] > .review-chrome__identity, [data-review-chrome] > .review-chrome__left-controls .review-chrome__page-position, [data-review-chrome] > .review-chrome__viewer-controls .review-chrome__zoom-cluster, [data-review-chrome] > .review-chrome__left-controls [data-review-copy-link]',
+        '[data-reader-chrome] > .reader-chrome__identity, [data-reader-chrome] > .reader-chrome__left-controls .reader-chrome__page-position, [data-reader-chrome] > .reader-chrome__viewer-controls .reader-chrome__zoom-cluster, [data-reader-chrome] > .reader-chrome__left-controls [data-reader-copy-link]',
       )];
       const audit = { missing: [] as string[], finished: false };
       (window as typeof window & { __chromeAudit?: typeof audit }).__chromeAudit = audit;
@@ -98,7 +98,7 @@ test('document history keeps the other toolbar controls mounted and visible', as
       };
       requestAnimationFrame(inspect);
     });
-    await page.locator('[data-review-chrome]').hover({ position: { x: 2, y: 2 } });
+    await page.locator('[data-reader-chrome]').hover({ position: { x: 2, y: 2 } });
     await page.getByRole('button', { name: 'Back in document history', exact: true }).click();
     await expect(page.getByRole('textbox', { name: /^Current page/ })).toHaveValue('1');
     await expect.poll(() => page.evaluate(() =>
@@ -118,9 +118,9 @@ test('save errors float at the upper left without shifting the PDF or toolbar', 
   await page.route('**/save/status', (route) => route.fulfill({ json: status() }));
   await page.route('**/save/retry', (route) => { failed = false; return route.fulfill({ json: status() }); });
   await openPdf(page);
-  const notice = page.locator('.review-save-notice');
+  const notice = page.locator('.reader-save-notice');
   await expect(notice).toBeVisible({ timeout: 10000 });
-  const stage = (await page.locator('[data-review-stage]').boundingBox())!;
+  const stage = (await page.locator('[data-reader-stage]').boundingBox())!;
   const bounds = (await notice.boundingBox())!;
   expect(bounds.x - stage.x).toBeGreaterThanOrEqual(6);
   expect(bounds.x - stage.x).toBeLessThanOrEqual(14);
@@ -132,12 +132,12 @@ test('save errors float at the upper left without shifting the PDF or toolbar', 
   await page.screenshot({ path: test.info().outputPath('floating-error.png') });
   await notice.getByRole('button', { name: 'Retry', exact: true }).click();
   await expect(notice).toBeHidden();
-  expect(await page.locator('[data-review-stage]').boundingBox()).toEqual(stage);
+  expect(await page.locator('[data-reader-stage]').boundingBox()).toEqual(stage);
 });
 
 test('agent status opens to the right and stays inside desktop and narrow viewports', async ({ page }) => {
   await openPdf(page, true);
-  const status = page.locator('[data-review-context-status] .codex-context-status');
+  const status = page.locator('[data-reader-context-status] .codex-context-status');
   await expect(status).toBeVisible();
   for (const width of [1280, 620, 521]) {
     await page.setViewportSize({ width, height: 900 });

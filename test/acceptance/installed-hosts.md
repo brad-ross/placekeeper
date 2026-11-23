@@ -18,8 +18,8 @@ The required v1 distribution is a source-first Apple-silicon install for a perso
 - [x] From that dependency-free source copy, `./install.sh` downloads Node 24.14.0, installs pnpm 11.16.0 dependencies from the frozen lockfile, and succeeds without Apple signing credentials.
 - [x] The isolated acceptance install creates the app at the configured user-local destination; the default is `~/Applications/Placekeeper.app`.
 - [x] The installer finishes only after the packaged Node/PDFium writer opens the generated fixture offline.
-- [x] After the intentional unsigned-app first-open confirmation, Finder Open With opens one PDF without Terminal; duplicate launch focuses the same recoverable review and explicit fork creates a separate review.
-- [x] Re-running the installer replaces the app without deleting recovery data or user-owned review artifacts; the transaction test proves a partial replacement restores the prior app.
+- [x] After the intentional unsigned-app first-open confirmation, Finder Open With opens one PDF without Terminal; duplicate launch focuses the same recoverable document and explicit fork creates a separate document.
+- [x] Re-running the installer replaces the app without deleting recovery data or user-owned annotated copies; the transaction test proves a partial replacement restores the prior app.
 - [x] Candidate readiness runs before the replacement transaction commits. A failing readiness executable restores the prior bundle; a successful installed smoke observes the exact candidate management identity in `accepting` state before continuing.
 
 ## Upgrade lifecycle evidence
@@ -29,13 +29,13 @@ The production installed smoke executes the current packaged candidate and trans
 | State | Automated result | Recovery shown to the user |
 |---|---|---|
 | Exact daemon and identical bundle | Existing daemon is reused; no shutdown request or bundle move. | None. |
-| Distinct candidate, two active PDFs | Replacement exits before touching the installed identity; both authenticated review state endpoints remain usable. | Close Placekeeper tabs/windows, wait for the five-second grace lease, and retry. |
-| Active Codex binding | Deferred install retains current prompt context; `SessionEnd` revokes it without stopping unrelated reviews. | End the bound Codex task or wait for its lease, then retry. |
+| Distinct candidate, two active PDFs | Replacement exits before touching the installed identity; both authenticated document state endpoints remain usable. | Close Placekeeper tabs/windows, wait for the five-second grace lease, and retry. |
+| Active Codex binding | Deferred install retains current prompt context; `SessionEnd` revokes it without stopping unrelated documents. | End the bound Codex task or wait for its lease, then retry. |
 | Accepted save or lifecycle work | Coordinator retries for at most five seconds, then preserves the app if work is still active. | Wait a moment, then retry. |
-| Malformed or timed-out daemon | Socket-level acceptance classifies it as uninspectable and the transaction helper is never invoked. | Close reviews and retry from the current Placekeeper installation. |
+| Malformed or timed-out daemon | Socket-level acceptance classifies it as uninspectable and the transaction helper is never invoked. | Close open documents and retry from the current Placekeeper installation. |
 | Closed pages plus ended task | Presence grace expires, conditional shutdown completes, candidate replacement/readiness succeeds, and the new launcher opens the fixture. | Retry the install. |
 
-The matrix also fixes the expected boundaries for offline-smoke failure, active-review deferral, active-Codex deferral, replacement failure, changed-hash readiness, readiness rollback, the physical destination, and warning-only LaunchServices failure. Candidate readiness is document-free: no user PDF is opened or autosaved before `install-built-app.sh` commits. A successful replacement preserves current recovery bytes. A failed replacement restores the prior current-identity app while leaving that recovery material untouched.
+The matrix also fixes the expected boundaries for offline-smoke failure, open-document deferral, active-Codex deferral, replacement failure, changed-hash readiness, readiness rollback, the physical destination, and warning-only LaunchServices failure. Candidate readiness is document-free: no user PDF is opened or autosaved before `install-built-app.sh` commits. A successful replacement preserves current recovery bytes. A failed replacement restores the prior current-identity app while leaving that recovery material untouched.
 
 ## Placekeeper release-candidate record
 
@@ -63,14 +63,14 @@ The 2026-08-07 acceptance record predates the clean-break identity and no longer
 
 Automated distribution checks prove that the app and extension carry identical integrity-pinned `app.js`, `app.css`, `pdfium.wasm`, and inline-worker declarations; missing, duplicated, externally hosted, stale, or unexpected assets fail validation. They also prove that the macOS bundle contains the executable `Contents/MacOS/placekeeper-vscode` wrapper and its bounded `vscode://placekeeper-local.placekeeper-vscode/placekeeper/external` route. These checks are scaffolding, not Electron webview evidence.
 
-Before U8 is called complete, run the copied fixture in `test/fixtures/latex` and record both rows below. Do not record PDF/source paths, registration IDs, capabilities, review text, or credentials. A result is Pass only when the extension log and generated webview HTML contain none of that material and the network log has zero external requests.
+Before U8 is called complete, run the copied fixture in `test/fixtures/latex` and record both rows below. Do not record PDF/source paths, registration IDs, capabilities, annotation text, or credentials. A result is Pass only when the extension log and generated webview HTML contain none of that material and the network log has zero external requests.
 
 | Date | Build | VS Code / LaTeX Workshop | Route | Direct boot + first page | Two rebuilds + same panel | Forward / reverse SyncTeX | Mixed + stale continuity | Distinct export | Hide/show + restart presentation | Zero iframe/browser/network | Result |
 |---|---|---|---|---|---|---|---|---|---|---|---|
 | 2026-08-28 | U8 source candidate | 1.135.0 / 10.18.0 | Placekeeper commands with LaTeX Workshop retaining build authority | Pass: embedded first page rendered beside source | Pass: two `latexmk` rebuilds changed the PDF in one panel | Pass: forward returned `ok`; reverse opened the mapped source line | Pass in generation, stale-sidecar, and reconciliation automation | Pass in broker/export automation | Pending release-presentation move + restart repetition | Pass: direct webview, no iframe/browser launch, empty network log | Partial: functional source-PDF loop passes; release-presentation repetition remains |
 | Pending | Pending | 1.95 / absent or incompatible | Supported Placekeeper-only fallback | Pending | Pending | Pending | Pending | Pending | Pending | Pending | Pending |
 
-For the current-host row, also move the panel, repeat view and SyncTeX, hide/show it, and reload VS Code. The restored serializer state may contain only the opaque panel key plus bounded page index and zoom. The service must rebind current semantic state; no session credential, source path, review text, or capability may be serialized. Exercise a partial candidate, source-save-without-successor, sidecar skew, ambiguous reconciliation, and export race; each must fail closed while protected work remains.
+For the current-host row, also move the panel, repeat view and SyncTeX, hide/show it, and reload VS Code. The restored serializer state may contain only the opaque panel key plus bounded page index and zoom. The service must rebind current semantic state; no session credential, source path, annotation text, or capability may be serialized. Exercise a partial candidate, source-save-without-successor, sidecar skew, ambiguous reconciliation, and export race; each must fail closed while protected work remains.
 
 If the LaTeX Workshop probe fails, record that failure as the compatibility result and complete the same loop with **Placekeeper: View PDF** and **Placekeeper: Forward SyncTeX**. Do not mark the release blocked merely because the unsupported compatibility path is unavailable; do mark it blocked if the supported fallback fails.
 
@@ -84,7 +84,7 @@ Playwright support for unpacked extensions does not guarantee that its managed C
 |---|---|---|---|---|---|---|---|---|---|---|---|
 | Pending | Pending | Pending | `cgegjjjhbhnfgcoipeffhogoojfoekgg` | Pending | Pending | Pending | Pending | Pending | Pending | Pending | Pending |
 
-### Installed embedded-review release gate
+### Installed embedded-document release gate
 
 Install the release-candidate app first and explicitly select Chrome setup to prepare its persistent folder and native-host registration, then run `pnpm test:chrome-installed`. Mac-only installation no longer prepares Chrome.
 The runner validates the distributable extension tree and exact user-level native
@@ -129,14 +129,14 @@ credential, command payload, source locator, annotation text, or PDF bytes.
 | AE6 navigation | Make several Placekeeper page/location jumps. Placekeeper Back/Forward traverses them without changing the omnibox; Chrome Back returns to the fixture landing page. | Pending |
 | AE7 native link surface | The Chrome top bar omits the document-level **Copy Link** because the PDF URL remains in the omnibox. A precise item-level **Copy Link** contains no source URL, task/bind data, credential, or presentation identity; opening it through Finder or Codex produces an ordinary unbound Placekeeper view. | Pending |
 | AE8 protected successor | Replace/restart the service after protected work. **Reopen PDF** presents resume/discard/fork; choose each against a fresh seeded case and verify exactly one idempotent outcome. | Pending |
-| Ordinary review | Search, create/edit/delete an annotation, reconcile a Review Item, save a copy, and export. Inject one service rejection and one disconnect during mutation. | Pending |
+| Ordinary use (`ordinaryReview`) | Search, create/edit/delete an annotation, reconcile another annotation, save a copy, and export. Inject one service rejection and one disconnect during mutation. | Pending |
 | Update skew | Exercise older extension/new host and new extension/older host. Before activation: cleanup plus one Chrome fallback. After activation: read-only update-required state, retained protected work, no fallback. | Pending |
 | Hostile canaries | Seed canaries in query/fragment, local path, filename/title, locator, credential, command payload, and PDF bytes. Chrome UI, links, logs, diagnostics, crash output, and recovery artifacts contain only role-authorized fields. | Pending |
 | Keyboard/accessibility | Complete loading, fallback, disconnect, update, reconnect, reopen, and resume/discard/fork without a pointer; verify visible focus, live announcements, transition focus, and accessible labels. | Pending |
-| Cross-surface regression | Finder Open With, app picker, canonical link, Codex in-app browser, and VS Code embedded review retain their existing behavior. | Pending |
+| Cross-surface regression | Finder Open With, app picker, canonical link, Codex in-app browser, and VS Code embedded document panel retain their existing behavior. | Pending |
 
 Do not move the real native-host manifest while any non-disposable Placekeeper
-review is active. Copy it to a private temporary directory, move only the exact
+document is open. Copy it to a private temporary directory, move only the exact
 `com.placekeeper.chrome.json` file for AE3, and restore it immediately after that
 case. Removing or reinstalling registration must not remove Protected Recovery or
 the disposable source. Upgrade/rollback transaction suites remain deterministic
@@ -158,13 +158,13 @@ The installed runner now injects a non-authorizing observer into the actual
 packaged PDFium worker and records worker startup, PDFium readiness, packaged
 asset access, and forbidden privilege results in the automated evidence. The
 earlier Chrome 152 proof established the same boundary and showed that
-handler-local reload identity is unavailable, which is why canonical review
+handler-local reload identity is unavailable, which is why canonical document
 identity is service-owned. The temporary proof page and successful-path
 localhost redirect are not part of the release extension.
 
 ## Reading-first interface evidence
 
-Automated release-candidate coverage exercises the same production review tree in an ordinary Chromium launch and a narrow 320-CSS-pixel `vscode` embed launch. The checks record one mounted viewer, one compact chrome, page `1 / 1`, unchanged page bounds and viewer mount identity through disclosure, preserved review state through breakpoint changes, visible workspace close controls, and deterministic focus restoration. The WebKit gate runs both the joined review workflow and installed-style production flow. The Codex lifecycle fixture exercises the private control socket rather than an installed Codex UI. Capability URLs, proofs, task IDs, and local paths are deliberately excluded from prompt-output assertions and this record.
+Automated release-candidate coverage exercises the same production reader tree in an ordinary Chromium launch and a narrow 320-CSS-pixel `vscode` embed launch. The checks record one mounted viewer, one compact chrome, page `1 / 1`, unchanged page bounds and viewer mount identity through disclosure, preserved annotation state through breakpoint changes, visible workspace close controls, and deterministic focus restoration. The WebKit gate runs both the joined document workflow and installed-style production flow. The Codex lifecycle fixture exercises the private control socket rather than an installed Codex UI. Capability URLs, proofs, task IDs, and local paths are deliberately excluded from prompt-output assertions and this record.
 
 The implementation was visually compared at 1280×900 and narrow widths with the plan-linked reading-first mockups. The resulting hierarchy keeps the PDF full-bleed within the content area, exposes the annotation workspace and Finish save flow only on request, uses a side peek for mark correspondence, and removes spatial transitions under reduced-motion preferences.
 
@@ -172,7 +172,7 @@ Installed Codex and VS Code desktop UI evidence still requires a release-candida
 
 ## Warm Neutral reference review (2026-08-09)
 
-The deterministic production-root scenes were compared in the source harness with `docs/plans/assets/2026-08-09-warm-neutral-design-language/warm-neutral-synthesis.html`. The source comparison covers the shared production review tree only; it does not claim an installed Codex or VS Code desktop inspection.
+The deterministic production-root scenes were compared in the source harness with `docs/plans/assets/2026-08-09-warm-neutral-design-language/warm-neutral-synthesis.html`. The source comparison covers the shared production reader tree only; it does not claim an installed Codex or VS Code desktop inspection.
 
 | R2 dimension | Source-scene finding |
 |---|---|
@@ -204,7 +204,7 @@ If the project later distributes a prebuilt download, reinstate Developer ID sig
 
 Source publication remains a separate maintainer action. Source releases require automated installer, packaging, lifecycle, and installed-app smoke checks. The optional Chrome integration is experimental until the independent exact-build Chrome validation and physical matrices above pass; that report does not block publishing the Mac source installer. Earlier checked source-install observations do not establish that this new candidate passed Finder, Chrome enablement, or desktop host UI checks.
 
-For the new flow, use disposable host profiles and a temporary installation root. Install Mac plus Chrome while skipping VS Code and Codex; confirm loading/enablement is pending until performed in Chrome. Rerun with the app current and select the skipped integrations. Confirm the supported VS Code installer recognizes the VSIX, reload the editor, and inspect its review. Confirm the local Codex marketplace resolves from the installed app after temporary source deletion; complete trust/enablement and start a new task. Preserve Chrome's previous on/off choice. Exercise one optional-host failure and confirm later hosts are offered and Mac success is retained. Finally, keep PDFs and a task binding active while requesting an update and selected host repair: both must defer without losing review or recovery state.
+For the new flow, use disposable host profiles and a temporary installation root. Install Mac plus Chrome while skipping VS Code and Codex; confirm loading/enablement is pending until performed in Chrome. Rerun with the app current and select the skipped integrations. Confirm the supported VS Code installer recognizes the VSIX, reload the editor, and inspect its document panel. Confirm the local Codex marketplace resolves from the installed app after temporary source deletion; complete trust/enablement and start a new task. Preserve Chrome's previous on/off choice. Exercise one optional-host failure and confirm later hosts are offered and Mac success is retained. Finally, keep PDFs and a task binding active while requesting an update and selected host repair: both must defer without losing annotation or recovery state.
 
 These physical UI observations remain pending until recorded against the candidate. Fixture tests establish setup control flow and transaction safety; they cannot establish host approval, enablement, or Finder rendering.
 
@@ -235,4 +235,4 @@ No current setup operation grants host trust or claims completed host verificati
 
 Host smoke results apply only to the installer filename, SHA-256, source commit and candidate run recorded with them. Follow [desktop installer qualification](desktop-installers.md) before marking a release's real-host integration scenario passed. Keep VS Code, Chrome and Codex results separate in the linked record, including host versions, isolated profile locations, opt-in/skip choices, trust/permission/restart actions and a real annotation/Protected Draft exercise. Registration preparation alone does not establish that a host loaded or trusted the integration.
 
-Exercise accepted and declined upgrade with simultaneous reviews in the selected hosts. Retain the pending-write and failed-protection outcomes, then verify each opted-in integration after the actual installer finishes. Edited or foreign host registrations must survive receipt-aware repair and uninstall. Do not register anything against a person's real profile to obtain a green test. When a host cannot be isolated or is unavailable, leave its release scenario unsatisfied.
+Exercise accepted and declined upgrade with simultaneous open documents in the selected hosts. Retain the pending-write and failed-protection outcomes, then verify each opted-in integration after the actual installer finishes. Edited or foreign host registrations must survive receipt-aware repair and uninstall. Do not register anything against a person's real profile to obtain a green test. When a host cannot be isolated or is unavailable, leave its release scenario unsatisfied.

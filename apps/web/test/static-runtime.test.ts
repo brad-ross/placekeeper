@@ -2,9 +2,9 @@ import { describe, expect, it, vi } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
-import { addPageNote, setAnnotationName } from "../../../packages/core/src/review-commands.js";
+import { addPageNote, setAnnotationName } from "../../../packages/core/src/document-commands.js";
 import type { PdfWriter } from "../../../packages/core/src/pdf-writer.js";
-import type { ReviewItem } from "../../../packages/core/src/review-model.js";
+import type { Annotation } from "../../../packages/core/src/document-model.js";
 import { createBrowserDocumentSession } from "../../../packages/pdf-backends/src/browser-document-session.js";
 import {
   STATIC_PDF_MAX_BYTES,
@@ -19,7 +19,7 @@ const sourceBytes = new TextEncoder().encode("%PDF-1.7\n%%EOF");
 
 describe("static browser review runtime", () => {
   it("reimports an exported Review Item as clean editable state", async () => {
-    const imported: ReviewItem = {
+    const imported: Annotation = {
       id: "11111111-1111-4111-8111-111111111111",
       kind: "pageNote",
       importedAnnotationAuthor: "Brad Ross",
@@ -215,7 +215,7 @@ describe("static browser review runtime", () => {
       sync: { phase: "not-saved", desiredRevision: 1, savedRevision: -1 },
     });
 
-    await expect(runtime.exportReviewedCopy()).resolves.toMatchObject({
+    await expect(runtime.exportAnnotatedCopy()).resolves.toMatchObject({
       kind: "reviewed-copy",
       path: "notes-reviewed.pdf",
       revision: 1,
@@ -497,7 +497,7 @@ describe("static browser review runtime", () => {
     ));
     expect(lifecycle.addEventListener).toHaveBeenCalledOnce();
     expect(listeners.has("beforeunload")).toBe(true);
-    await runtime.exportReviewedCopy();
+    await runtime.exportAnnotatedCopy();
     expect(lifecycle.removeEventListener).toHaveBeenCalledOnce();
     expect(listeners.has("beforeunload")).toBe(false);
     runtime.dispose();
@@ -536,14 +536,14 @@ describe("static browser review runtime", () => {
     const acknowledged = "accepted" in named ? named.state : named;
     const fence = { expectedRevision: acknowledged.revision, documentGeneration: acknowledged.workflow.documentGeneration };
     const other = await runtime.command(setAnnotationName(acknowledged, "Other Window"));
-    await expect(runtime.exportReviewedCopy(undefined, fence)).rejects.toThrow("Document changed");
+    await expect(runtime.exportAnnotatedCopy(undefined, fence)).rejects.toThrow("Document changed");
     expect(writer.write).not.toHaveBeenCalled();
     const retry = await runtime.command(setAnnotationName("accepted" in other ? other.state : other, "Brad Ross"));
     const retryState = "accepted" in retry ? retry.state : retry;
-    await expect(runtime.exportReviewedCopy(undefined, {
+    await expect(runtime.exportAnnotatedCopy(undefined, {
       expectedRevision: retryState.revision, documentGeneration: retryState.workflow.documentGeneration + 1,
     })).rejects.toThrow("Document changed");
-    const exporting = runtime.exportReviewedCopy(undefined, {
+    const exporting = runtime.exportAnnotatedCopy(undefined, {
       expectedRevision: retryState.revision, documentGeneration: retryState.workflow.documentGeneration,
     });
     await runtime.command(setAnnotationName(retryState, "Later Name"));
@@ -594,7 +594,7 @@ describe("static browser review runtime", () => {
       download,
     });
 
-    await expect(runtime.exportReviewedCopy()).rejects.toThrow("PDF export timed out");
+    await expect(runtime.exportAnnotatedCopy()).rejects.toThrow("PDF export timed out");
     expect(download).not.toHaveBeenCalled();
     runtime.dispose();
   });

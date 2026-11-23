@@ -1,10 +1,10 @@
 import {
-  REVIEW_RUNTIME_VERSION,
-  isReviewRuntimeMethodForHost,
-  sanitizeChromeReviewRuntimeRequest,
-  sanitizeChromeReviewRuntimeResponse,
-  type ReviewRuntimeBrokerMethod,
-} from "./review-runtime-protocol.js";
+  DOCUMENT_RUNTIME_VERSION,
+  canonicalDocumentRuntimeMethodForHost,
+  sanitizeChromeDocumentRuntimeRequest,
+  sanitizeChromeDocumentRuntimeResponse,
+  type DocumentRuntimeBrokerMethod,
+} from "./document-runtime-protocol.js";
 
 export const CHROME_RUNTIME_PROTOCOL = "placekeeper.chrome-runtime" as const;
 export const CHROME_RUNTIME_PROTOCOL_VERSION = 2 as const;
@@ -26,7 +26,7 @@ interface RuntimeEnvelope {
 
 export interface ChromeRuntimeHello extends RuntimeEnvelope {
   readonly type: "hello";
-  readonly reviewRuntimeVersion: typeof REVIEW_RUNTIME_VERSION;
+  readonly reviewRuntimeVersion: typeof DOCUMENT_RUNTIME_VERSION;
   readonly protocol: typeof CHROME_RUNTIME_PROTOCOL;
 }
 
@@ -36,7 +36,7 @@ export type ChromeRuntimeExtensionMessage = ChromeRuntimeHello | (RuntimeEnvelop
   | { readonly lane: "acquisition"; readonly type: "chunk"; readonly requestId: string; readonly transferId: string; readonly sequence: number; readonly data: string }
   | { readonly lane: "acquisition"; readonly type: "finish"; readonly requestId: string; readonly transferId: string; readonly sequence: number }
   | { readonly lane: "acquisition"; readonly type: "cancel"; readonly requestId: string; readonly transferId: string; readonly reason: string }
-  | { readonly lane: "runtime"; readonly type: "invoke"; readonly requestId: string; readonly generation: number; readonly revision: number; readonly method: ReviewRuntimeBrokerMethod; readonly payload: unknown; readonly idempotencyKey?: string }
+  | { readonly lane: "runtime"; readonly type: "invoke"; readonly requestId: string; readonly generation: number; readonly revision: number; readonly method: DocumentRuntimeBrokerMethod; readonly payload: unknown; readonly idempotencyKey?: string }
   | { readonly lane: "resource"; readonly type: "read"; readonly requestId: string; readonly resource: "document"; readonly generation: number; readonly offset: number; readonly length: number }
   | { readonly lane: "resource"; readonly type: "ack"; readonly requestId: string; readonly sequence: number }
   | { readonly lane: "resource"; readonly type: "cancel"; readonly requestId: string }
@@ -49,17 +49,54 @@ export type ChromeRuntimeExtensionMessage = ChromeRuntimeHello | (RuntimeEnvelop
 ));
 
 export type ChromeRuntimeHostMessage = RuntimeEnvelope & (
-  | { readonly type: "hello-ack"; readonly reviewRuntimeVersion: typeof REVIEW_RUNTIME_VERSION; readonly protocol: typeof CHROME_RUNTIME_PROTOCOL; readonly leaseMs: number }
+  | { readonly type: "hello-ack"; readonly reviewRuntimeVersion: typeof DOCUMENT_RUNTIME_VERSION; readonly protocol: typeof CHROME_RUNTIME_PROTOCOL; readonly leaseMs: number }
   | { readonly lane: ChromeRuntimeLane; readonly type: "ack"; readonly requestId: string; readonly sequence?: number }
   | { readonly lane: "lifecycle"; readonly type: "projection"; readonly requestId: string; readonly payload: unknown }
   | { readonly lane: "lifecycle"; readonly type: "active"; readonly requestId: string; readonly payload: unknown }
   | { readonly lane: "lifecycle"; readonly type: "recovery-offered"; readonly requestId: string; readonly choices: readonly ["resume", "discard", "fork"]; readonly offer: { readonly id: string; readonly expiresAt: string } }
-  | { readonly lane: "runtime"; readonly type: "result"; readonly requestId: string; readonly method: ReviewRuntimeBrokerMethod; readonly payload: unknown }
+  | { readonly lane: "runtime"; readonly type: "result"; readonly requestId: string; readonly method: DocumentRuntimeBrokerMethod; readonly payload: unknown }
   | { readonly lane: "runtime"; readonly type: "invalidation"; readonly revision: number; readonly generation: number; readonly reason: ChromeRuntimeProjectionChangeReason }
   | { readonly lane: "resource"; readonly type: "resource-chunk"; readonly requestId: string; readonly sequence: number; readonly data: string; readonly done: boolean }
   | { readonly lane: ChromeRuntimeLane; readonly type: "failure"; readonly requestId?: string; readonly reason: string }
   | { readonly lane: "lifecycle"; readonly type: "update-required"; readonly requestId?: string }
 );
+
+/**
+ * Handshake field that carries DOCUMENT_RUNTIME_VERSION in `hello` and
+ * `hello-ack`. The Chrome extension (store-updated) and the native service
+ * upgrade independently, and both sides check handshake keys exactly, so the
+ * sender must keep the legacy spelling until every peer in the field accepts
+ * the new one.
+ *
+ * TODO(0.4.0): send CHROME_RUNTIME_DOCUMENT_VERSION_KEY once the oldest
+ * supported Chrome extension and service are 0.3.3 or later (the first release
+ * that accepts both spellings); keep accepting the legacy key on receive.
+ */
+export const CHROME_RUNTIME_LEGACY_DOCUMENT_VERSION_KEY = "reviewRuntimeVersion" as const;
+export const CHROME_RUNTIME_DOCUMENT_VERSION_KEY = "documentRuntimeVersion" as const;
+type HandshakeVersionKey = typeof CHROME_RUNTIME_LEGACY_DOCUMENT_VERSION_KEY | typeof CHROME_RUNTIME_DOCUMENT_VERSION_KEY;
+
+/** Returns the one handshake version key present on `value`, if exactly one is. */
+function handshakeVersionKey(value: Record<string, unknown>): HandshakeVersionKey | undefined {
+  const legacy = Object.hasOwn(value, CHROME_RUNTIME_LEGACY_DOCUMENT_VERSION_KEY);
+  const current = Object.hasOwn(value, CHROME_RUNTIME_DOCUMENT_VERSION_KEY);
+  if (legacy === current) return undefined;
+  return legacy ? CHROME_RUNTIME_LEGACY_DOCUMENT_VERSION_KEY : CHROME_RUNTIME_DOCUMENT_VERSION_KEY;
+}
+
+/** The document runtime version a peer announced under either handshake key. */
+export function chromeRuntimeHandshakeDocumentVersion(value: unknown): unknown {
+  if (!record(value)) return undefined;
+  const key = handshakeVersionKey(value);
+  return key === undefined ? undefined : value[key];
+}
+
+function normalizedHandshake(value: Record<string, unknown>, key: HandshakeVersionKey): Record<string, unknown> | undefined {
+  if (value[key] !== DOCUMENT_RUNTIME_VERSION) return undefined;
+  if (key === CHROME_RUNTIME_LEGACY_DOCUMENT_VERSION_KEY) return value;
+  const { [key]: version, ...rest } = value;
+  return { ...rest, [CHROME_RUNTIME_LEGACY_DOCUMENT_VERSION_KEY]: version };
+}
 
 export type ChromeRuntimeProjectionChangeReason = "generation" | "revision" | "save" | "recovery" | "presence";
 
@@ -148,8 +185,10 @@ function safeFileSource(value: unknown): value is string {
 export function parseChromeRuntimeExtensionMessage(value: unknown): ChromeRuntimeExtensionMessage | undefined {
   if (!record(value) || !validEnvelope(value) || typeof value.type !== "string") return undefined;
   if (value.type === "hello") {
-    return exact(value, ["type", "protocol", "protocolVersion", "reviewRuntimeVersion", "connectionId"]) &&
-      value.reviewRuntimeVersion === REVIEW_RUNTIME_VERSION && value.protocol === CHROME_RUNTIME_PROTOCOL ? value as unknown as ChromeRuntimeHello : undefined;
+    const versionKey = handshakeVersionKey(value);
+    return versionKey !== undefined &&
+      exact(value, ["type", "protocol", "protocolVersion", versionKey, "connectionId"]) &&
+      value.protocol === CHROME_RUNTIME_PROTOCOL ? normalizedHandshake(value, versionKey) as unknown as ChromeRuntimeHello : undefined;
   }
   if (typeof value.lane !== "string" || !safeId(value.requestId)) return undefined;
   const base = ["type", "lane", "protocolVersion", "connectionId", "requestId"];
@@ -185,14 +224,15 @@ export function parseChromeRuntimeExtensionMessage(value: unknown): ChromeRuntim
     const keys = value.idempotencyKey === undefined
       ? [...base, "generation", "revision", "method", "payload"]
       : [...base, "generation", "revision", "method", "payload", "idempotencyKey"];
-    if (!exact(value, keys) || !isReviewRuntimeMethodForHost("chrome", value.method) ||
-      value.method === "bootstrap" || value.method === "presence" || value.method === "detach" ||
+    const method = canonicalDocumentRuntimeMethodForHost("chrome", value.method);
+    if (!exact(value, keys) || method === undefined ||
+      method === "bootstrap" || method === "presence" || method === "detach" ||
       !safeInteger(value.generation) || !safeInteger(value.revision) ||
       (value.idempotencyKey !== undefined && (typeof value.idempotencyKey !== "string" || !OPERATION_KEY.test(value.idempotencyKey)))) return undefined;
-    const payload = sanitizeChromeReviewRuntimeRequest(value.method, value.payload);
+    const payload = sanitizeChromeDocumentRuntimeRequest(method, value.payload);
     return payload === undefined
       ? undefined
-      : { ...value, payload } as unknown as ChromeRuntimeExtensionMessage;
+      : { ...value, method, payload } as unknown as ChromeRuntimeExtensionMessage;
   }
   if (value.lane === "resource" && value.type === "read") {
     return exact(value, [...base, "resource", "generation", "offset", "length"]) && value.resource === "document" &&
@@ -252,7 +292,7 @@ export function sanitizeChromeRuntimeProjection(value: unknown): unknown | undef
     !SHA256.test(String(value.document.sha256)) || !safeInteger(value.document.byteLength) ||
     (value.document.byteLength as number) < 1 || !safeInteger(value.document.generation) ||
     value.document.generation !== value.generation) return undefined;
-  const projected = sanitizeChromeReviewRuntimeResponse("bootstrap", {
+  const projected = sanitizeChromeDocumentRuntimeResponse("bootstrap", {
     ...value,
     resources: { document: "blob:handler-issued", pdfiumWasm: "chrome-extension://packaged/pdfium.wasm", worker: "chrome-extension://packaged/pdfium-worker.js" },
   });
@@ -265,9 +305,11 @@ export function sanitizeChromeRuntimeProjection(value: unknown): unknown | undef
 export function parseChromeRuntimeHostMessage(value: unknown): ChromeRuntimeHostMessage | undefined {
   if (!record(value) || !validEnvelope(value) || typeof value.type !== "string" || containsForbiddenKey(value)) return undefined;
   if (value.type === "hello-ack") {
-    return exact(value, ["type", "protocol", "protocolVersion", "reviewRuntimeVersion", "connectionId", "leaseMs"]) &&
-      value.reviewRuntimeVersion === REVIEW_RUNTIME_VERSION && value.protocol === CHROME_RUNTIME_PROTOCOL && safeInteger(value.leaseMs) && (value.leaseMs as number) >= 1_000
-      ? value as unknown as ChromeRuntimeHostMessage : undefined;
+    const versionKey = handshakeVersionKey(value);
+    return versionKey !== undefined &&
+      exact(value, ["type", "protocol", "protocolVersion", versionKey, "connectionId", "leaseMs"]) &&
+      value.protocol === CHROME_RUNTIME_PROTOCOL && safeInteger(value.leaseMs) && (value.leaseMs as number) >= 1_000
+      ? normalizedHandshake(value, versionKey) as unknown as ChromeRuntimeHostMessage : undefined;
   }
   if (typeof value.lane !== "string") return undefined;
   if (value.type === "failure") {
@@ -316,10 +358,12 @@ export function parseChromeRuntimeHostMessage(value: unknown): ChromeRuntimeHost
   }
   if (value.type === "result") {
     if (value.lane !== "runtime" || !exact(value, ["type", "lane", "protocolVersion", "connectionId", "requestId", "method", "payload"]) ||
-      !safeId(value.requestId) || !isReviewRuntimeMethodForHost("chrome", value.method) || value.method === "bootstrap") return undefined;
-    const payload = sanitizeChromeReviewRuntimeResponse(value.method, value.payload);
+      !safeId(value.requestId)) return undefined;
+    const method = canonicalDocumentRuntimeMethodForHost("chrome", value.method);
+    if (method === undefined || method === "bootstrap") return undefined;
+    const payload = sanitizeChromeDocumentRuntimeResponse(method, value.payload);
     return payload === undefined
-      ? undefined : { ...value, payload } as unknown as ChromeRuntimeHostMessage;
+      ? undefined : { ...value, method, payload } as unknown as ChromeRuntimeHostMessage;
   }
   if (value.type === "invalidation") {
     return value.lane === "runtime" && exact(value, ["type", "lane", "protocolVersion", "connectionId", "revision", "generation", "reason"]) &&

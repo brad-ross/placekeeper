@@ -3,18 +3,18 @@ import { describe, expect, it, vi } from 'vitest';
 import { VIEWER_ZOOM_MAX_PERCENT } from '../src/pdf/viewer-controls.js';
 import type { ReactNode } from 'react';
 
-vi.mock('../src/review/TopBarMenu.js', () => ({
+vi.mock('../src/reader/TopBarMenu.js', () => ({
   TopBarMenu: ({ children }: { children: ReactNode }) => <div>{children}</div>,
 }));
 
-import { documentIdentityLabel } from '../src/review/DocumentActionsMenu.js';
+import { documentIdentityLabel } from '../src/reader/DocumentActionsMenu.js';
 import {
   pageInputWidth,
-  ReviewChrome,
+  ReaderChrome,
   zoomInputWidth,
   validPageNumber,
   validZoomPercent,
-} from '../src/review/ReviewChrome.js';
+} from '../src/reader/ReaderChrome.js';
 
 const readyViewer = {
   ready: true,
@@ -28,8 +28,8 @@ const readyViewer = {
 const neutralStyles = readCssSource(
   new URL('../src/app/neutral-chrome.css', import.meta.url));
 
-function chrome(overrides: Partial<Parameters<typeof ReviewChrome>[0]> = {}) {
-  return renderToStaticMarkup(<ReviewChrome
+function chrome(overrides: Partial<Parameters<typeof ReaderChrome>[0]> = {}) {
+  return renderToStaticMarkup(<ReaderChrome
     documentTitle="paper.pdf"
     viewerState={readyViewer}
     fitWidthReady
@@ -50,7 +50,7 @@ describe('neutral toolbar contract', () => {
       fitState: { selectedMode: 'width', effectiveMode: 'width', active: true, pending: false, fallback: false },
     });
     expect(html).toContain('aria-label="Fit mode: Fit width. Next: Fit text"');
-    expect(html).toMatch(/<button[^>]*data-review-zoom-action="fit-width"(?![^>]*disabled)[^>]*>/u);
+    expect(html).toMatch(/<button[^>]*data-reader-zoom-action="fit-width"(?![^>]*disabled)[^>]*>/u);
     expect(html).toContain('data-fit-active="true"');
   });
 
@@ -71,8 +71,8 @@ describe('neutral toolbar contract', () => {
       selectedMode: 'width', effectiveMode: 'width', active: true, pending: true, fallback: false,
     } });
     expect(html).toContain('aria-label="Fit mode: Fitting…. Next: Fit text"');
-    expect(html).toMatch(/<button[^>]*data-review-zoom-action="fit-width"[^>]*aria-busy="true"(?![^>]*disabled)[^>]*>/u);
-    const fitButton = html.match(/<button[^>]*data-review-zoom-action="fit-width"[^>]*>[\s\S]*?<\/button>/u)?.[0];
+    expect(html).toMatch(/<button[^>]*data-reader-zoom-action="fit-width"[^>]*aria-busy="true"(?![^>]*disabled)[^>]*>/u);
+    const fitButton = html.match(/<button[^>]*data-reader-zoom-action="fit-width"[^>]*>[\s\S]*?<\/button>/u)?.[0];
     expect(fitButton).toContain('lucide-move-horizontal');
     expect(fitButton).not.toContain('lucide-loader-circle');
   });
@@ -89,12 +89,12 @@ describe('neutral toolbar contract', () => {
 
   it('uses direct page and zoom inputs with fixed suffixes', () => {
     const html = chrome();
-    expect(html).toContain('class="review-chrome__page-input"');
+    expect(html).toContain('class="reader-chrome__page-input"');
     expect(html).toContain('value="3"');
-    expect(html).toContain('data-review-page-position');
+    expect(html).toContain('data-reader-page-position');
     expect(html).toContain('<span aria-hidden="true">/ 12</span>');
-    expect(html).toContain('class="review-chrome__zoom-input"');
-    expect(html).toContain('class="review-chrome__zoom-suffix">%</span>');
+    expect(html).toContain('class="reader-chrome__zoom-input"');
+    expect(html).toContain('class="reader-chrome__zoom-suffix">%</span>');
   });
 
   it('shows the PDF title in the identity with the filename alone as its tooltip', () => {
@@ -102,12 +102,12 @@ describe('neutral toolbar contract', () => {
       displayTitle: 'Estimating Counterfactual Matrix Means',
       saveOptionsAvailable: true,
     });
-    expect(html).toContain('<span class="review-chrome__filename">Estimating Counterfactual Matrix Means</span>');
+    expect(html).toContain('<span class="reader-chrome__filename">Estimating Counterfactual Matrix Means</span>');
     expect(html).not.toContain('Save options');
     expect(html).toContain('aria-label="Estimating Counterfactual Matrix Means, paper.pdf, Saved. Open automatic save options"');
     expect(documentIdentityLabel('paper.pdf', 'paper.pdf')).toBe('paper.pdf');
     // Without a PDF title the filename is shown, as before.
-    expect(chrome()).toContain('<span class="review-chrome__filename">paper.pdf</span>');
+    expect(chrome()).toContain('<span class="reader-chrome__filename">paper.pdf</span>');
   });
 
   it('sizes the page input to its digits so the page group spaces evenly', () => {
@@ -125,7 +125,7 @@ describe('neutral toolbar contract', () => {
 
   it('keeps every history action in place and greys out the unavailable ones', () => {
     const html = chrome();
-    const live = html.slice(0, html.indexOf('data-review-chrome-sizing-rack'));
+    const live = html.slice(0, html.indexOf('data-reader-chrome-sizing-rack'));
     expect(live).toContain('aria-label="Edit history"');
     expect(live).toMatch(/<button[^>]*disabled=""[^>]*aria-label="Undo"/u);
     expect(live).toMatch(/<button[^>]*disabled=""[^>]*aria-label="Redo"/u);
@@ -137,10 +137,10 @@ describe('neutral toolbar contract', () => {
 describe('neutral bottom References contract', () => {
   it('places the header controls in the vertical tab column beside the preview', () => {
     expect(neutralStyles).toMatch(
-      /\.review-workspace\[data-workspace-presentation="bottom"\]\[data-workspace-header-variant="references"\][\s\S]*> \.review-workspace__header\s*\{[^}]*position:\s*absolute;[^}]*top:\s*12px;[^}]*left:\s*12px;[^}]*width:\s*var\(--reference-tab-column\);/u,
+      /\.reader-workspace\[data-workspace-presentation="bottom"\]\[data-workspace-header-variant="references"\][\s\S]*> \.reader-workspace__header\s*\{[^}]*position:\s*absolute;[^}]*top:\s*12px;[^}]*left:\s*12px;[^}]*width:\s*var\(--reference-tab-column\);/u,
     );
     expect(neutralStyles).toMatch(
-      /\.review-workspace__panel--references\[data-reference-tabs-orientation="vertical"\]\s*\{[^}]*grid-template-columns:\s*var\(--reference-tab-column[^}]*padding:\s*12px;/u,
+      /\.reader-workspace__panel--references\[data-reference-tabs-orientation="vertical"\]\s*\{[^}]*grid-template-columns:\s*var\(--reference-tab-column[^}]*padding:\s*12px;/u,
     );
     expect(neutralStyles).toMatch(
       /\.reference-tabs\[data-reference-tabs-orientation="vertical"\]\s*\{[^}]*padding:\s*46px 0 0;/u,

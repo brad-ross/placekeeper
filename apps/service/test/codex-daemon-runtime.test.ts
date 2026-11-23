@@ -25,7 +25,7 @@ async function fixture() {
 async function native(host: PlacekeeperHost, pdf: string) {
   const launch = await host.open({ pdfPath: pdf, surface: "codex-native" });
   if (!launch.ok || !("handoff" in launch)) throw new Error("Expected native launch");
-  expect(host.codexRuntime.claimLaunch({ bindProof: launch.bindProof, reviewSessionId: launch.sessionId, documentGeneration: launch.documentGeneration, taskSessionId: "daemon-native-task" })).toBe(true);
+  expect(host.codexRuntime.claimLaunch({ bindProof: launch.bindProof, documentSessionId: launch.sessionId, documentGeneration: launch.documentGeneration, taskSessionId: "daemon-native-task" })).toBe(true);
   const display = host.codexRuntime.display(launch.handoff.token);
   if (!display) throw new Error("Expected display");
   expect(host.codexRuntime.attestDisplay(display.receipt, "daemon-native-task")).toBe(true);
@@ -64,7 +64,7 @@ it("defers a mixed native/browser upgrade until both presentations end, while hi
   // Explicit control retirement removes the browser disconnect grace; the
   // advisory native reconnect hint remains and cannot block replacement.
   host.broker.controls.closeAllSockets();
-  expect(host.lifecycle.status().activity).toEqual({ reviewPresence: 0, codexTasks: 0, transientWork: 0 });
+  expect(host.lifecycle.status().activity).toEqual({ documentPresence: 0, codexTasks: 0, transientWork: 0 });
   await expect(upgrade(host, mutate)).resolves.toEqual({ status: "installed" });
   expect(mutate).toHaveBeenCalledOnce();
 });

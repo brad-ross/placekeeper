@@ -1,6 +1,6 @@
 @import '../../web/src/app/document-loading.css';
-@import '../../web/src/app/review-design-tokens.css';
-@import '../../web/src/app/review-modal-surface.css';
+@import '../../web/src/app/reader-design-tokens.css';
+@import '../../web/src/app/reader-modal-surface.css';
 
 :root {
   color-scheme: only light;
@@ -17,8 +17,8 @@ body {
   min-height: 100dvh;
   place-items: center;
   padding: 12px;
-  color: var(--review-ink-primary);
-  background: var(--review-surface-canvas);
+  color: var(--reader-ink-primary);
+  background: var(--reader-surface-canvas);
   font-size: 13px;
   line-height: 1.5;
 }
@@ -84,7 +84,7 @@ button {
 }
 
 button:focus-visible {
-  outline: 2px solid var(--review-focus, #496789);
+  outline: 2px solid var(--reader-focus, #496789);
   outline-offset: 2px;
 }
 
@@ -99,7 +99,7 @@ button:disabled {
   align-items: center;
   justify-content: flex-end;
   flex-wrap: nowrap;
-  gap: var(--review-action-group-gap);
+  gap: var(--reader-action-group-gap);
 }
 
 .handler-actions button[hidden] {
@@ -112,7 +112,7 @@ button:disabled {
   align-items: center;
   justify-content: flex-end;
   flex-wrap: nowrap;
-  gap: var(--review-action-group-gap);
+  gap: var(--reader-action-group-gap);
   margin-left: auto;
 }
 
@@ -245,7 +245,7 @@ button:disabled {
   border: 0;
   border-radius: 0;
   box-shadow: none;
-  background: var(--review-surface-canvas);
+  background: var(--reader-surface-canvas);
 }
 .handler[data-document-loading="true"] #launch-shell > .document-loading { display: grid; }
 .handler[data-document-loading="true"] .handler-dialog__header,

@@ -1,7 +1,7 @@
 import { realpath, stat } from 'node:fs/promises';
 import { basename, isAbsolute } from 'node:path';
 import type { CallToolResult, GetPromptResult, Prompt, Tool } from '@modelcontextprotocol/sdk/types.js';
-import { CODEX_MAX_ENCODED_RESPONSE_BYTES, CODEX_REVIEW_UI_RESOURCE } from '../../../packages/core/src/codex-mcp-protocol.js';
+import { CODEX_MAX_ENCODED_RESPONSE_BYTES, CODEX_DOCUMENT_UI_RESOURCE } from '../../../packages/core/src/codex-mcp-protocol.js';
 import { EXTENSION_META_KEY, EXTENSION_TOOL } from '../../../packages/core/src/extension-protocol.js';
 import { callExtensionTool, extensionTools } from './extension-server.js';
 import type { NativeServiceClient } from './service-client.js';
@@ -24,7 +24,7 @@ export const claudeDesktopTools: Tool[] = [
     description: 'Open a PDF on this computer in the Placekeeper reader inside the chat. Use when the user asks to open, read, review or annotate a local PDF. Pass its absolute path.',
     inputSchema: { type: 'object', additionalProperties: false, required: ['path'], properties: { path: { type: 'string', description: 'Absolute path to a local .pdf file.' } } },
     annotations: { readOnlyHint: true, openWorldHint: false },
-    _meta: { ui: { resourceUri: CODEX_REVIEW_UI_RESOURCE } },
+    _meta: { ui: { resourceUri: CODEX_DOCUMENT_UI_RESOURCE } },
   },
   {
     name: 'open_placekeeper',
@@ -32,7 +32,7 @@ export const claudeDesktopTools: Tool[] = [
     description: 'Open the Placekeeper reader inside the chat and let the user choose a PDF with the system file picker or from recent documents. Use when the user wants Placekeeper but has not given a path.',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
     annotations: { readOnlyHint: true, openWorldHint: false },
-    _meta: { ui: { resourceUri: CODEX_REVIEW_UI_RESOURCE } },
+    _meta: { ui: { resourceUri: CODEX_DOCUMENT_UI_RESOURCE } },
   },
   appTool,
 ];

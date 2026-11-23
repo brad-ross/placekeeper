@@ -5,12 +5,12 @@ import {
   type PlacekeeperLinkLocation,
 } from "./placekeeper-link.js";
 import {
-  isReviewRuntimeMethodForHost,
-  sanitizeNativeReviewRuntimeRequest,
-  sanitizeNativeReviewRuntimeResponse,
-  type ReviewRuntimeBrokerMethod,
+  canonicalDocumentRuntimeMethodForHost,
+  sanitizeNativeDocumentRuntimeRequest,
+  sanitizeNativeDocumentRuntimeResponse,
+  type DocumentRuntimeBrokerMethod,
   type NativeRuntimeHost,
-} from "./review-runtime-protocol.js";
+} from "./document-runtime-protocol.js";
 
 export const NATIVE_HELPER_PROTOCOL_VERSION = 1 as const;
 export const NATIVE_HELPER_MAX_FRAME_BYTES = 4 * 1024 * 1024;
@@ -22,7 +22,7 @@ const OPERATION_ID = /^[A-Za-z0-9_-]{16,128}$/u;
 const SHA256 = /^[a-f0-9]{64}$/u;
 const BASE64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u;
 
-interface ReviewEnvelope {
+interface DocumentEnvelope {
   readonly protocolVersion: 1;
   readonly windowId: string;
   readonly attemptId: string;
@@ -46,7 +46,7 @@ export interface NativeRuntimeProjection {
   };
 }
 
-export type NativeReviewHelperMessage = ReviewEnvelope & (
+export type NativeDocumentHelperMessage = DocumentEnvelope & (
   | { readonly type: "admit"; readonly sourcePath: string; readonly navigationHandle?: string }
   | { readonly type: "admit-launch"; readonly launchId: string }
   | { readonly type: "admit-link"; readonly link: string; readonly confirmed: true }
@@ -63,7 +63,7 @@ export type NativeReviewHelperMessage = ReviewEnvelope & (
       readonly type: "invoke";
       readonly generation: number;
       readonly revision: number;
-      readonly method: ReviewRuntimeBrokerMethod;
+      readonly method: DocumentRuntimeBrokerMethod;
       readonly payload: unknown;
       readonly idempotencyKey?: string;
     }
@@ -95,7 +95,7 @@ export type NativeReviewHelperMessage = ReviewEnvelope & (
   | { readonly type: "release" }
 );
 
-export type NativeReviewHelperResponse = ReviewEnvelope & (
+export type NativeDocumentHelperResponse = DocumentEnvelope & (
   | {
       readonly type: "admitted";
       readonly provisionalId: string;
@@ -118,7 +118,7 @@ export type NativeReviewHelperResponse = ReviewEnvelope & (
       readonly revision: number;
       readonly reason: "revision" | "generation" | "save" | "recovery" | "presence";
     }
-  | { readonly type: "result"; readonly method: ReviewRuntimeBrokerMethod; readonly payload: unknown }
+  | { readonly type: "result"; readonly method: DocumentRuntimeBrokerMethod; readonly payload: unknown }
   | { readonly type: "resource-bytes"; readonly sequence: number; readonly data: string; readonly done: boolean }
   | { readonly type: "resource-adopted"; readonly generation: number }
   | { readonly type: "placekeeper-link"; readonly link: string }
@@ -142,7 +142,7 @@ function integer(value: unknown, maximum = Number.MAX_SAFE_INTEGER): value is nu
   return Number.isSafeInteger(value) && (value as number) >= 0 && (value as number) <= maximum;
 }
 
-function reviewEnvelope(value: Record<string, unknown>): boolean {
+function documentEnvelope(value: Record<string, unknown>): boolean {
   return value.protocolVersion === NATIVE_HELPER_PROTOCOL_VERSION && id(value.windowId)
     && id(value.attemptId) && id(value.requestId);
 }
@@ -156,26 +156,26 @@ function safeLocation(value: unknown): value is PlacekeeperLinkLocation {
   }
 }
 
-export function parseNativeReviewHelperMessage(host: NativeRuntimeHost, value: unknown): NativeReviewHelperMessage | undefined {
-  if (!record(value) || !reviewEnvelope(value)) return undefined;
+export function parseNativeDocumentHelperMessage(host: NativeRuntimeHost, value: unknown): NativeDocumentHelperMessage | undefined {
+  if (!record(value) || !documentEnvelope(value)) return undefined;
   const base = ["protocolVersion", "windowId", "attemptId", "requestId", "type"];
   if (value.type === "admit-launch") {
     return host === "electron" && exact(value, [...base, "launchId"])
       && typeof value.launchId === "string" && /^[A-Za-z0-9_-]{43}$/u.test(value.launchId)
-      ? value as unknown as NativeReviewHelperMessage : undefined;
+      ? value as unknown as NativeDocumentHelperMessage : undefined;
   }
   if (value.type === "admit") {
     return exact(value, [...base, "sourcePath", ...(value.navigationHandle === undefined ? [] : ["navigationHandle"])])
       && (value.navigationHandle === undefined || (typeof value.navigationHandle === "string" && /^[A-Za-z0-9_-]{43}$/u.test(value.navigationHandle))) && typeof value.sourcePath === "string"
       && (value.sourcePath.startsWith("/") || (host === "electron" && /^(?:[A-Za-z]:[\\/]|\\\\[^\\]+\\[^\\]+)/u.test(value.sourcePath))) && value.sourcePath.length <= 16_384 && !value.sourcePath.includes("\0")
-      ? value as unknown as NativeReviewHelperMessage : undefined;
+      ? value as unknown as NativeDocumentHelperMessage : undefined;
   }
   if (value.type === "admit-link") {
     if (!exact(value, [...base, "link", "confirmed"]) || value.confirmed !== true
       || typeof value.link !== "string" || value.link.length > PLACEKEEPER_LINK_MAX_LENGTH) return undefined;
     try {
       decodePlacekeeperLink(value.link);
-      return value as unknown as NativeReviewHelperMessage;
+      return value as unknown as NativeDocumentHelperMessage;
     } catch {
       return undefined;
     }
@@ -184,10 +184,10 @@ export function parseNativeReviewHelperMessage(host: NativeRuntimeHost, value: u
     const keys = value.launchId === undefined ? [...base, "documentValidated"] : [...base, "documentValidated", "launchId"];
     return exact(value, keys) && value.documentValidated === true
       && (value.launchId === undefined || (host === "electron" && typeof value.launchId === "string" && /^[A-Za-z0-9_-]{43}$/u.test(value.launchId)))
-      ? value as unknown as NativeReviewHelperMessage : undefined;
+      ? value as unknown as NativeDocumentHelperMessage : undefined;
   }
   if (value.type === "refresh" || value.type === "keepalive" || value.type === "release") {
-    return exact(value, base) ? value as unknown as NativeReviewHelperMessage : undefined;
+    return exact(value, base) ? value as unknown as NativeDocumentHelperMessage : undefined;
   }
   if (value.type === "recover") {
     return exact(value, [...base, "decision", "offer", "idempotencyKey"])
@@ -196,7 +196,7 @@ export function parseNativeReviewHelperMessage(host: NativeRuntimeHost, value: u
       && typeof value.offer.id === "string" && OPERATION_ID.test(value.offer.id)
       && typeof value.offer.expiresAt === "string" && Number.isFinite(Date.parse(value.offer.expiresAt))
       && typeof value.idempotencyKey === "string" && OPERATION_ID.test(value.idempotencyKey)
-      ? value as unknown as NativeReviewHelperMessage : undefined;
+      ? value as unknown as NativeDocumentHelperMessage : undefined;
   }
   if (value.type === "destination-selection") {
     return host === "electron" && exact(value, [...base, "generation", "revision", "method", "selectedPath", "idempotencyKey"])
@@ -206,37 +206,38 @@ export function parseNativeReviewHelperMessage(host: NativeRuntimeHost, value: u
       && (value.selectedPath === null || (typeof value.selectedPath === "string"
         && /^(?:\/|[A-Za-z]:[\\/]|\\\\[^\\]+\\[^\\]+)/u.test(value.selectedPath)
         && value.selectedPath.length <= 16_384 && !value.selectedPath.includes("\0")))
-      ? value as unknown as NativeReviewHelperMessage : undefined;
+      ? value as unknown as NativeDocumentHelperMessage : undefined;
   }
   if (value.type === "invoke") {
     const keys = value.idempotencyKey === undefined
       ? [...base, "generation", "revision", "method", "payload"]
       : [...base, "generation", "revision", "method", "payload", "idempotencyKey"];
-    if (!exact(value, keys) || !isReviewRuntimeMethodForHost(host, value.method)
-      || value.method === "bootstrap" || value.method === "presence" || value.method === "detach"
+    const method = canonicalDocumentRuntimeMethodForHost(host, value.method);
+    if (!exact(value, keys) || method === undefined
+      || method === "bootstrap" || method === "presence" || method === "detach"
       || !integer(value.generation) || value.generation < 1 || !integer(value.revision)
       || (value.idempotencyKey !== undefined
         && (typeof value.idempotencyKey !== "string" || !OPERATION_ID.test(value.idempotencyKey)))) return undefined;
-    const payload = sanitizeNativeReviewRuntimeRequest(host, value.method, value.payload);
-    return payload === undefined ? undefined : { ...value, payload } as unknown as NativeReviewHelperMessage;
+    const payload = sanitizeNativeDocumentRuntimeRequest(host, method, value.payload);
+    return payload === undefined ? undefined : { ...value, method, payload } as unknown as NativeDocumentHelperMessage;
   }
   if (value.type === "read-resource") {
     return exact(value, [...base, "resourceId", "generation", "role", "offset", "length"])
       && id(value.resourceId) && integer(value.generation) && value.generation > 0
       && value.role === "document" && integer(value.offset, 512 * 1024 * 1024)
       && integer(value.length, NATIVE_HELPER_RESOURCE_CHUNK_BYTES) && value.length > 0
-      ? value as unknown as NativeReviewHelperMessage : undefined;
+      ? value as unknown as NativeDocumentHelperMessage : undefined;
   }
   if (value.type === "adopt-resource") {
     return exact(value, [...base, "resourceId", "generation", "byteLength", "digest"])
       && id(value.resourceId) && integer(value.generation) && value.generation > 0
       && integer(value.byteLength, 512 * 1024 * 1024) && value.byteLength >= 5
       && typeof value.digest === "string" && SHA256.test(value.digest)
-      ? value as unknown as NativeReviewHelperMessage : undefined;
+      ? value as unknown as NativeDocumentHelperMessage : undefined;
   }
   if (value.type === "copy-link") {
     return exact(value, [...base, "location"]) && safeLocation(value.location)
-      ? value as unknown as NativeReviewHelperMessage : undefined;
+      ? value as unknown as NativeDocumentHelperMessage : undefined;
   }
   return undefined;
 }
@@ -247,7 +248,7 @@ export function sanitizeNativeRuntimeProjection(host: NativeRuntimeHost, value: 
     || !integer(value.document.byteLength, 512 * 1024 * 1024) || value.document.byteLength < 5
     || !integer(value.document.generation) || value.document.generation < 1
     || value.document.generation !== value.generation || typeof value.protected !== "boolean") return undefined;
-  const projected = sanitizeNativeReviewRuntimeResponse(host, "bootstrap", {
+  const projected = sanitizeNativeDocumentRuntimeResponse(host, "bootstrap", {
     ...value,
     resources: {
       document: "placekeeper-resource://document/host-issued",
@@ -280,8 +281,8 @@ export function decodeNativeHelperFrame(frame: Uint8Array): unknown {
   return JSON.parse(bytes.subarray(4).toString("utf8")) as unknown;
 }
 
-export function validNativeReviewHelperResponse(host: NativeRuntimeHost, value: unknown): value is NativeReviewHelperResponse {
-  if (!record(value) || !reviewEnvelope(value)) return false;
+export function validNativeDocumentHelperResponse(host: NativeRuntimeHost, value: unknown): value is NativeDocumentHelperResponse {
+  if (!record(value) || !documentEnvelope(value)) return false;
   const base = ["protocolVersion", "windowId", "attemptId", "requestId", "type"];
   if (value.type === "admitted") {
     return exact(value, [
@@ -309,10 +310,11 @@ export function validNativeReviewHelperResponse(host: NativeRuntimeHost, value: 
       && ["revision", "generation", "save", "recovery", "presence"].includes(String(value.reason));
   }
   if (value.type === "result") {
+    const method = canonicalDocumentRuntimeMethodForHost(host, value.method);
     return exact(value, [...base, "method", "payload"])
-      && isReviewRuntimeMethodForHost(host, value.method)
-      && value.method !== "bootstrap" && value.method !== "presence" && value.method !== "detach"
-      && sanitizeNativeReviewRuntimeResponse(host, value.method, value.payload) !== undefined;
+      && method !== undefined
+      && method !== "bootstrap" && method !== "presence" && method !== "detach"
+      && sanitizeNativeDocumentRuntimeResponse(host, method, value.payload) !== undefined;
   }
   if (value.type === "resource-bytes") {
     return exact(value, [...base, "sequence", "data", "done"]) && integer(value.sequence)

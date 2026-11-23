@@ -10,7 +10,7 @@ import {
   ChromeHandoffSession,
   ChromeTransferQuota,
   ChromeTransferStore,
-  type ChromeBrowserReviewOpener,
+  type ChromeBrowserDocumentOpener,
   type SealedBrowserSourceHandle,
 } from "../src/browser/chrome-handoff.js";
 import { validatePdfFile, validatePdfInSubprocess } from "../src/browser/chrome-pdf-validator.js";
@@ -22,7 +22,7 @@ afterEach(async () => {
 });
 
 async function fixture(options: {
-  readonly opener?: ChromeBrowserReviewOpener;
+  readonly opener?: ChromeBrowserDocumentOpener;
   readonly quota?: ChromeTransferQuota;
   readonly validate?: (path: string) => Promise<void>;
   readonly maxTransferBytes?: number;
@@ -115,7 +115,7 @@ describe("bounded Chrome handoff", () => {
 
   it("cleans up on invalid PDF, oversized totals, disconnect, timeout, and service failure", async () => {
     let now = 0;
-    const opener: ChromeBrowserReviewOpener = {
+    const opener: ChromeBrowserDocumentOpener = {
       async openLocal() { throw new Error("service details must not escape"); },
       async openSealed() { throw new Error("socket /private/path control.sock failed"); },
     };
@@ -203,7 +203,7 @@ describe("bounded Chrome handoff", () => {
     "http://user@127.0.0.1:43179/s/779e1d9d-58c1-4b12-8dc2-3449dad132c1/bootstrap#cap=1234567890123456789012345678901234567890123",
     "http://127.0.0.1:43179/s/779e1d9d-58c1-1b12-8dc2-3449dad132c1/bootstrap#cap=1234567890123456789012345678901234567890123",
   ])("rejects a malformed service destination: %s", async (destination) => {
-    const opener: ChromeBrowserReviewOpener = {
+    const opener: ChromeBrowserDocumentOpener = {
       async openLocal() { return destination; },
       async openSealed() { return destination; },
     };
@@ -233,7 +233,7 @@ describe("bounded Chrome handoff", () => {
       validate,
       maxConcurrentTransfers: 1,
     });
-    const opener: ChromeBrowserReviewOpener = {
+    const opener: ChromeBrowserDocumentOpener = {
       async openLocal() { throw new Error("unused"); },
       async openSealed() { throw new Error("unused"); },
     };

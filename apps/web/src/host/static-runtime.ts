@@ -1,14 +1,14 @@
 import { externalWebUrl } from "../../../../packages/core/src/external-web-url.js";
-import { ReviewExportConflictError, type ReviewExportFence } from "../../../../packages/core/src/review-runtime-protocol.js";
+import { DocumentExportConflictError, type DocumentExportFence } from "../../../../packages/core/src/document-runtime-protocol.js";
 import type { SaveStatus } from "../../../../packages/core/src/save-status.js";
-import { projectReviewItems } from "../../../../packages/core/src/annotation-projection.js";
+import { projectAnnotations } from "../../../../packages/core/src/annotation-projection.js";
 import type {
   PdfRewriteEligibility,
   PdfWriteResult,
 } from "../../../../packages/core/src/pdf-writer.js";
-import { assertPortableAnnotationWritable, createImportedReviewState } from "../../../../packages/core/src/portable-annotation.js";
-import type { ReviewState } from "../../../../packages/core/src/review-model.js";
-import { reduceReview } from "../../../../packages/core/src/review-reducer.js";
+import { assertPortableAnnotationWritable, createImportedDocumentState } from "../../../../packages/core/src/portable-annotation.js";
+import type { DocumentState } from "../../../../packages/core/src/document-model.js";
+import { reduceDocument } from "../../../../packages/core/src/document-reducer.js";
 import { createBrowserEmbedPdfWriter } from "../../../../packages/pdf-backends/src/browser-writer.js";
 import {
   BrowserDocumentSessionError,
@@ -124,7 +124,7 @@ async function sha256(bytes: Uint8Array): Promise<string> {
     .join("");
 }
 
-function reviewedCopyName(filename: string): string {
+function annotatedCopyName(filename: string): string {
   const stem = safePdfFilename(filename).replace(/\.pdf$/iu, "") || "document";
   return `${stem}-reviewed.pdf`;
 }
@@ -142,7 +142,7 @@ function downloadBytes(bytes: Uint8Array, filename: string): void {
 }
 
 function notSavedStatus(
-  state: ReviewState,
+  state: DocumentState,
   eligibility: PdfRewriteEligibility,
   lastExportedRevision: number,
 ): SaveStatus {
@@ -446,7 +446,7 @@ export async function createStaticHostRuntime(
   const origin = dependencies.origin ?? globalThis.location?.origin ?? "https://placekeeper.invalid";
   const download = dependencies.download ?? downloadBytes;
   const lifecycle = dependencies.lifecycle ?? globalThis as unknown as StaticLifecycleTarget;
-  let state = createImportedReviewState({
+  let state = createImportedDocumentState({
     sessionId,
     source: {
       fileId: digest,
@@ -502,8 +502,8 @@ export async function createStaticHostRuntime(
     subscribeInvalidations: () => () => undefined,
     async command(command) {
       if (disposed) throw new Error("This document is closed.");
-      const nextState = reduceReview(state, command);
-      projectReviewItems(nextState.items, undefined, {
+      const nextState = reduceDocument(state, command);
+      projectAnnotations(nextState.items, undefined, {
         ...(nextState.annotationName === undefined ? {} : { annotationName: nextState.annotationName }),
       }).forEach(assertPortableAnnotationWritable);
       state = nextState;
@@ -514,7 +514,7 @@ export async function createStaticHostRuntime(
       return notSavedStatus(state, eligibility, lastExportedRevision);
     },
     async saveProposal() {
-      return { sourceDisposition: "local", filename: reviewedCopyName(input.source.name), folder: "" };
+      return { sourceDisposition: "local", filename: annotatedCopyName(input.source.name), folder: "" };
     },
     async chooseCopy() {
       return notSavedStatus(state, eligibility, lastExportedRevision);
@@ -531,10 +531,10 @@ export async function createStaticHostRuntime(
     async locateSave() {
       return notSavedStatus(state, eligibility, lastExportedRevision);
     },
-    async exportReviewedCopy(_confirmPossiblyStale?: true, fence?: ReviewExportFence): Promise<ProductionExportResult> {
+    async exportAnnotatedCopy(_confirmPossiblyStale?: true, fence?: DocumentExportFence): Promise<ProductionExportResult> {
       if (disposed) throw new Error("This document is closed.");
       if (fence && (fence.expectedRevision !== state.revision || fence.documentGeneration !== state.workflow.documentGeneration)) {
-        throw new ReviewExportConflictError();
+        throw new DocumentExportConflictError();
       }
       const exportState = state;
       let output: PdfWriteResult;
@@ -544,7 +544,7 @@ export async function createStaticHostRuntime(
           sourceSha256: digest,
           revision: exportState.revision,
           manageNativeAnnotations: true,
-          annotations: projectReviewItems(
+          annotations: projectAnnotations(
             exportState.items,
             exportState.workflow.documentGeneration,
             { ...(exportState.annotationName === undefined ? {} : { annotationName: exportState.annotationName }) },
@@ -560,7 +560,7 @@ export async function createStaticHostRuntime(
         throw error;
       }
       if (disposed) throw new Error("Export was cancelled. No download was started.");
-      const filename = reviewedCopyName(input.source.name);
+      const filename = annotatedCopyName(input.source.name);
       download(output.pdfBytes, filename);
       lastExportedRevision = Math.max(lastExportedRevision, exportState.revision);
       updateUnloadGuard();

@@ -7,7 +7,7 @@ import { EXTENSION_META_KEY } from '../../../packages/core/src/extension-protoco
 import { ReaderBridge, callReaderBridgeTool, callReaderServerTool } from '../src/reader-bridge.js';
 const host = vi.hoisted(() => ({ options: [] as any[], mounts: [] as any[], unmount: vi.fn(), onMount: undefined as (() => void) | undefined }));
 vi.mock('../../web/src/host/codex-runtime.js', () => ({ createCodexHostRuntime: (options: any) => { host.options.push(options); return options; } }));
-vi.mock('../../web/src/codex-entry.js', () => ({ mountCodexProductionReview: (...args: any[]) => { host.mounts.push(args); host.onMount?.(); return host.unmount; } }));
+vi.mock('../../web/src/codex-entry.js', () => ({ mountCodexProductionDocument: (...args: any[]) => { host.mounts.push(args); host.onMount?.(); return host.unmount; } }));
 const grant = 'a'.repeat(43), nextGrant = 'b'.repeat(43);
 const active = (g = grant) => ({ status: 'active', grant: g, presentation: { status: 'active', runtimeId: 'runtime_123', attemptId: 'attempt_123', generation: 1, presentationCapability: 'c'.repeat(43), reconnectTicket: 'd'.repeat(43) } });
 const reply = (value: unknown) => ({ _meta: { [EXTENSION_META_KEY]: value } });
@@ -236,7 +236,7 @@ it('opens opaque host bytes in the canonical reader, routes reviewed export, and
         return exported;
     });
     try {
-        await expect(host.options[0].call('exportReviewedCopy', {})).rejects.toThrow('Refresh the review before exporting.');
+        await expect(host.options[0].call('exportReviewedCopy', {})).rejects.toThrow('Refresh the document before exporting.');
         expect(exportCopy).not.toHaveBeenCalled();
         await expect(host.options[0].call('exportReviewedCopy', { fence })).resolves.toEqual(exported);
         expect(exportCopy).toHaveBeenCalledWith(nextGrant, fence);
@@ -258,7 +258,7 @@ it('opens opaque host bytes in the canonical reader, routes reviewed export, and
     const old = host.options[0]; generation = 2; update({ params: { uri: 'opaque:host' } });
     await vi.waitFor(() => expect(host.mounts).toHaveLength(2));
     expect(f.calls.some(c => c.action === 'resume')).toBe(true);
-    expect(host.options[1].reviewedCopyExport).toBe(false);
+    expect(host.options[1].annotatedCopyExport).toBe(false);
     await expect(old.call('command', {})).rejects.toThrow('stale-reply');
     await f.shell.teardown(); expect(resources.unsubscribe).toHaveBeenCalledOnce(); expect(resources.write).not.toHaveBeenCalled();
 });
@@ -419,7 +419,7 @@ it('marks publication intent before sharing, rejects stale generations and retai
     const api = { getCurrent: () => current, update: vi.fn(async (_params: any) => ({ updateId: 'published' })) };
     const f = fixture(async request => request.action === 'context-published' ? marking.promise : reply({ status: 'ok', payload: {} }), undefined, () => api);
     await f.shell.receive({ ...active(), contextPublished: false });
-    const snapshot = { title: 'Paper', documentGeneration: 1, reviewRevision: 0, source: { fileId: 'secret', digest: 'd' }, page: 2, pageCount: 5, annotations: [], selection: null };
+    const snapshot = { title: 'Paper', documentGeneration: 1, annotationRevision: 0, source: { fileId: 'secret', digest: 'd' }, page: 2, pageCount: 5, annotations: [], selection: null };
     host.mounts[0][5]({ ...snapshot, documentGeneration: 2 }); await vi.advanceTimersByTimeAsync(0); expect(api.update).not.toHaveBeenCalled();
     host.mounts[0][5](snapshot); await vi.advanceTimersByTimeAsync(0); expect(api.update).not.toHaveBeenCalled();
     marking.resolve(reply({ status: 'context-ready' })); await vi.advanceTimersByTimeAsync(0); expect(api.update).toHaveBeenCalledOnce();
@@ -433,7 +433,7 @@ it('does not publish when the grant publication-intent acknowledgement fails', a
     const api = { getCurrent: () => null, update: vi.fn() };
     const f = fixture(async request => reply(request.action === 'context-published' ? { status: 'unavailable' } : { status: 'ok', payload: {} }), undefined, () => api);
     await f.shell.receive({ ...active(), contextPublished: false });
-    host.mounts[0][5]({ title: 'Paper', documentGeneration: 1, reviewRevision: 0, source: { fileId: 'file', digest: 'd' }, page: 1, pageCount: 2, annotations: [], selection: null });
+    host.mounts[0][5]({ title: 'Paper', documentGeneration: 1, annotationRevision: 0, source: { fileId: 'file', digest: 'd' }, page: 1, pageCount: 2, annotations: [], selection: null });
     await vi.advanceTimersByTimeAsync(0); expect(api.update).not.toHaveBeenCalled();
     await f.shell.teardown();
 });
@@ -448,7 +448,7 @@ it('publishes fresh initial null context automatically while respecting a later 
     const f = fixture(async request => reply(request.action === 'context-published' ? { status: 'context-ready' } : { status: 'ok', payload: {} }), undefined, () => api);
     f.app.getHostContext = () => ({ displayMode: 'fullscreen', 'openai/modelContext': null });
     await f.shell.receive({ ...active(), contextPublished: false });
-    const snapshot = { title: 'Paper', documentGeneration: 1, reviewRevision: 0, source: { fileId: 'file', digest: 'd' }, page: 1, pageCount: 2, annotations: [], selection: null };
+    const snapshot = { title: 'Paper', documentGeneration: 1, annotationRevision: 0, source: { fileId: 'file', digest: 'd' }, page: 1, pageCount: 2, annotations: [], selection: null };
     expect(host.options[0].contextOwner).toBe('app');
     host.mounts[0][5](snapshot); await vi.advanceTimersByTimeAsync(0);
     expect(api.update).toHaveBeenCalledOnce();
@@ -464,7 +464,7 @@ it('waits for actual host visibility after expansion before completing live navi
     const f = fixture();
     (f.app as any).requestDisplayMode = vi.fn(async () => ({ mode: 'fullscreen' }));
     await f.shell.receive(active()); await vi.advanceTimersByTimeAsync(0);
-    const snapshot = { documentGeneration: 1, reviewRevision: 2, title: 'Paper', source: { fileId: 'file', digest: 'digest' }, page: 1, pageCount: 3, selection: null, annotations: [] };
+    const snapshot = { documentGeneration: 1, annotationRevision: 2, title: 'Paper', source: { fileId: 'file', digest: 'digest' }, page: 1, pageCount: 3, selection: null, annotations: [] };
     const navigate = vi.fn(async () => true);
     host.mounts[0][4].attach({ snapshot: () => snapshot, navigate, search: vi.fn() });
     (document as any).hidden = true; f.shell.visibilityChanged(true);
@@ -494,7 +494,7 @@ it('automatically shares the current review and selection despite stale saved pr
         return reply(request.action === 'context-published' ? { status: 'context-ready' } : { status: 'ok', payload: {} });
     }, undefined, () => ({ getCurrent: () => null, update }));
     await f.shell.receive({ ...active(), contextPublished: false });
-    host.mounts[0][5]({ documentGeneration: 1, reviewRevision: 2, title: 'PDF', source: { digest: 'd', fileId: 'f' }, page: 1, pageCount: 2, selection: { text: 'selected passage', pages: [1] }, annotations: [] });
+    host.mounts[0][5]({ documentGeneration: 1, annotationRevision: 2, title: 'PDF', source: { digest: 'd', fileId: 'f' }, page: 1, pageCount: 2, selection: { text: 'selected passage', pages: [1] }, annotations: [] });
     f.shell.wake(); await vi.advanceTimersByTimeAsync(0);
     expect(update).toHaveBeenCalledOnce();
     expect(JSON.parse(update.mock.calls[0]![0].content[0].resource.text.split('\n').at(-1))).toMatchObject({ title: 'PDF', selection: { text: 'selected passage', pages: [1] } });
@@ -505,7 +505,7 @@ it('automatically shares the current review and selection despite stale saved pr
 it('attaches a captured note through model context without using the prompt composer', async () => {
  const send=vi.fn();const update=vi.fn(async (_params:any)=>({updateId:'attached'}));
  const f=fixture(async r=>reply(r.action==='context-published'?{status:'context-ready'}:{status:'ok',payload:{}}),undefined,()=>({getCurrent:()=>null,update}));Object.assign(f.app,{sendMessage:send});await f.shell.receive(active());
- const snapshot={documentGeneration:1,reviewRevision:2,title:'Original',source:{digest:'original',fileId:'f'},page:1,pageCount:2,selection:{text:'captured',pages:[1]},annotations:[]};
+ const snapshot={documentGeneration:1,annotationRevision:2,title:'Original',source:{digest:'original',fileId:'f'},page:1,pageCount:2,selection:{text:'captured',pages:[1]},annotations:[]};
  const preparing=host.mounts[0][4].addContext({kind:'selection',snapshot,note:'My question'});snapshot.selection.text='changed';snapshot.source.digest='changed';
  await vi.advanceTimersByTimeAsync(0);await preparing;
  expect(send).not.toHaveBeenCalled();expect(JSON.stringify(update.mock.calls)).toContain('captured');expect(JSON.stringify(update.mock.calls)).toContain('My question');expect(JSON.stringify(update.mock.calls)).not.toContain('changed');await f.shell.teardown();
@@ -955,7 +955,7 @@ it('shares the complete verified PDF on click and follows an authenticated succe
     const bytes = Uint8Array.from({ length: 75_013 }, (_, index) => index % 251);
     const first = paperSource(1, 'paper', vi.fn(() => bytes));
     controller.setSource(first);
-    const snapshot = { title: first.title, documentGeneration: 1, reviewRevision: 0, source: { fileId: 'paper', digest: first.digest }, page: 1, pageCount: 2, annotations: [], selection: null };
+    const snapshot = { title: first.title, documentGeneration: 1, annotationRevision: 0, source: { fileId: 'paper', digest: first.digest }, page: 1, pageCount: 2, annotations: [], selection: null };
     host.mounts[0][5](snapshot);
     await vi.advanceTimersByTimeAsync(0);
     expect(f.documents()).toEqual([]);
@@ -965,7 +965,7 @@ it('shares the complete verified PDF on click and follows an authenticated succe
     await vi.advanceTimersByTimeAsync(0);
     expect(f.documents().at(-1)?.resource.blob).toBe(Buffer.from(bytes).toString('base64'));
     expect(controller.getState().status).toBe('available');
-    host.mounts[0][5]({ ...snapshot, reviewRevision: 1 });
+    host.mounts[0][5]({ ...snapshot, annotationRevision: 1 });
     await vi.advanceTimersByTimeAsync(0);
     expect(first.readBytes).toHaveBeenCalledOnce();
     expect(controller.getState().status).toBe('available');
@@ -1177,7 +1177,7 @@ it.each([
     const controller = host.mounts[0][4].documentContext;
     controller.setSource(first);
     host.mounts[0][5]({
-        title: first.title, documentGeneration: 1, reviewRevision: 0, source: { fileId: 'paper', digest: first.digest },
+        title: first.title, documentGeneration: 1, annotationRevision: 0, source: { fileId: 'paper', digest: first.digest },
         page: 1, pageCount: 2, annotations: [], selection: null,
     });
     await vi.advanceTimersByTimeAsync(0);
@@ -1227,7 +1227,7 @@ describe('plain MCP Apps host (Claude Desktop)', () => {
         button(f, 'New Document').onclick(); await vi.advanceTimersByTimeAsync(0);
         expect(f.calls.map(c => c.action)).toEqual(expect.arrayContaining(['recent-list', 'open', 'activate']));
         expect(host.mounts).toHaveLength(1);
-        expect(host.options[0]).not.toHaveProperty('reviewedCopyExport');
+        expect(host.options[0]).not.toHaveProperty('annotatedCopyExport');
         expect(f.controls.dataset.mode).toBe('review');
         expect(f.root.hidden).toBe(true);
         expect(button(f, 'Open reader').hidden).toBe(false);
@@ -1291,7 +1291,7 @@ describe('plain MCP Apps host (Claude Desktop)', () => {
         f.shell.hostContextChanged({ displayMode: 'fullscreen' });
         expect(f.root.hidden).toBe(false);
         expect(f.status.textContent).not.toMatch(/expand/);
-        host.mounts[0][5]({ documentGeneration: 1, reviewRevision: 1, title: 'Paper', source: { digest: 'd', fileId: 'f' }, page: 1, pageCount: 2, selection: null, annotations: [] });
+        host.mounts[0][5]({ documentGeneration: 1, annotationRevision: 1, title: 'Paper', source: { digest: 'd', fileId: 'f' }, page: 1, pageCount: 2, selection: null, annotations: [] });
         expect(f.status.textContent).not.toMatch(/expand/);
         // Back inline, the earlier decline is not resurrected.
         f.shell.hostContextChanged({ displayMode: 'inline' });
@@ -1343,7 +1343,7 @@ describe('plain MCP Apps host (Claude Desktop)', () => {
         await vi.advanceTimersByTimeAsync(95_000);
         oldButtons.find(node => node.tagName === 'BUTTON' && node.textContent === 'Open Copy').onclick();
         await vi.advanceTimersByTimeAsync(0);
-        expect(f.status.textContent).toContain('This review choice is no longer available. Choose the PDF again or ask to open it in Placekeeper again. Protected work is retained.');
+        expect(f.status.textContent).toContain('This document choice is no longer available. Choose the PDF again or ask to open it in Placekeeper again. Protected work is retained.');
         expect(f.status.textContent).not.toMatch(/file menu|conversation panel/);
         await f.shell.teardown();
     });
@@ -1374,7 +1374,7 @@ describe('plain MCP Apps host (Claude Desktop)', () => {
             Object.assign(f.app, { getHostCapabilities: () => (capability ? { updateModelContext: capability } : {}), updateModelContext });
             return { ...f, updateModelContext };
         }
-        const snapshot = { documentGeneration: 1, reviewRevision: 2, title: 'Paper', source: { digest: 'd', fileId: 'f' }, page: 3, pageCount: 9, selection: { text: 'selected passage', pages: [3] }, annotations: [] };
+        const snapshot = { documentGeneration: 1, annotationRevision: 2, title: 'Paper', source: { digest: 'd', fileId: 'f' }, page: 3, pageCount: 9, selection: { text: 'selected passage', pages: [3] }, annotations: [] };
 
         it('publishes the background snapshot and explicit attachments as text, keeping document-in-context unsupported', async () => {
             const f = contextHost({ text: {} });
@@ -1439,7 +1439,7 @@ describe('plain MCP Apps host (Claude Desktop)', () => {
     });
 
     describe('with the server reader relay', () => {
-        const snapshot = { documentGeneration: 1, reviewRevision: 2, title: 'Paper', source: { digest: 'd', fileId: 'f' }, page: 1, pageCount: 9, selection: null, annotations: [] };
+        const snapshot = { documentGeneration: 1, annotationRevision: 2, title: 'Paper', source: { digest: 'd', fileId: 'f' }, page: 1, pageCount: 9, selection: null, annotations: [] };
         function relayHost(context: Record<string, unknown>, capability?: Record<string, object>) {
             const relay = new ReaderBridge();
             const f = plainHost(context, async request => {
@@ -1585,7 +1585,7 @@ it.each([
     await f.shell.teardown();
 });
 
-it('offers Check again as the primary action while the review is still open elsewhere', async () => {
+it('offers Check again as the primary action while the document is still open elsewhere', async () => {
     const f = fixture(async () => reply({ status: 'closed' }));
     await f.shell.receive({ status: 'busy', recoveryToken: 'r'.repeat(43), canResume: false });
     const dialog = descendants(f.controls).find(node => node.tagName === 'DIALOG');

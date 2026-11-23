@@ -4,18 +4,18 @@ import {
   createExecutionBaseline,
   createReconciliationOutcome,
   canonicalSha256,
-  reviewSemanticDigest,
+  documentSemanticDigest,
   type LiveExecutionBaselineV1,
   type LiveObservationIdentity,
   type ReconciliationOutcomeV1,
   type SourceFingerprint,
 } from "../../../../packages/core/src/live-context.js";
 import {
-  projectStructuredReviewItem,
+  projectStructuredAnnotation,
   type SourceHint,
-  type StructuredReviewItem,
-} from "../../../../packages/core/src/structured-review-item.js";
-import type { ReviewItem } from "../../../../packages/core/src/review-model.js";
+  type StructuredAnnotation,
+} from "../../../../packages/core/src/structured-annotation.js";
+import type { Annotation } from "../../../../packages/core/src/document-model.js";
 import type { AtomicSessionProjection, SessionBroker } from "../sessions/session-broker.js";
 import { querySyncTexHintsForItems } from "../synctex/query.js";
 import {
@@ -58,7 +58,7 @@ export interface SourceReconciliationReportV1 {
   readonly checkedAt: string;
   readonly identity: LiveObservationIdentity;
   readonly outcomes: readonly SourceReconciliationDecision[];
-  readonly laterItems: readonly StructuredReviewItem[];
+  readonly laterItems: readonly StructuredAnnotation[];
 }
 
 interface BaselineSource extends ScopedSourceRead {}
@@ -77,7 +77,7 @@ interface RegisteredProposal {
 
 interface ExecutionRecord {
   readonly taskSessionId: string;
-  readonly reviewSessionId: string;
+  readonly documentSessionId: string;
   readonly documentGeneration: number;
   readonly sourceRoot: string;
   readonly baseline: LiveExecutionBaselineV1;
@@ -91,7 +91,7 @@ export interface SourceReconciliationServiceOptions {
   readonly now?: () => Date;
   readonly executionId?: () => string;
   readonly queryHints?: (input: {
-    readonly items: readonly ReviewItem[];
+    readonly items: readonly Annotation[];
     readonly sourceRoot: string;
     readonly pdfPath: string;
   }) => Promise<ReadonlyMap<string, SourceHint>>;
@@ -314,7 +314,7 @@ async function readUniqueSources(
   return sources;
 }
 
-function sameReviewIdentity(
+function sameDocumentIdentity(
   snapshot: AtomicSessionProjection | undefined,
   identity: LiveObservationIdentity,
 ): boolean {
@@ -323,7 +323,7 @@ function sameReviewIdentity(
     snapshot.documentGeneration === identity.documentGeneration &&
     snapshot.state.revision === identity.reviewRevision &&
     snapshot.state.source.digest === identity.source.digest &&
-    reviewSemanticDigest(snapshot.state.items) === identity.stateDigest;
+    documentSemanticDigest(snapshot.state.items) === identity.stateDigest;
 }
 
 export class SourceReconciliationService {
@@ -351,7 +351,7 @@ export class SourceReconciliationService {
       if (binding === undefined) throw new Error("The Codex task has no active PDF binding");
       const capturedAt = this.#now().toISOString();
       const executionId = this.#executionId();
-      const captured = await this.#broker.projectAtomicSession(binding.reviewSessionId, async (snapshot) => {
+      const captured = await this.#broker.projectAtomicSession(binding.documentSessionId, async (snapshot) => {
         if (snapshot.documentGeneration !== binding.documentGeneration) {
           throw new Error("The PDF generation changed before source-work baseline capture");
         }
@@ -375,14 +375,14 @@ export class SourceReconciliationService {
           sources.set(source.fingerprint.path, source);
         }
         const structuredItems = snapshot.state.items.map((item) =>
-          projectStructuredReviewItem(item, hints.get(item.id)),
+          projectStructuredAnnotation(item, hints.get(item.id)),
         );
         const identity = {
           placekeeperSessionId: snapshot.sessionId,
           documentGeneration: snapshot.documentGeneration,
           source: { ...snapshot.state.source },
           reviewRevision: snapshot.state.revision,
-          stateDigest: reviewSemanticDigest(snapshot.state.items),
+          stateDigest: documentSemanticDigest(snapshot.state.items),
         };
         const sourceFingerprints: SourceFingerprint[] = [...sources.values()].map(({ fingerprint }) => fingerprint);
         const baseline = createExecutionBaseline({
@@ -395,13 +395,13 @@ export class SourceReconciliationService {
         return { root, sources, baseline };
       });
       if (captured === undefined) throw new Error("The bound PDF session is no longer active");
-      if (!sameReviewIdentity(
-        await this.#broker.snapshotAtomicSession(binding.reviewSessionId),
+      if (!sameDocumentIdentity(
+        await this.#broker.snapshotAtomicSession(binding.documentSessionId),
         captured.baseline.identity,
-      )) throw new Error("Review State changed during source-work baseline capture");
+      )) throw new Error("Annotation state changed during source-work baseline capture");
       const record: ExecutionRecord = {
         taskSessionId: input.taskSessionId,
-        reviewSessionId: binding.reviewSessionId,
+        documentSessionId: binding.documentSessionId,
         documentGeneration: binding.documentGeneration,
         sourceRoot: captured.root,
         baseline: captured.baseline,
@@ -444,7 +444,7 @@ export class SourceReconciliationService {
       }
       const priorItemKey = record.proposalKeyByItem.get(input.proposal.baselineItemId);
       if (priorItemKey !== undefined) {
-        throw new Error("Each baseline Review Item accepts one idempotent proposal per execution");
+        throw new Error("Each baseline annotation accepts one idempotent proposal per execution");
       }
       const canonicalProposal = { ...input.proposal, path: source.fingerprint.path };
       const baselineAnchor = baselineTargetAnchor(source.text, canonicalProposal.expectedText);
@@ -468,11 +468,11 @@ export class SourceReconciliationService {
       const record = this.#record(input.taskSessionId, input.executionId);
       const binding = this.#broker.taskBindings.bindingForTask(input.taskSessionId);
       if (
-        binding === undefined || binding.reviewSessionId !== record.reviewSessionId ||
+        binding === undefined || binding.documentSessionId !== record.documentSessionId ||
         binding.documentGeneration !== record.documentGeneration
       ) throw new Error("The execution no longer belongs to the task's active PDF generation");
       const checkedAt = this.#now().toISOString();
-      const report = await this.#broker.projectAtomicSession(record.reviewSessionId, async (snapshot) => {
+      const report = await this.#broker.projectAtomicSession(record.documentSessionId, async (snapshot) => {
         if (snapshot.documentGeneration !== record.documentGeneration) {
           throw new Error("The PDF generation changed during reconciliation");
         }
@@ -515,7 +515,7 @@ export class SourceReconciliationService {
           }
           const registered = record.proposalsByKey.get(proposalKey)!;
           const proposal = registered.proposal;
-          const currentStructured = projectStructuredReviewItem(currentItem, baselineItem.sourceHint);
+          const currentStructured = projectStructuredAnnotation(currentItem, baselineItem.sourceHint);
           if (canonicalSha256(currentStructured) !== canonicalSha256(baselineItem)) {
             return {
               status: "complete",
@@ -572,24 +572,24 @@ export class SourceReconciliationService {
         });
         const laterItems = snapshot.state.items
           .filter(({ id }) => !baselineIds.has(id))
-          .map((item) => projectStructuredReviewItem(item));
+          .map((item) => projectStructuredAnnotation(item));
         return {
           identity: {
             placekeeperSessionId: snapshot.sessionId,
             documentGeneration: snapshot.documentGeneration,
             source: { ...snapshot.state.source },
             reviewRevision: snapshot.state.revision,
-            stateDigest: reviewSemanticDigest(snapshot.state.items),
+            stateDigest: documentSemanticDigest(snapshot.state.items),
           },
           outcomes,
           laterItems,
         };
       });
       if (report === undefined) throw new Error("The bound PDF session ended during reconciliation");
-      if (!sameReviewIdentity(
-        await this.#broker.snapshotAtomicSession(record.reviewSessionId),
+      if (!sameDocumentIdentity(
+        await this.#broker.snapshotAtomicSession(record.documentSessionId),
         report.identity,
-      )) throw new Error("Review State changed during reconciliation");
+      )) throw new Error("Annotation state changed during reconciliation");
       return {
         schemaVersion: 1,
         executionId: record.baseline.executionId,

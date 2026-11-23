@@ -148,10 +148,10 @@ describe("open command", () => {
   it("atomically drains accepted work and cancels when new activity wins the final recheck", async () => {
     const drainStarted = Promise.withResolvers<void>();
     const releaseDrain = Promise.withResolvers<void>();
-    let reviewPresence = 0;
+    let documentPresence = 0;
     let transientWork = 1;
     const lifecycle = new DaemonLifecycleCoordinator({
-      activity: () => ({ reviewPresence, codexTasks: 0, transientWork }),
+      activity: () => ({ documentPresence: documentPresence, codexTasks: 0, transientWork }),
       drain: async () => {
         drainStarted.resolve();
         await releaseDrain.promise;
@@ -164,20 +164,20 @@ describe("open command", () => {
     expect(lifecycle.status().lifecycle).toBe("draining");
     const activity = lifecycle.enterActivity();
     expect(activity).toBeDefined();
-    reviewPresence = 1;
+    documentPresence = 1;
     activity!.complete();
     releaseDrain.resolve();
 
     await expect(shutdown).resolves.toMatchObject({ status: "refused" });
     expect(lifecycle.status()).toMatchObject({
       lifecycle: "accepting",
-      activity: { reviewPresence: 1 },
+      activity: { documentPresence: 1 },
     });
   });
 
   it("rejects activity after shutdown commit", async () => {
     const lifecycle = new DaemonLifecycleCoordinator({
-      activity: () => ({ reviewPresence: 0, codexTasks: 0, transientWork: 0 }),
+      activity: () => ({ documentPresence: 0, codexTasks: 0, transientWork: 0 }),
       drain: async () => {},
     });
     await expect(lifecycle.shutdownIfIdle()).resolves.toEqual({ status: "accepted" });
@@ -374,7 +374,7 @@ describe("open command", () => {
         protocolVersion: 1 as const,
         daemonIdentity: "a".repeat(64),
         lifecycle: "accepting" as const,
-        activity: { reviewPresence: 0, codexTasks: 0, transientWork: 0 },
+        activity: { documentPresence: 0, codexTasks: 0, transientWork: 0 },
       },
     }));
     const shutdown = vi.fn();
@@ -406,7 +406,7 @@ describe("open command", () => {
           upgradePreparationVersion: 1,
           daemonIdentity: "a".repeat(64),
           lifecycle: "accepting",
-          activity: { reviewPresence: 0, codexTasks: 0, transientWork: 0 },
+          activity: { documentPresence: 0, codexTasks: 0, transientWork: 0 },
         },
       }),
       shutdown,
@@ -431,7 +431,7 @@ describe("open command", () => {
           upgradePreparationVersion: 1,
           daemonIdentity: "a".repeat(64),
           lifecycle: "accepting",
-          activity: { reviewPresence: 1, codexTasks: 0, transientWork: 0 },
+          activity: { documentPresence: 1, codexTasks: 0, transientWork: 0 },
         },
       }),
       shutdown: vi.fn(),
@@ -451,7 +451,7 @@ describe("open command", () => {
           upgradePreparationVersion: 1,
           daemonIdentity: "a".repeat(64),
           lifecycle: "accepting",
-          activity: { reviewPresence: 0, codexTasks: 0, transientWork: 0 },
+          activity: { documentPresence: 0, codexTasks: 0, transientWork: 0 },
         },
       }),
       shutdown: async () => { order.push("shutdown"); return { status: "accepted" }; },
@@ -489,11 +489,11 @@ describe("open command", () => {
           upgradePreparationVersion: 1,
           daemonIdentity: "a".repeat(64),
           lifecycle: "accepting",
-          activity: { reviewPresence: 0, codexTasks: 0, transientWork: 1 },
+          activity: { documentPresence: 0, codexTasks: 0, transientWork: 1 },
         },
       }),
       shutdown: async () => ++attempts < 3
-        ? { status: "refused", activity: { reviewPresence: 0, codexTasks: 0, transientWork: 1 } }
+        ? { status: "refused", activity: { documentPresence: 0, codexTasks: 0, transientWork: 1 } }
         : { status: "accepted" },
       retryDelay: async () => {},
       waitForRetirement: async () => {},
@@ -516,7 +516,7 @@ describe("open command", () => {
       protocolVersion: MANAGEMENT_PROTOCOL_VERSION,
       daemonIdentity,
       lifecycle: "accepting",
-      activity: { reviewPresence: 0, codexTasks: 0, transientWork: 0 },
+      activity: { documentPresence: 0, codexTasks: 0, transientWork: 0 },
     }));
 
     await expect(inspectDaemonCompatibility(socketPath, daemonIdentity)).resolves.toMatchObject({
@@ -525,7 +525,7 @@ describe("open command", () => {
         protocolVersion: MANAGEMENT_PROTOCOL_VERSION,
         daemonIdentity,
         lifecycle: "accepting",
-        activity: { reviewPresence: 0, codexTasks: 0, transientWork: 0 },
+        activity: { documentPresence: 0, codexTasks: 0, transientWork: 0 },
       },
     });
     await expect(inspectDaemonCompatibility(socketPath, "b".repeat(64))).resolves.toMatchObject({
@@ -621,7 +621,7 @@ describe("open command", () => {
     await writeFile(join(assets, "app.js"), "export function start(){}\n");
     await writeFile(pdf, "%PDF-1.7\nclean\n%%EOF");
     const host = await PlacekeeperHost.start({ recoveryRoot: join(root, "recovery"), webAssets: { root: assets } });
-    const opened = await host.broker.openReview({ pdfPath: pdf });
+    const opened = await host.broker.openDocument({ pdfPath: pdf });
     if (opened.kind !== "opened") throw new Error("Expected a new review");
     host.broker.credentials.revokeSession(opened.launch.sessionId);
     const remove = vi.spyOn(DraftSnapshotStore.prototype, "remove").mockRejectedValueOnce(new Error("disk unavailable"));
@@ -682,7 +682,7 @@ describe("open command", () => {
       kind: "exact",
       status: {
         lifecycle: "accepting",
-        activity: { reviewPresence: 1, codexTasks: 0, transientWork: 0 },
+        activity: { documentPresence: 1, codexTasks: 0, transientWork: 0 },
       },
     });
 
@@ -695,7 +695,7 @@ describe("open command", () => {
       operation: "shutdown-if-idle",
       result: {
         status: "refused",
-        activity: { reviewPresence: 1, codexTasks: 0 },
+        activity: { documentPresence: 1, codexTasks: 0 },
       },
     });
     await expect(requestLaunch(socketPath, { pdfPath: pdf })).resolves.toMatchObject({
@@ -815,14 +815,14 @@ describe("open command", () => {
     expect(await requestControl(socketPath, {
       kind: "claim-binding",
       taskSessionId: "task-a",
-      reviewSessionId: opened.sessionId,
+      documentSessionId: opened.sessionId,
       documentGeneration: opened.documentGeneration,
       bindProof: opened.bindProof,
     })).toMatchObject({ kind: "binding", result: { status: "pending" } });
     if (!("url" in opened)) throw new Error("Expected browser launch");
     const capability = new URL(opened.url).hash.slice("#cap=".length);
     expect(host.broker.exchangeBootstrap(opened.sessionId, capability)).toBeTypeOf("string");
-    expect(host.broker.taskBindings.bindingForTask("task-a")).toMatchObject({ reviewSessionId: opened.sessionId });
+    expect(host.broker.taskBindings.bindingForTask("task-a")).toMatchObject({ documentSessionId: opened.sessionId });
 
     expect(await requestControl(socketPath, { kind: "refresh-context", taskSessionId: "task-a" }))
       .toMatchObject({ kind: "context" });
@@ -869,7 +869,7 @@ describe("legacy installer retirement authority", () => {
     const shutdown = vi.fn(async () => ({status:"accepted" as const}));
     const retired = vi.fn(async () => {}), mutate = vi.fn(async () => {});
     await expect(coordinateUpgrade({ operation, candidate, installed,
-      inspect:async()=>({kind:"exact",status:{protocolVersion:1,daemonIdentity:candidate.daemonIdentity,lifecycle:"accepting",activity:{reviewPresence:0,codexTasks:0,transientWork:0}}}),
+      inspect:async()=>({kind:"exact",status:{protocolVersion:1,daemonIdentity:candidate.daemonIdentity,lifecycle:"accepting",activity:{documentPresence:0,codexTasks:0,transientWork:0}}}),
       shutdown,waitForRetirement:retired,replaceAndReady:mutate,
     })).rejects.toThrow(/Quit the current app manually/u);
     expect(shutdown).not.toHaveBeenCalled();expect(retired).not.toHaveBeenCalled();expect(mutate).not.toHaveBeenCalled();
@@ -898,7 +898,7 @@ describe("committed upgrade closure orchestration", () => {
         inspect:async()=>({kind:'exact',status:{protocolVersion:1,upgradePreparationVersion:1,daemonIdentity:candidate.daemonIdentity,...lifecycle.status()}}),
         prepare:async()=>{
           const attempt=preparation.preview(candidate.daemonIdentity,candidate);preparation.begin(attempt,true);
-          preparation.acknowledge(participant,attempt,{revision:'1',reviewRevisionDurable:true,protectedDraftDurable:true,pdfSaveSettled:true});preparation.commit(attempt);
+          preparation.acknowledge(participant,attempt,{revision:'1',annotationRevisionDurable:true,protectedDraftDurable:true,pdfSaveSettled:true});preparation.commit(attempt);
           // The installer starts shutdown immediately; this host has not yet
           // polled committed status and its five-second grace has not begun.
           poll=setTimeout(()=>{expect(preparation.poll(participant)?.phase).toBe('committed');socket.destroy();},100);
@@ -914,7 +914,7 @@ describe("committed upgrade closure orchestration", () => {
   },15_000);
   it("cancels a committed attempt on bounded closure failure so surviving hosts regain admission",async()=>{
     const { UpgradePreparationCoordinator } = await import('../src/host/upgrade-preparation.js');
-    const lifecycle=new DaemonLifecycleCoordinator({activity:()=>({reviewPresence:1,codexTasks:0,transientWork:0}),drain:async()=>{}});
+    const lifecycle=new DaemonLifecycleCoordinator({activity:()=>({documentPresence:1,codexTasks:0,transientWork:0}),drain:async()=>{}});
     const preparation=new UpgradePreparationCoordinator(lifecycle);preparation.setParticipantCoverage(()=>true);
     const candidate={daemonIdentity:'a'.repeat(64),installArtifactIdentity:'b'.repeat(64)};
     const cancel=vi.fn(async(credentials:import('../src/host/upgrade-preparation.js').UpgradeAttemptCredentials)=>{preparation.cancel(credentials);});
@@ -935,10 +935,10 @@ it('revalidates committed credentials after every refused prepared shutdown and 
   const candidate={daemonIdentity:'a'.repeat(64),installArtifactIdentity:'b'.repeat(64)};
   const credentials={attemptId:'attempt',token:'token',candidate};
   let committed=true;
-  const shutdown=vi.fn(async()=>({status:'refused' as const,activity:{reviewPresence:1,codexTasks:0,transientWork:0}}));
+  const shutdown=vi.fn(async()=>({status:'refused' as const,activity:{documentPresence:1,codexTasks:0,transientWork:0}}));
   const cancel=vi.fn(async()=>{}),replace=vi.fn();
   await expect(coordinateUpgrade({candidate,
-    inspect:async()=>({kind:'exact',status:{protocolVersion:1,upgradePreparationVersion:1,daemonIdentity:candidate.daemonIdentity,lifecycle:'accepting',activity:{reviewPresence:1,codexTasks:0,transientWork:0}}}),
+    inspect:async()=>({kind:'exact',status:{protocolVersion:1,upgradePreparationVersion:1,daemonIdentity:candidate.daemonIdentity,lifecycle:'accepting',activity:{documentPresence:1,codexTasks:0,transientWork:0}}}),
     prepare:async()=>credentials,validatePreparation:async value=>{expect(value).toBe(credentials);return committed;},cancelPreparation:cancel,
     retryDelay:async()=>{committed=false;},shutdown,waitForRetirement:vi.fn(),replaceAndReady:replace,
   })).rejects.toThrow('no longer committed');
@@ -948,7 +948,7 @@ it('does not cancel a service after accepted prepared shutdown when process reti
   const candidate={daemonIdentity:'a'.repeat(64),installArtifactIdentity:'b'.repeat(64)};
   const cancel=vi.fn(),replace=vi.fn();
   await expect(coordinateUpgrade({candidate,
-    inspect:async()=>({kind:'exact',status:{protocolVersion:1,upgradePreparationVersion:1,daemonIdentity:candidate.daemonIdentity,lifecycle:'accepting',activity:{reviewPresence:1,codexTasks:0,transientWork:0}}}),
+    inspect:async()=>({kind:'exact',status:{protocolVersion:1,upgradePreparationVersion:1,daemonIdentity:candidate.daemonIdentity,lifecycle:'accepting',activity:{documentPresence:1,codexTasks:0,transientWork:0}}}),
     prepare:async()=>({attemptId:'attempt',token:'token',candidate}),validatePreparation:async()=>true,cancelPreparation:cancel,
     shutdown:async()=>({status:'accepted'}),waitForRetirement:async()=>{throw Error('retirement uncertain');},replaceAndReady:replace,
   })).rejects.toThrow('retirement uncertain');
@@ -957,7 +957,7 @@ it('does not cancel a service after accepted prepared shutdown when process reti
 it('reports failed cancellation along with the original closure failure',async()=>{
   const candidate={daemonIdentity:'a'.repeat(64),installArtifactIdentity:'b'.repeat(64)};
   const failure=await coordinateUpgrade({candidate,
-    inspect:async()=>({kind:'exact',status:{protocolVersion:1,upgradePreparationVersion:1,daemonIdentity:candidate.daemonIdentity,lifecycle:'accepting',activity:{reviewPresence:1,codexTasks:0,transientWork:0}}}),
+    inspect:async()=>({kind:'exact',status:{protocolVersion:1,upgradePreparationVersion:1,daemonIdentity:candidate.daemonIdentity,lifecycle:'accepting',activity:{documentPresence:1,codexTasks:0,transientWork:0}}}),
     prepare:async()=>({attemptId:'attempt',token:'token',candidate}),validatePreparation:async()=>true,cancelPreparation:async()=>{throw Error('cancel unavailable');},
     shutdown:async()=>{throw Error('shutdown unavailable');},waitForRetirement:vi.fn(),replaceAndReady:vi.fn(),
   }).then(()=>undefined,error=>error);

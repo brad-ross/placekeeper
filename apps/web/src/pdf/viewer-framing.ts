@@ -136,7 +136,7 @@ export class LatestFrameRequest<T> {
 
 export interface ViewerFramingTarget {
   pageIndex?: number;
-  reviewId?: string;
+  annotationId?: string;
 }
 
 export interface ViewerFramingSnapshot {

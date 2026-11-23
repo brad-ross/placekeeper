@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import type { PdfOutlineItem } from '../src/pdf/pdf-outline.js';
-import { OutlineNavigator } from '../src/review/OutlineNavigator.js';
+import { OutlineNavigator } from '../src/reader/OutlineNavigator.js';
 
 const item = (id: string, children: PdfOutlineItem[] = []): PdfOutlineItem => ({
   id, label: id, pageContext: null, target: null, children,

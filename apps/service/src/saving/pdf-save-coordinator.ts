@@ -1,6 +1,6 @@
-import { InvalidReviewCommandError, ReviewConflictError, ReviewDraftConflictError } from "../../../../packages/core/src/review-reducer.js";
-import { ReviewGenerationConflictError } from "../sessions/session-broker.js";
-import type { ReviewState, SaveDestinationConfirmation } from "../../../../packages/core/src/review-model.js";
+import { InvalidDocumentCommandError, DocumentConflictError, DocumentDraftConflictError } from "../../../../packages/core/src/document-reducer.js";
+import { DocumentGenerationConflictError } from "../sessions/session-broker.js";
+import type { DocumentState, SaveDestinationConfirmation } from "../../../../packages/core/src/document-model.js";
 import { randomUUID } from "node:crypto";
 import { readFile, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -19,24 +19,24 @@ import {
   validatePdfFilename,
 } from "../files/file-capabilities.js";
 import { preserveReplacementPermissions, publishFile, stagePublication, syncPublishedFile } from "../platform/file-publication.js";
-import { verifyReviewedPdf, type PdfExportVerifier } from "../export/pdf-verifier.js";
-import { reviewStateDigest, type SaveFailureReason } from "../recovery/draft-snapshot.js";
+import { verifyAnnotatedPdf, type PdfExportVerifier } from "../export/pdf-verifier.js";
+import { documentStateDigest, type SaveFailureReason } from "../recovery/draft-snapshot.js";
 import type { SessionBroker } from "../sessions/session-broker.js";
 import { defaultAnnotatedFilename, proposedCopyPath } from "./save-destination.js";
 import type { DestinationPicker } from "../host/destination-picker.js";
 
 /** Only semantic name rejection is recoverable in the still-open confirmation dialog. */
-export function rejectedDestinationName(error: unknown, state: ReviewState | undefined) {
+export function rejectedDestinationName(error: unknown, state: DocumentState | undefined) {
   if (state === undefined) return undefined;
-  if (!(error instanceof InvalidReviewCommandError || error instanceof ReviewConflictError ||
-    error instanceof ReviewDraftConflictError || error instanceof ReviewGenerationConflictError)) return undefined;
+  if (!(error instanceof InvalidDocumentCommandError || error instanceof DocumentConflictError ||
+    error instanceof DocumentDraftConflictError || error instanceof DocumentGenerationConflictError)) return undefined;
   return {
     accepted: false as const, state,
-    message: error instanceof InvalidReviewCommandError ? error.message
-      : error instanceof ReviewGenerationConflictError
+    message: error instanceof InvalidDocumentCommandError ? error.message
+      : error instanceof DocumentGenerationConflictError
         ? "The PDF was rebuilt before this name could be applied. Review the current generation and retry explicitly."
         : "Another window changed this draft. Review the current revision and retry explicitly.",
-    reason: error instanceof ReviewGenerationConflictError ? "generation-conflict" as const : "rejected" as const,
+    reason: error instanceof DocumentGenerationConflictError ? "generation-conflict" as const : "rejected" as const,
   };
 }
 
@@ -120,7 +120,7 @@ export class PdfSaveCoordinator {
     this.#broker = options.broker;
     this.#writer = options.writer;
     this.#capabilities = options.capabilities ?? options.broker.capabilities;
-    this.#verify = options.verify ?? verifyReviewedPdf;
+    this.#verify = options.verify ?? verifyAnnotatedPdf;
     this.#backend = options.backend ?? {};
     this.#picker = options.picker;
     this.#syncDirectory = options.syncDirectory;
@@ -138,9 +138,9 @@ export class PdfSaveCoordinator {
   #assertExpectedDocumentGeneration(sessionId: string, expected: number | undefined): void {
     if (expected === undefined) return;
     const state = this.#broker.state(sessionId);
-    if (state === undefined) throw new Error("Review session is not active");
+    if (state === undefined) throw new Error("Document session is not active");
     if (state.workflow.documentGeneration !== expected) {
-      throw new ReviewGenerationConflictError(expected, state.workflow.documentGeneration, state.revision);
+      throw new DocumentGenerationConflictError(expected, state.workflow.documentGeneration, state.revision);
     }
   }
 
@@ -149,7 +149,7 @@ export class PdfSaveCoordinator {
     if (state?.workflow.mode === "generated-output") {
       throw new PdfWriterError(
         "permission-denied",
-        "Generated output is immutable. Use explicit export to create a reviewed copy.",
+        "Generated output is immutable. Use explicit export to create an Annotated Document.",
       );
     }
     const eligibility = this.#broker.saveStatus(sessionId)?.rewriteEligibility;
@@ -160,7 +160,7 @@ export class PdfSaveCoordinator {
 
   proposal(sessionId: string): SaveCopyProposal {
     const state = this.#broker.state(sessionId);
-    if (state === undefined) throw new Error("Review session is not active");
+    if (state === undefined) throw new Error("Document session is not active");
     if (this.#broker.sourceDisposition(sessionId) === "remote-temporary") {
       return { sourceDisposition: "remote-temporary" };
     }
@@ -175,7 +175,7 @@ export class PdfSaveCoordinator {
 
   async browserProposal(sessionId: string, folder: string | undefined): Promise<SaveCopyProposal> {
     const scope = await this.#broker.sessionScope(sessionId);
-    if (scope === undefined) throw new Error("Review session is not active");
+    if (scope === undefined) throw new Error("Document session is not active");
     const filename = validatePdfFilename(scope.sourceDisplayName);
     return {
       sourceDisposition: scope.sourceDisposition,
@@ -202,9 +202,9 @@ export class PdfSaveCoordinator {
     confirmation?: SaveDestinationConfirmation,
     expectedDocumentGeneration?: number,
     assertAuthority?: () => void,
-  ): Promise<ReviewState | void> {
+  ): Promise<DocumentState | void> {
     const state = this.#broker.state(sessionId);
-    if (state === undefined) throw new Error("Review session is not active");
+    if (state === undefined) throw new Error("Document session is not active");
     const remote = this.#broker.sourceDisposition(sessionId) === "remote-temporary";
     const sourcePath = this.#capabilities.getFilePath(state.source.fileId);
     if (sourcePath === undefined) throw new Error("Original PDF capability is unavailable");
@@ -282,7 +282,7 @@ export class PdfSaveCoordinator {
     this.#assertExpectedDocumentGeneration(sessionId, expectedDocumentGeneration);
     if (status.destination.kind === "original") {
       const state = this.#broker.state(sessionId);
-      if (state === undefined) throw new Error("Review session is not active");
+      if (state === undefined) throw new Error("Document session is not active");
       const fingerprint = status.destination.fingerprint;
       const checkAuthority = () => { assertAuthority?.(); trusted?.assertAuthority?.(); };
       const rebind = () => this.#capabilities.rebindApprovedPdf(state.source.fileId, selected, fingerprint, checkAuthority);
@@ -321,11 +321,11 @@ export class PdfSaveCoordinator {
     await this.requestSave(sessionId);
   }
 
-  async chooseCopy(sessionId: string, targetPath: string, confirmation?: SaveDestinationConfirmation, expectedDocumentGeneration?: number, assertAuthority?: () => void): Promise<ReviewState | void> {
+  async chooseCopy(sessionId: string, targetPath: string, confirmation?: SaveDestinationConfirmation, expectedDocumentGeneration?: number, assertAuthority?: () => void): Promise<DocumentState | void> {
     this.#assertExpectedDocumentGeneration(sessionId, expectedDocumentGeneration);
     this.#assertRewriteEligible(sessionId);
     const capability = await this.#capabilities.preauthorizeDestination(targetPath);
-    let acceptedState: ReviewState;
+    let acceptedState: DocumentState;
     try {
       if (capability.existingTarget !== undefined) {
         throw new FileCapabilityError("TARGET_CHANGED", "A file already exists at that location");
@@ -347,14 +347,14 @@ export class PdfSaveCoordinator {
     return confirmation === undefined ? undefined : acceptedState;
   }
 
-  async chooseOriginal(sessionId: string, confirmation?: SaveDestinationConfirmation, expectedDocumentGeneration?: number, assertAuthority?: () => void): Promise<ReviewState | void> {
+  async chooseOriginal(sessionId: string, confirmation?: SaveDestinationConfirmation, expectedDocumentGeneration?: number, assertAuthority?: () => void): Promise<DocumentState | void> {
     this.#assertExpectedDocumentGeneration(sessionId, expectedDocumentGeneration);
     this.#assertRewriteEligible(sessionId);
     if (this.#broker.sourceDisposition(sessionId) === "remote-temporary") {
       throw new Error("A remote browser PDF cannot modify its private temporary source");
     }
     const state = this.#broker.state(sessionId);
-    if (state === undefined) throw new Error("Review session is not active");
+    if (state === undefined) throw new Error("Document session is not active");
     const targetPath = this.#capabilities.getFilePath(state.source.fileId);
     if (targetPath === undefined) throw new Error("Original PDF capability is unavailable");
     const status = await this.#broker.establishSaveDestination(sessionId, {
@@ -450,7 +450,7 @@ export class PdfSaveCoordinator {
       }
       try {
         const delivery = await this.#broker.freezeSaveDelivery(sessionId);
-        const stateDigest = delivery.stateDigest ?? reviewStateDigest({ items: delivery.items ?? [] });
+        const stateDigest = delivery.stateDigest ?? documentStateDigest({ items: delivery.items ?? [] });
         await withTargetLock(destination.targetPath, async () => {
           const sourcePdf = new Uint8Array(await readFile(delivery.sourceSnapshotPath));
           const written = await runPdfBackend(this.#writer, {

@@ -232,7 +232,7 @@ async function coordinateLifecycleMutation(
             preparation = await request({ operation: "status", credentials });
           }
           if (preparation.phase !== "ready") throw new Error("Pending annotation work could not be protected; installation stopped");
-          if ((await request({ operation: "commit", credentials })).phase !== "committed") throw new Error("Review closure was not committed");
+          if ((await request({ operation: "commit", credentials })).phase !== "committed") throw new Error("Document closure was not committed");
           return credentials;
         } catch (error) { await request({ operation: "cancel", credentials }).catch(() => undefined); throw error; }
       },

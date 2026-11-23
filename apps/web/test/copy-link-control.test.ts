@@ -7,7 +7,7 @@ import {
   CopyLinkControl,
   createCopyLinkCommand,
   type CopyLinkStatus,
-} from '../src/review/CopyLinkControl.js';
+} from '../src/reader/CopyLinkControl.js';
 
 function deferred<T>() {
   let resolve!: (value: T) => void;

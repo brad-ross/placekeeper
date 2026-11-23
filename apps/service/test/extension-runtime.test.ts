@@ -101,8 +101,8 @@ describe("app-owned extension presentations", () => {
     const f = await fixture(), panel = await opened(f.manager, {});
     const initial = payload(await f.manager.handle(request(panel.presentation, "bootstrap")));
     const entered = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
-    const protect = f.broker.protectChromeReview.bind(f.broker);
-    vi.spyOn(f.broker, "protectChromeReview").mockImplementationOnce(async (id) => {
+    const protect = f.broker.protectChromeDocument.bind(f.broker);
+    vi.spyOn(f.broker, "protectChromeDocument").mockImplementationOnce(async (id) => {
       await protect(id); entered.resolve(); await release.promise;
     });
     const command = { type: "set-annotation-name", expectedRevision: 0, annotationName: "retired" };
@@ -130,7 +130,7 @@ describe("app-owned extension presentations", () => {
     } });
     const panel = await opened(f.manager, {});
     const initial = payload(await f.manager.handle(request(panel.presentation, "bootstrap")));
-    await f.broker.protectChromeReview(initial.sessionId);
+    await f.broker.protectChromeDocument(initial.sessionId);
     gate = true;
     const predecessor = boundary === "predecessor" ? f.broker.acceptMutation(initial.sessionId, {
       type: "set-annotation-name", expectedRevision: 0, annotationName: "predecessor",
@@ -163,7 +163,7 @@ describe("app-owned extension presentations", () => {
     } });
     const panel = await opened(f.manager, {});
     const initial = payload(await f.manager.handle(request(panel.presentation, "bootstrap")));
-    await f.broker.protectChromeReview(initial.sessionId);
+    await f.broker.protectChromeDocument(initial.sessionId);
     const before = f.broker.saveStatus(initial.sessionId);
     gate = true;
     const pending = f.manager.handle(request(panel.presentation, method, method === "chooseCopy" ? { filename: "reviewed.pdf" } : {}));
@@ -331,7 +331,7 @@ describe("app-owned extension presentations", () => {
   });
 
   it("opens an independent review of an exact clean browser session without changing that session", async () => {
-    const f = await fixture(), original = await f.broker.openReview({ pdfPath: f.pdfPath });
+    const f = await fixture(), original = await f.broker.openDocument({ pdfPath: f.pdfPath });
     if (original.kind === 'recovery-offered') throw Error('Expected clean review');
     const state = f.broker.state(original.launch.sessionId);
     expect(f.broker.chromeProtected(original.launch.sessionId)).toBe(false);
@@ -371,6 +371,8 @@ describe("app-owned extension presentations", () => {
   it("resumes the exact independent recent review after a service restart", async () => {
     const f = await fixture(), first = await opened(f.manager, {});
     const firstState = payload(await f.manager.handle(request(first.presentation, 'watermark')));
+    expect(firstState).toMatchObject({ reviewRevision: 0 });
+    expect(firstState).not.toHaveProperty('annotationRevision');
     const offer = await f.manager.open({pdfPath:f.pdfPath});if(offer.status!=='busy')throw Error('Expected choice');
     const fork=await f.manager.choose({action:'choose',recoveryToken:offer.recoveryToken,choice:'fork',operationId:randomUUID()});if(fork.status!=='provisional')throw Error('Expected fork');
     const second=active(await f.manager.resume(fork.grant,randomUUID(),'activate'));
@@ -511,7 +513,7 @@ describe("app-owned extension presentations", () => {
     await opened(f.manager, { pdfPath: f.pdfPath });
     const busy = await f.manager.open({ pdfPath: f.pdfPath });
     if (busy.status !== "busy") throw Error("Expected busy");
-    const reopen = vi.spyOn(f.broker, "openReview");
+    const reopen = vi.spyOn(f.broker, "openDocument");
     f.advance(95_000);
     expect(await f.manager.dispatch({ action: "recheck", recoveryToken: busy.recoveryToken })).toEqual({ status: "unavailable" });
     expect(await f.manager.choose({ action: "choose", recoveryToken: busy.recoveryToken, choice: "fork", operationId: randomUUID() })).toEqual({ status: "unavailable" });

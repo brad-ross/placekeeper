@@ -1,7 +1,7 @@
 import { ensurePrivateDirectory, establishPrivateDirectory } from "../src/platform/private-storage.js";
 import { createHash, randomUUID } from "node:crypto";
-import { createReviewState } from "../../../packages/core/src/review-model.js";
-import { DraftSnapshotStore, reviewStateDigest, type RecoverableDraftV3 } from "../src/recovery/draft-snapshot.js";
+import { createDocumentState } from "../../../packages/core/src/document-model.js";
+import { DraftSnapshotStore, documentStateDigest, type RecoverableDraftV3 } from "../src/recovery/draft-snapshot.js";
 import { createServer } from "node:net";
 import { lstat, mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -22,7 +22,7 @@ async function fixture() {
   await writeFile(join(resources, "runtime-manifest.json"), JSON.stringify({ daemonIdentity: "a".repeat(64), installArtifactIdentity: "b".repeat(64), recovery: { readableDraftSchemaVersions: [1, 2, 3], writtenDraftSchemaVersion: 3 } }));
   return { resources, backup: join(root, "backup"), receipt: join(root, "receipt"), paths: { appSupportRoot: root, recoveryRoot, socketPath: join(root, "control.sock"), webAssetsRoot: join(root, "web") } };
 }
-const status = (reviewPresence = 0) => ({ upgradePreparationVersion: 1 as const, protocolVersion: 1, daemonIdentity: "c".repeat(64), lifecycle: "accepting", activity: { reviewPresence, codexTasks: 0, transientWork: 0 } });
+const status = (documentPresence = 0) => ({ upgradePreparationVersion: 1 as const, protocolVersion: 1, daemonIdentity: "c".repeat(64), lifecycle: "accepting", activity: { documentPresence: documentPresence, codexTasks: 0, transientWork: 0 } });
 beforeEach(() => vi.clearAllMocks());
 describe("explicit candidate service switching and rollback", () => {
   it("does not retire an incumbent with a live review", async () => {
@@ -153,7 +153,7 @@ it("keeps the installed service when the user refuses preparation", async () => 
 it("explains the actual manual legacy save, close and end-task actions", async () => {
   const { upgradePreparationVersion: _version, ...legacy } = status(1);
   mocks.inspect.mockResolvedValue({ kind: "incompatible", status: legacy });
-  await expect(switchDesktopService(await fixture())).rejects.toThrow(/discard unfinished drafts.*save the PDFs.*close review.*end bound Codex tasks.*Quit the current app manually/u);
+  await expect(switchDesktopService(await fixture())).rejects.toThrow(/discard unfinished drafts.*save the PDFs.*close document.*end bound Codex tasks.*Quit the current app manually/u);
   expect(mocks.request).not.toHaveBeenCalled();
 });
 it("refuses replacement if drain finishes a recovery format the candidate cannot read", async () => {
@@ -173,10 +173,10 @@ it("refuses replacement if drain finishes a recovery format the candidate cannot
 
 
 function protectedSnapshot(pending: boolean, revision = 1): RecoverableDraftV3 {
-  const initial = createReviewState({sessionId:randomUUID(),source:{fileId:"file_legacy_guard",digest:"d".repeat(64),byteLength:10}});
+  const initial = createDocumentState({sessionId:randomUUID(),source:{fileId:"file_legacy_guard",digest:"d".repeat(64),byteLength:10}});
   const now = new Date().toISOString();
   const state = {...initial,revision,pendingDrafts:pending ? [{id:randomUUID(),ownerViewId:"view_legacy_guard",baseGeneration:1,revision:0,kind:"pageNote" as const,pageIndex:0,text:"unfinished protected input",anchor:{kind:"page" as const,pageIndex:0,rect:{x:1,y:1,width:2,height:2}},disposition:{kind:"resolved" as const,generation:1},status:"protected" as const,createdAt:now,updatedAt:now}] : []};
-  return {schemaVersion:3,source:{disposition:"local",canonicalSourcePath:"/fixture/paper.pdf",sourceSnapshotPath:"/fixture/source.pdf",displayName:"paper.pdf"},state,acknowledgedAt:now,destination:{phase:"none",generation:0},sync:{phase:"clean",desiredRevision:revision,savedRevision:revision,desiredDigest:reviewStateDigest(state),savedDigest:reviewStateDigest(state)}};
+  return {schemaVersion:3,source:{disposition:"local",canonicalSourcePath:"/fixture/paper.pdf",sourceSnapshotPath:"/fixture/source.pdf",displayName:"paper.pdf"},state,acknowledgedAt:now,destination:{phase:"none",generation:0},sync:{phase:"clean",desiredRevision:revision,savedRevision:revision,desiredDigest:documentStateDigest(state),savedDigest:documentStateDigest(state)}};
 }
 function idleLegacyTransport() {
   const { upgradePreparationVersion: _version, ...legacy } = status();

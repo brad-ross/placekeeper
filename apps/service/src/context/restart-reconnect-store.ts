@@ -19,6 +19,22 @@ interface RestartReconnectRecord {
   readonly schemaVersion: 1;
   readonly ticketId: string;
   readonly taskSessionHash: string;
+  readonly documentSessionHash: string;
+  readonly browserTokenHash: string;
+  readonly sourcePathHash: string;
+  readonly sourceDigest: string;
+  readonly expiresAtMs: number;
+}
+
+/** On-disk record. Its keys are frozen: tickets written by earlier releases
+ * must stay readable, so `documentSessionHash` is stored as
+ * `reviewSessionHash`. `parse` and `serialize` are the only translation
+ * points. */
+interface StoredRestartReconnectRecord {
+  readonly schemaVersion: 1;
+  readonly native?: NativeRestartScope;
+  readonly ticketId: string;
+  readonly taskSessionHash: string;
   readonly reviewSessionHash: string;
   readonly browserTokenHash: string;
   readonly sourcePathHash: string;
@@ -28,11 +44,11 @@ interface RestartReconnectRecord {
 
 interface RestartReconnectEnvelope {
   readonly checksum: string;
-  readonly payload: RestartReconnectRecord;
+  readonly payload: StoredRestartReconnectRecord;
 }
 
 export interface MatchedRestartReconnectTicket {
-  readonly reviewSessionHash: string;
+  readonly documentSessionHash: string;
   readonly native?: NativeRestartScope;
   readonly ticketId: string;
   readonly taskSessionHash: string;
@@ -58,32 +74,43 @@ function parse(contents: string): RestartReconnectRecord | undefined {
   try {
     const envelope = JSON.parse(contents) as RestartReconnectEnvelope;
     const payload = JSON.stringify(envelope.payload);
-    const record = envelope.payload;
-    return envelope.checksum === digestSecretHex(payload) &&
-      record.schemaVersion === 1 &&
-      (record.native === undefined || (
-        typeof record.native.runtimeId === "string" &&
-        typeof record.native.attemptId === "string" &&
-        Number.isSafeInteger(record.native.documentGeneration) &&
-        record.native.documentGeneration >= 1
+    const stored = envelope.payload;
+    if (!(envelope.checksum === digestSecretHex(payload) &&
+      stored.schemaVersion === 1 &&
+      (stored.native === undefined || (
+        typeof stored.native.runtimeId === "string" &&
+        typeof stored.native.attemptId === "string" &&
+        Number.isSafeInteger(stored.native.documentGeneration) &&
+        stored.native.documentGeneration >= 1
       )) &&
-      isTicketId(record.ticketId) &&
-      isDigest(record.taskSessionHash) &&
-      isDigest(record.reviewSessionHash) &&
-      isDigest(record.browserTokenHash) &&
-      isDigest(record.sourcePathHash) &&
-      isDigest(record.sourceDigest) &&
-      Number.isSafeInteger(record.expiresAtMs) && record.expiresAtMs > 0
-      ? record
-      : undefined;
+      isTicketId(stored.ticketId) &&
+      isDigest(stored.taskSessionHash) &&
+      isDigest(stored.reviewSessionHash) &&
+      isDigest(stored.browserTokenHash) &&
+      isDigest(stored.sourcePathHash) &&
+      isDigest(stored.sourceDigest) &&
+      Number.isSafeInteger(stored.expiresAtMs) && stored.expiresAtMs > 0)) return undefined;
+    const { reviewSessionHash, ...rest } = stored;
+    return { ...rest, documentSessionHash: reviewSessionHash };
   } catch {
     return undefined;
   }
 }
 
 function serialize(record: RestartReconnectRecord): string {
-  const payload = JSON.stringify(record);
-  return JSON.stringify({ checksum: digestSecretHex(payload), payload: record } satisfies RestartReconnectEnvelope);
+  const stored: StoredRestartReconnectRecord = {
+    schemaVersion: record.schemaVersion,
+    ...(record.native === undefined ? {} : { native: record.native }),
+    ticketId: record.ticketId,
+    taskSessionHash: record.taskSessionHash,
+    reviewSessionHash: record.documentSessionHash,
+    browserTokenHash: record.browserTokenHash,
+    sourcePathHash: record.sourcePathHash,
+    sourceDigest: record.sourceDigest,
+    expiresAtMs: record.expiresAtMs,
+  };
+  const payload = JSON.stringify(stored);
+  return JSON.stringify({ checksum: digestSecretHex(payload), payload: stored } satisfies RestartReconnectEnvelope);
 }
 
 export class RestartReconnectStore {
@@ -127,7 +154,7 @@ export class RestartReconnectStore {
 
   async issue(input: {
     readonly taskSessionId: string;
-    readonly reviewSessionId: string;
+    readonly documentSessionId: string;
     readonly browserToken: string;
     readonly canonicalSourcePath: string;
     readonly sourceDigest: string;
@@ -135,7 +162,7 @@ export class RestartReconnectStore {
   }): Promise<void> {
     if (
       input.taskSessionId.length === 0 ||
-      input.reviewSessionId.length === 0 ||
+      input.documentSessionId.length === 0 ||
       input.browserToken.length === 0 ||
       input.canonicalSourcePath.length === 0
     ) {
@@ -151,7 +178,7 @@ export class RestartReconnectStore {
         }),
         ticketId: randomUUID(),
         taskSessionHash: digestSecretHex(input.taskSessionId),
-        reviewSessionHash: digestSecretHex(input.reviewSessionId),
+        documentSessionHash: digestSecretHex(input.documentSessionId),
         browserTokenHash: digestSecretHex(input.browserToken),
         sourcePathHash: digestSecretHex(input.canonicalSourcePath),
         sourceDigest: input.sourceDigest,
@@ -163,7 +190,7 @@ export class RestartReconnectStore {
       const current = await this.#read(record.browserTokenHash);
       const unchangedAndFresh = JSON.stringify(current?.native) === JSON.stringify(record.native) &&
         current?.taskSessionHash === record.taskSessionHash &&
-        current.reviewSessionHash === record.reviewSessionHash &&
+        current.documentSessionHash === record.documentSessionHash &&
         current.sourcePathHash === record.sourcePathHash &&
         current.sourceDigest === record.sourceDigest &&
         current.expiresAtMs > now + this.#ttlMs / 2;
@@ -263,8 +290,8 @@ export class RestartReconnectStore {
     await this.#removeMatching("taskSessionHash", digestSecretHex(taskSessionId));
   }
 
-  async revokeSession(reviewSessionId: string): Promise<void> {
-    await this.#removeMatching("reviewSessionHash", digestSecretHex(reviewSessionId));
+  async revokeSession(documentSessionId: string): Promise<void> {
+    await this.#removeMatching("documentSessionHash", digestSecretHex(documentSessionId));
   }
 
   #nowMs(): number {
@@ -306,7 +333,7 @@ export class RestartReconnectStore {
   }
 
   async #removeMatching(
-    field: "taskSessionHash" | "reviewSessionHash",
+    field: "taskSessionHash" | "documentSessionHash",
     digest: string,
   ): Promise<void> {
     await this.#serialize(async () => {

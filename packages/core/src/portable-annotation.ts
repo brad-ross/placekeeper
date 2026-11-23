@@ -1,17 +1,17 @@
-import type { ReviewAnnotation } from "./pdf-writer.js";
+import type { PdfWriterAnnotation } from "./pdf-writer.js";
 import type {
-  ReviewItem,
-  ReviewItemKind,
-  ReviewSourceIdentity,
-  ReviewState,
-  ReviewWorkflowMode,
-} from "./review-model.js";
-import { canonicalizeReviewItem, DEFAULT_ANNOTATION_NAME } from "./review-model.js";
+  Annotation,
+  AnnotationKind,
+  DocumentSourceIdentity,
+  DocumentState,
+  DocumentWorkflowMode,
+} from "./document-model.js";
+import { canonicalizeAnnotation, DEFAULT_ANNOTATION_NAME } from "./document-model.js";
 import {
-  assertReviewItem,
-  InvalidReviewCommandError,
-  MAX_REVIEW_SELECTION_SEGMENTS,
-} from "./review-item-validation.js";
+  assertAnnotation,
+  InvalidDocumentCommandError,
+  MAX_DOCUMENT_SELECTION_SEGMENTS,
+} from "./annotation-validation.js";
 export {
   assertPortableAnnotationGroupWritable,
   PORTABLE_ANNOTATION_MAX_BYTES,
@@ -29,7 +29,7 @@ import { hasSafePortableAnnotationShape } from './portable-annotation-shape.js';
 
 export const PORTABLE_ANNOTATION_AUTHOR = DEFAULT_ANNOTATION_NAME;
 const PORTABLE_ANNOTATION_OWNER = "placekeeper";
-const KINDS = new Set<ReviewItemKind>([
+const KINDS = new Set<AnnotationKind>([
   "replace",
   "delete",
   "insert",
@@ -51,7 +51,7 @@ interface PortableAnnotationEnvelope {
   readonly schemaVersion: 2;
   readonly owner: typeof PORTABLE_ANNOTATION_OWNER;
   readonly itemId: string;
-  readonly item: ReviewItem;
+  readonly item: Annotation;
   readonly projection: PortableProjection;
 }
 
@@ -83,7 +83,7 @@ export type PortableAnnotationInspection =
   | { readonly status: "invalid"; readonly reason: string }
   | {
       readonly status: "owned";
-      readonly item: ReviewItem;
+      readonly item: Annotation;
     };
 
 export interface PortableAnnotationCandidate {
@@ -96,11 +96,11 @@ export type PortableAnnotationCollectionInspection =
   | { readonly status: "invalid"; readonly reason: string }
   | {
       readonly status: "owned";
-      readonly items: readonly ReviewItem[];
+      readonly items: readonly Annotation[];
       readonly ownedIndexes: readonly number[];
       readonly ownedCandidates: readonly {
         readonly candidateIndex: number;
-        readonly item: ReviewItem;
+        readonly item: Annotation;
       }[];
     };
 
@@ -130,7 +130,7 @@ function isRect(value: unknown): value is EngineRect {
   );
 }
 
-function isPdfRect(value: unknown): value is ReviewAnnotation["rect"] {
+function isPdfRect(value: unknown): value is PdfWriterAnnotation["rect"] {
   return (
     isRecord(value) &&
     isFiniteNumber(value.x) &&
@@ -157,13 +157,13 @@ function canonicalJson(value: unknown): string {
   return JSON.stringify(canonical(value));
 }
 
-function isReviewItem(value: unknown): value is ReviewItem {
+function isAnnotation(value: unknown): value is Annotation {
   if (!isRecord(value)) return false;
   const shallowlyValid = (
     typeof value.id === "string" &&
     value.id.length > 0 &&
     value.id.length <= 128 &&
-    KINDS.has(value.kind as ReviewItemKind) &&
+    KINDS.has(value.kind as AnnotationKind) &&
     Number.isSafeInteger(value.pageIndex) &&
     (value.pageIndex as number) >= 0 &&
     isIsoDate(value.createdAt) &&
@@ -172,8 +172,8 @@ function isReviewItem(value: unknown): value is ReviewItem {
   );
   if (!shallowlyValid) return false;
   try {
-    assertReviewItem(value as unknown as ReviewItem, {
-      maxSelectionSegments: MAX_REVIEW_SELECTION_SEGMENTS,
+    assertAnnotation(value as unknown as Annotation, {
+      maxSelectionSegments: MAX_DOCUMENT_SELECTION_SEGMENTS,
     });
     return true;
   } catch {
@@ -181,7 +181,7 @@ function isReviewItem(value: unknown): value is ReviewItem {
   }
 }
 
-function subtypeFor(kind: ReviewItemKind): string {
+function subtypeFor(kind: AnnotationKind): string {
   switch (kind) {
     case "pdfAnnotation": return "unknown";
     case "replace":
@@ -195,14 +195,14 @@ function subtypeFor(kind: ReviewItemKind): string {
   }
 }
 
-function engineRect(rect: ReviewAnnotation["rect"]): EngineRect {
+function engineRect(rect: PdfWriterAnnotation["rect"]): EngineRect {
   return {
     origin: { x: rect.x, y: rect.y },
     size: { width: rect.width, height: rect.height },
   };
 }
 
-function projectionFor(item: ReviewItem, annotation: ReviewAnnotation): PortableProjection {
+function projectionFor(item: Annotation, annotation: PdfWriterAnnotation): PortableProjection {
   return {
     id: annotation.id,
     pageIndex: annotation.pageIndex,
@@ -231,7 +231,7 @@ function rectMatches(
 }
 
 function projectionMatches(
-  item: ReviewItem,
+  item: Annotation,
   expected: PortableProjection,
   visible: VisiblePortableAnnotation,
 ): boolean {
@@ -269,7 +269,7 @@ function payloadRect(value: unknown): EngineRect | undefined {
   };
 }
 
-function itemMatchesProjection(item: ReviewItem, projection: PortableProjection): boolean {
+function itemMatchesProjection(item: Annotation, projection: PortableProjection): boolean {
   const expectedRect = payloadRect(item.payload.rect) ?? payloadRect(item.payload.position);
   if (expectedRect === undefined) return false;
   const expectedContents = item.kind === "replace" || item.kind === "insert"
@@ -382,18 +382,18 @@ function visibleMatchesGroupedProjection(
 
 function reconstructGroupedItem(
   children: readonly GroupedPortableAnnotationEnvelope[],
-): ReviewItem | undefined {
+): Annotation | undefined {
   const first = children[0]?.projection;
   const last = children.at(-1)?.projection;
   const portableItem = children[0]?.item;
   if (first === undefined || last === undefined || portableItem === undefined) return undefined;
-  const copyRect = (rect: ReviewAnnotation["rect"]) => ({
+  const copyRect = (rect: PdfWriterAnnotation["rect"]) => ({
     x: rect.x,
     y: rect.y,
     width: rect.width,
     height: rect.height,
   });
-  const item: ReviewItem = {
+  const item: Annotation = {
     ...portableItem,
     pageIndex: first.pageIndex,
     payload: {
@@ -413,21 +413,21 @@ function reconstructGroupedItem(
     },
   };
   try {
-    assertReviewItem(item, { maxSelectionSegments: MAX_REVIEW_SELECTION_SEGMENTS });
+    assertAnnotation(item, { maxSelectionSegments: MAX_DOCUMENT_SELECTION_SEGMENTS });
     return item;
   } catch {
     return undefined;
   }
 }
 
-function withImportedAuthor(item: ReviewItem, author: string): ReviewItem {
+function withImportedAuthor(item: Annotation, author: string): Annotation {
   const { importedAnnotationAuthor: _untrusted, ...clean } = item;
   return author === PORTABLE_ANNOTATION_AUTHOR ? clean : { ...clean, importedAnnotationAuthor: author };
 }
 
 export function createPortableAnnotationCustom(
-  item: ReviewItem,
-  annotation: ReviewAnnotation,
+  item: Annotation,
+  annotation: PdfWriterAnnotation,
 ): PortableAnnotationCustom {
   const {
     importedAnnotationAuthor: _importedAuthor,
@@ -446,10 +446,10 @@ export function createPortableAnnotationCustom(
   };
 }
 
-export function assertPortableAnnotationWritable(annotation: ReviewAnnotation): void {
+export function assertPortableAnnotationWritable(annotation: PdfWriterAnnotation): void {
   if (annotation.kind === "pdfAnnotation") return;
   if (!hasSafePortableAnnotationShape(annotation.custom)) {
-    throw new InvalidReviewCommandError(
+    throw new InvalidDocumentCommandError(
       PORTABLE_ANNOTATION_UNSAFE_SHAPE_MESSAGE,
     );
   }
@@ -457,7 +457,7 @@ export function assertPortableAnnotationWritable(annotation: ReviewAnnotation): 
     new TextEncoder().encode(JSON.stringify(annotation.custom)).byteLength >
       PORTABLE_ANNOTATION_MAX_BYTES
   ) {
-    throw new InvalidReviewCommandError(
+    throw new InvalidDocumentCommandError(
       PORTABLE_ANNOTATION_TOO_LARGE_MESSAGE,
     );
   }
@@ -478,7 +478,7 @@ export function inspectPortableAnnotation(
   ) {
     return { status: "invalid", reason: "unsupported-schema" };
   }
-  if (!isReviewItem(envelope.item) || !isProjection(envelope.projection)) {
+  if (!isAnnotation(envelope.item) || !isProjection(envelope.projection)) {
     return { status: "invalid", reason: "invalid-payload" };
   }
   if (
@@ -500,7 +500,7 @@ export function inspectPortableAnnotation(
 }
 
 export function inspectProjectedPortableAnnotation(
-  annotation: ReviewAnnotation,
+  annotation: PdfWriterAnnotation,
 ): PortableAnnotationInspection {
   return inspectPortableAnnotation(annotation.custom, {
     id: annotation.id,
@@ -536,7 +536,7 @@ export function inspectPortableAnnotations(
     readonly envelope: GroupedPortableAnnotationEnvelope;
   }>>();
   const orderedEntries: Array<
-    | { readonly kind: "v2"; readonly item: ReviewItem; readonly candidateIndex: number }
+    | { readonly kind: "v2"; readonly item: Annotation; readonly candidateIndex: number }
     | { readonly kind: "v3"; readonly itemId: string }
   > = [];
   const seenGroupOrder = new Set<string>();
@@ -582,7 +582,7 @@ export function inspectPortableAnnotations(
     }
   }
 
-  const groupedItems = new Map<string, ReviewItem>();
+  const groupedItems = new Map<string, Annotation>();
   for (const [itemId, entries] of groups) {
     const children = entries
       .map(({ envelope }) => envelope)
@@ -656,7 +656,7 @@ export function inspectPortableAnnotations(
 }
 
 export function inspectProjectedPortableAnnotations(
-  annotations: readonly ReviewAnnotation[],
+  annotations: readonly PdfWriterAnnotation[],
 ): PortableAnnotationCollectionInspection {
   return inspectPortableAnnotations(annotations.map((annotation) => ({
     custom: annotation.custom,
@@ -716,14 +716,14 @@ export function decodePortableAnnotationJson(raw: string): PortableAnnotationIns
   }
 }
 
-export function createImportedReviewState(input: {
+export function createImportedDocumentState(input: {
   readonly sessionId: string;
-  readonly source: ReviewSourceIdentity;
+  readonly source: DocumentSourceIdentity;
   readonly sourceRootId?: string;
-  readonly items: readonly ReviewItem[];
-  readonly workflowMode?: ReviewWorkflowMode;
+  readonly items: readonly Annotation[];
+  readonly workflowMode?: DocumentWorkflowMode;
   readonly documentGeneration?: number;
-}): ReviewState {
+}): DocumentState {
   // Only validated owned imports carry author evidence. Native PDF annotations
   // retain their own authors and cannot establish a document-wide name.
   const ownedAuthors = new Set(input.items
@@ -741,7 +741,7 @@ export function createImportedReviewState(input: {
     revision: 0,
     lifecycle: "active",
     items: mode === "generated-output"
-      ? input.items.map((item) => canonicalizeReviewItem(item, {
+      ? input.items.map((item) => canonicalizeAnnotation(item, {
           ownerViewId: item.reconciliation?.ownerViewId ?? "portable-import",
           baseGeneration: item.reconciliation?.baseGeneration ?? documentGeneration,
         }))

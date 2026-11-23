@@ -1,8 +1,8 @@
 import { expect, it } from 'vitest';
 import { LiveReaderTools } from '../src/live-reader-tools.js';
-import type { ReviewAgentActions } from '../../web/src/host/review-agent-bridge.js';
+import type { DocumentAgentActions } from '../../web/src/host/document-agent-bridge.js';
 import type { DocumentModelContext } from '../src/live-reader-tools.js';
-const snapshot = { documentGeneration: 4, reviewRevision: 2, title: 'PDF', source: { fileId: 'file', digest: 'digest' }, page: 1, pageCount: 3, selection: null, annotations: [] };
+const snapshot = { documentGeneration: 4, annotationRevision: 2, title: 'PDF', source: { fileId: 'file', digest: 'digest' }, page: 1, pageCount: 3, selection: null, annotations: [] };
 it('registers tools when the host has no unregister method', () => {
   let attempts = 0;
   const bridge = new LiveReaderTools({ registerTool: () => { attempts++; } } as unknown as DocumentModelContext, { ensureVisible: async () => true, available: () => true });
@@ -135,7 +135,7 @@ function fixture() {
   const bridge = new LiveReaderTools({ registerTool: tool => { tools.set(tool.name, tool); }, unregisterTool: name => { tools.delete(name); } }, {
     ensureVisible: async () => { visible = true; return true; }, available: () => visible,
   });
-  const actions: ReviewAgentActions = { snapshot: () => snapshot, search: async () => { throw Error('interrupted'); }, navigate: async () => { moved = true; return new Promise(resolve => { finish = resolve; }); } };
+  const actions: DocumentAgentActions = { snapshot: () => snapshot, search: async () => { throw Error('interrupted'); }, navigate: async () => { moved = true; return new Promise(resolve => { finish = resolve; }); } };
   const detach = bridge.attach(actions);
   return { tools, bridge, detach, finish: (v: boolean) => finish(v), moved: () => moved };
 }

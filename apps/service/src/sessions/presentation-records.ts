@@ -145,7 +145,7 @@ export class PresentationRecords {
   promoteReconnect(capabilityHash: string, pending: PendingRestartReconnect): void {
     for (const [credentialHash, scope] of this.#credentialScopes) {
       if (
-        scope.sessionId === pending.reviewSessionId &&
+        scope.sessionId === pending.documentSessionId &&
         scope.documentGeneration === pending.documentGeneration &&
         scope.browserCapabilityHash === capabilityHash
       ) {
@@ -206,7 +206,7 @@ export class PresentationRecords {
     }
 
     for (const [proofHash, metadata] of this.#reconnectByBindProofHash) {
-      if (metadata.reviewSessionId === sessionId) this.#reconnectByBindProofHash.delete(proofHash);
+      if (metadata.documentSessionId === sessionId) this.#reconnectByBindProofHash.delete(proofHash);
     }
 
   }
@@ -232,11 +232,11 @@ export class PresentationRecords {
     }
 
     for (const [capabilityHash, binding] of this.#reconnectBindingsByCapabilityHash) {
-      if (binding.reviewSessionId === sessionId) this.#reconnectBindingsByCapabilityHash.delete(capabilityHash);
+      if (binding.documentSessionId === sessionId) this.#reconnectBindingsByCapabilityHash.delete(capabilityHash);
     }
 
     for (const [capabilityHash, pending] of this.#pendingRestartReconnects) {
-      if (pending.reviewSessionId === sessionId) {
+      if (pending.documentSessionId === sessionId) {
         this.notifyRestartReconnectExchange(capabilityHash);
         this.#pendingRestartReconnects.delete(capabilityHash);
       }
@@ -259,7 +259,7 @@ export class PresentationRecords {
 
   #isAuthenticatedRestartReconnect(capabilityHash: string, pending: PendingRestartReconnect): boolean {
     return [...this.#credentialScopes.values()].some((scope) =>
-      scope.sessionId === pending.reviewSessionId &&
+      scope.sessionId === pending.documentSessionId &&
       scope.documentGeneration === pending.documentGeneration &&
       scope.browserCapabilityHash === capabilityHash
     );

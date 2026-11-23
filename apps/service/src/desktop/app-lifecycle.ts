@@ -1,4 +1,4 @@
-import type { UpgradeReviewParticipants } from "../host/upgrade-review-participants.js";
+import type { UpgradeDocumentParticipants } from "../host/upgrade-document-participants.js";
 import type { EditorNavigation } from "../synctex/editor-navigation.js";
 import {
   parseNativeAppControlMessage,
@@ -26,7 +26,7 @@ interface AppRecord {
 }
 
 export class NativeAppLifecycleManager {
-  upgradeParticipants?: UpgradeReviewParticipants;
+  upgradeParticipants?: UpgradeDocumentParticipants;
   retireUpgradeMetadata(): void { for (const id of this.#apps.keys()) this.upgradeParticipants?.retireMetadata(`app:${id}`); }
   upgradeCovered(): boolean { return [...this.#apps.values()].every(app => !app.retiring && app.bootstrappingWindows === 0 && app.activeWindows === app.helpers.size && this.upgradeParticipants?.has(`app:${app.appInstanceId}`) && [...app.helpers].every(id => this.helperUpgradeCovered?.(id))); }
   helperUpgradeCovered?: (helperId: string) => boolean;
@@ -190,7 +190,7 @@ export class NativeAppLifecycleManager {
     });
     if (message.upgradePreparationVersion === 1) this.upgradeParticipants?.attach(`app:${message.appInstanceId}`, {
       revision: () => { const app = this.#apps.get(message.appInstanceId); if (!app) throw new Error('App detached'); return `${app.activeWindows}:${app.bootstrappingWindows}:${[...app.helpers].sort().join(',')}`; },
-      protect: async () => { const app = this.#apps.get(message.appInstanceId); if (!app || app.bootstrappingWindows !== 0) throw new Error('A review is still opening'); },
+      protect: async () => { const app = this.#apps.get(message.appInstanceId); if (!app || app.bootstrappingWindows !== 0) throw new Error('A document is still opening'); },
     });
     return this.#ack(message.appInstanceId);
   }

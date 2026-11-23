@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { startHttpServer, type LocalHttpServer } from "./server/http-server.js";
 import {
   SessionBroker,
-  type OpenReviewRequest,
+  type OpenDocumentRequest,
   type SessionLaunch,
 } from "./sessions/session-broker.js";
 
@@ -16,7 +16,7 @@ export interface RunningLocalService {
 }
 
 export async function startLocalService(
-  request: OpenReviewRequest,
+  request: OpenDocumentRequest,
   recoveryRoot = join(
     homedir(),
     "Library",
@@ -27,9 +27,9 @@ export async function startLocalService(
 ): Promise<RunningLocalService> {
   const broker = new SessionBroker({ recoveryRoot });
   await broker.initialize();
-  const opened = await broker.openReview(request);
+  const opened = await broker.openDocument(request);
   if (opened.kind === "recovery-offered") {
-    throw new Error("A recovery decision is required before launching the review");
+    throw new Error("A recovery decision is required before opening the document");
   }
   const server = await startHttpServer(broker);
   const launchUrl = `${server.origin}${opened.launch.launchPath}${opened.launch.fragment}`;

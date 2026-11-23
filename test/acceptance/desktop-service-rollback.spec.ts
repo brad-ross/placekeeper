@@ -75,7 +75,7 @@ test('packaged desktop to previous desktop to current desktop service rollback p
   const acceptedComment = 'Accepted review content must survive both service switches.';
   const protectedText = 'Acknowledged editor input must survive the retained reader.';
   try {
-    const opened = await seed.openReview({ pdfPath: source, surface: 'codex-native' });
+    const opened = await seed.openDocument({ pdfPath: source, surface: 'codex-native' });
     if (opened.kind !== 'opened') throw new Error('The disposable seed unexpectedly offered recovery');
     sessionId = opened.launch.sessionId;
     const timestamp = new Date().toISOString();
@@ -172,7 +172,7 @@ test('packaged desktop to previous desktop to current desktop service rollback p
         }
         const idleStatus = await requestControl(paths.socketPath, { kind: 'management', protocolVersion: MANAGEMENT_PROTOCOL_VERSION, operation: 'status' });
         evidence.push({ event: 'native-reader-detached', label, status: idleStatus });
-        expect(idleStatus).toMatchObject({ kind: 'management', operation: 'status', status: { activity: { reviewPresence: 0, codexTasks: 0, transientWork: 0 } } });
+        expect(idleStatus).toMatchObject({ kind: 'management', operation: 'status', status: { activity: { documentPresence: 0, codexTasks: 0, transientWork: 0 } } });
         const current = await readProtectedDraft(sessionDirectory);
         expect(current.state.revision).toBe(acknowledged.state.revision);
         expect(current.state.workflow.documentGeneration).toBe(acknowledged.state.workflow.documentGeneration);

@@ -15,7 +15,7 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CallToolRequestSchema, GetPromptRequestSchema, ListPromptsRequestSchema, ListToolsRequestSchema, ListResourcesRequestSchema, ReadResourceRequestSchema, type CallToolResult, type Tool } from "@modelcontextprotocol/sdk/types.js";
 import { getUiCapability, RESOURCE_MIME_TYPE } from "@modelcontextprotocol/ext-apps/server";
-import { CODEX_MAX_ENCODED_RESPONSE_BYTES, CODEX_REVIEW_UI_RESOURCE, parseCodexAppRequest, parseCodexDisplayRequest } from "../../../packages/core/src/codex-mcp-protocol.js";
+import { CODEX_DISPLAY_TOOL_NAME, CODEX_LEGACY_DISPLAY_TOOL_NAME, CODEX_MAX_ENCODED_RESPONSE_BYTES, CODEX_DOCUMENT_UI_RESOURCE, isCodexDisplayToolName, parseCodexAppRequest, parseCodexDisplayRequest } from "../../../packages/core/src/codex-mcp-protocol.js";
 import { createServiceClient, type NativeServiceClient } from "./service-client.js";
 import { callReaderBridgeTool, callReaderServerTool, ReaderBridge, readerBridgeTool, readerServerTools } from "./reader-bridge.js";
 import { READER_BRIDGE_TOOL } from "./reader-bridge-protocol.js";
@@ -23,8 +23,13 @@ import { isReaderToolName } from "./reader-tool-definitions.js";
 
 import { APP_TOOL, PENDING_META_KEY, RESPONSE_META_KEY, QUALIFICATION_META_KEY } from "./transport-contract.js";
 const unavailable = (): CallToolResult => ({ isError: true, content: [{ type: "text", text: "Placekeeper native integration is unavailable. Check that the installed app and plugin versions match, enable the plugin MCP server and hooks, reload Codex, then reopen the PDF." }] });
+function displayTool(name: string, description: string): Tool {
+  return { name, description, inputSchema: { type: "object", additionalProperties: false, required: ["handoff"], properties: { handoff: { type: "string", pattern: "^[A-Za-z0-9_-]{43}$" } } }, _meta: { ui: { resourceUri: CODEX_DOCUMENT_UI_RESOURCE, visibility: ["model"] } } };
+}
 export const nativeTools: Tool[] = [
-  { name: "display_review", description: "Open a PDF in Placekeeper.", inputSchema: { type: "object", additionalProperties: false, required: ["handoff"], properties: { handoff: { type: "string", pattern: "^[A-Za-z0-9_-]{43}$" } } }, _meta: { ui: { resourceUri: CODEX_REVIEW_UI_RESOURCE, visibility: ["model"] } } },
+  displayTool(CODEX_DISPLAY_TOOL_NAME, "Open a PDF in Placekeeper."),
+  // Deprecated alias: installed plugin skills and hooks older than this app call it by this name.
+  displayTool(CODEX_LEGACY_DISPLAY_TOOL_NAME, `Deprecated alias of ${CODEX_DISPLAY_TOOL_NAME}. Open a PDF in Placekeeper.`),
   { name: APP_TOOL, description: "Private native panel protocol. No independent document or task selection.", inputSchema: { type: "object", additionalProperties: false, required: ["request"], properties: { request: { type: "object" } } }, _meta: { ui: { visibility: ["app"] } } },
 ];
 export interface NativeQualificationDependencies {
@@ -37,7 +42,7 @@ export interface NativeQualificationDependencies {
 export async function callNativeTool(client: NativeServiceClient, name: string, args: unknown, dependencies: NativeQualificationDependencies = {}): Promise<CallToolResult> {
   const { qualification, controls, experiments, oldAttempt } = dependencies;
   try {
-    if (name === "display_review") {
+    if (isCodexDisplayToolName(name)) {
       const request = parseCodexDisplayRequest(args);
       if (request === undefined) return unavailable();
       const { receipt, pending } = await client.display(request);
@@ -78,7 +83,7 @@ export function createNativeServer(client: NativeServiceClient, shell: string, d
     const tool = displayName && ["open_pdf", "open_placekeeper", "open_pdf_file"].includes(original.name)
       ? { ...original, title: displayName } : original;
     const ui = tool._meta?.ui;
-    return typeof ui === "object" && ui !== null && "resourceUri" in ui && ui.resourceUri === CODEX_REVIEW_UI_RESOURCE
+    return typeof ui === "object" && ui !== null && "resourceUri" in ui && ui.resourceUri === CODEX_DOCUMENT_UI_RESOURCE
       ? { ...tool, _meta: { ...tool._meta, ui: { ...ui, resourceUri: shellUri } } }
       : tool;
   });
@@ -98,7 +103,7 @@ export function createNativeServer(client: NativeServiceClient, shell: string, d
   });
   server.setRequestHandler(ListResourcesRequestSchema, async () => ({ resources: [{ uri: shellUri, name: "Placekeeper review v1", mimeType: RESOURCE_MIME_TYPE }] }));
   server.setRequestHandler(ReadResourceRequestSchema, async ({ params }) => {
-    if (params.uri !== shellUri && params.uri !== CODEX_REVIEW_UI_RESOURCE) throw new Error("Unknown resource");
+    if (params.uri !== shellUri && params.uri !== CODEX_DOCUMENT_UI_RESOURCE) throw new Error("Unknown resource");
     return { contents: [{ uri: params.uri, mimeType: RESOURCE_MIME_TYPE, text: shell, _meta: { ui: { csp: { connectDomains: [], resourceDomains: [] }, prefersBorder: true, ...(claude ? { preferredDisplayMode: "fullscreen" } : {}) }, "openai/ui": { preferredDisplayMode: "fullscreen", availableDisplayModes: ["fullscreen", "inline"] } } }] };
   });
   if (bridge) server.onclose = () => bridge.dispose();

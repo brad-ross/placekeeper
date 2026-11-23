@@ -2,13 +2,13 @@ import type { PlacekeeperLinkLocation } from "../../../../packages/core/src/plac
 import type {
   ReadingLocationResolutionRequestV1,
   ReadingLocationResolutionV1,
-  ReviewExportFence,
-} from "../../../../packages/core/src/review-runtime-protocol.js";
-import type { ReviewCommand, ReviewStateView, SaveDestinationConfirmation } from "../../../../packages/core/src/review-model.js";
+  DocumentExportFence,
+} from "../../../../packages/core/src/document-runtime-protocol.js";
+import type { DocumentCommand, DocumentStateView, SaveDestinationConfirmation } from "../../../../packages/core/src/document-model.js";
 import type { SaveStatus } from "../../../../packages/core/src/save-status.js";
 import type { LiveContextBindingStatus } from "../../../../packages/core/src/live-context.js";
-import type { RejectedReviewCommand } from "../review/review-command-result.js";
-import type { ReviewInteractionTransport } from "../review/authoring-session.js";
+import type { RejectedDocumentCommand } from "../reader/document-command-result.js";
+import type { DocumentInteractionTransport } from "../reader/authoring-session.js";
 
 export interface ProductionSession {
   readonly sessionId: string;
@@ -56,10 +56,10 @@ export interface ProductionExportResult {
 }
 
 export type SaveDestinationResult = SaveStatus & {
-  readonly nameResult?: ReviewStateView | RejectedReviewCommand;
+  readonly nameResult?: DocumentStateView | RejectedDocumentCommand;
 };
 
-export interface ReviewInteractionAttachment {
+export interface DocumentInteractionAttachment {
   readonly sessionId: string;
   readonly attachmentId: string;
   readonly incarnationId: string;
@@ -68,20 +68,20 @@ export interface ReviewInteractionAttachment {
   readonly capabilities: readonly string[];
 }
 
-export interface ProductionSessionApi extends Partial<ReviewInteractionTransport> {
+export interface ProductionSessionApi extends Partial<DocumentInteractionTransport> {
   readonly capabilities?: {
     readonly localDocumentRefresh: boolean;
     readonly interactionLifecycleVersion?: 1;
-    readonly reviewedCopyExport?: boolean;
+    readonly annotatedCopyExport?: boolean;
   };
   subscribeInteractionReconnect?(
     listener: (identity: { readonly generation: number; readonly revision: number }) => Promise<void>,
   ): () => void;
   presence?(): () => void;
   command(
-    command: ReviewCommand,
-    attachment?: ReviewInteractionAttachment,
-  ): Promise<ReviewStateView | RejectedReviewCommand>;
+    command: DocumentCommand,
+    attachment?: DocumentInteractionAttachment,
+  ): Promise<DocumentStateView | RejectedDocumentCommand>;
   saveStatus(): Promise<SaveStatus>;
   saveProposal(): Promise<SaveCopyProposal>;
   chooseCopy(filename?: string, folderSelectionId?: string, confirmation?: SaveDestinationConfirmation): Promise<SaveDestinationResult>;
@@ -90,7 +90,7 @@ export interface ProductionSessionApi extends Partial<ReviewInteractionTransport
   retrySave(): Promise<SaveStatus>;
   locateSave(): Promise<SaveStatus>;
   resolveReadingLocation?(input: ReadingLocationResolutionRequestV1): Promise<ReadingLocationResolutionV1>;
-  exportReviewedCopy?(confirmPossiblyStale?: true, fence?: ReviewExportFence): Promise<ProductionExportResult>;
+  exportAnnotatedCopy?(confirmPossiblyStale?: true, fence?: DocumentExportFence): Promise<ProductionExportResult>;
   createLink?(location: PlacekeeperLinkLocation): Promise<string>;
   scope(signal?: AbortSignal): Promise<ProductionScope>;
 }

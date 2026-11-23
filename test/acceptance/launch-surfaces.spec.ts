@@ -67,6 +67,7 @@ test("VS Code manifest is desktop-local and exposes the supported LaTeX review c
     "placekeeper.viewPdf",
     "placekeeper.forwardSyncTex",
     "placekeeper.goToSource",
+    "placekeeper.exportAnnotatedDocument",
     "placekeeper.exportReviewedPdf",
     "placekeeper.configureLatexWorkshop",
     "placekeeper.restoreLatexWorkshop",
@@ -76,7 +77,7 @@ test("VS Code manifest is desktop-local and exposes the supported LaTeX review c
 });
 
 test("VS Code review loads the shared client directly without a localhost frame", async () => {
-  const panel = await readFile(resolve("apps/vscode/src/review-panel.ts"), "utf8");
+  const panel = await readFile(resolve("apps/vscode/src/document-panel.ts"), "utf8");
   const extension = await readFile(resolve("apps/vscode/src/extension.ts"), "utf8");
   const productionEntry = await readFile(resolve("apps/web/src/production-entry.tsx"), "utf8");
   expect(panel).toContain("app.startVscode");
@@ -115,6 +116,7 @@ test("only the Codex adapter requests the native Codex launch surface", async ()
   expect(skill).toContain(
     '`"$HOME/Applications/Placekeeper.app/Contents/MacOS/placekeeper" open-link --json --surface codex-native --confirmed',
   );
+  expect(skill).toContain("mcp__placekeeper__display_document");
   expect(skill).toContain("mcp__placekeeper__display_review");
   expect(skill).toContain("trusted display PostToolUse hook");
   expect(skill).toContain("rerun the same full installed-launcher command");

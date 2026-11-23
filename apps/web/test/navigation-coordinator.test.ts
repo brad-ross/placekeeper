@@ -24,15 +24,15 @@ import {
   type ReferenceReturnPresentationState,
   type OutlineTargetOrderLocation,
   type NavigationCoordinatorDependencies,
-} from '../src/review/navigation-coordinator.js';
-import type { ReviewLocationHistoryPort } from '../src/review/review-location-history.js';
-import type { AnnotationReaderIdentity } from '../src/review/annotation-reader.js';
+} from '../src/reader/navigation-coordinator.js';
+import type { DocumentLocationHistoryPort } from '../src/reader/document-location-history.js';
+import type { AnnotationReaderIdentity } from '../src/reader/annotation-reader.js';
 import {
   createReferenceNavigationState,
   reduceReferenceNavigation,
   type ReferenceNavigationAction,
   type ReferenceNavigationState,
-} from '../src/review/reference-navigation-state.js';
+} from '../src/reader/reference-navigation-state.js';
 
 const location = (pageIndex: number, y = 10, zoom = 1): PdfViewerLocation => ({
   pageIndex,
@@ -139,7 +139,7 @@ function locationHistory(initial: PlacekeeperLinkLocation = { kind: 'page', page
   let current = initial;
   let onPop: (direction: 'back' | 'forward' | 'unknown') => void = () => undefined;
   let snapshot = { canBack: false, canForward: false };
-  const history: ReviewLocationHistoryPort = {
+  const history: DocumentLocationHistoryPort = {
     start: vi.fn((listener) => { onPop = listener; }),
     read: vi.fn(() => current),
     replace: vi.fn((location) => { current = location; }),

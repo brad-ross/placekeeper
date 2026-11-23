@@ -43,7 +43,7 @@ it('keeps Codex opening out of service calls and rejects unavailable opening', a
   unavailable.dispose();
 });
 
-import { createReviewState } from '../../../packages/core/src/review-model.js';
+import { createDocumentState } from '../../../packages/core/src/document-model.js';
 import { VersionedWebviewBridge } from '../../vscode/src/webview-bridge.js';
 const panelId = 'panel_identifier_1234';
 const sessionId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
@@ -52,7 +52,7 @@ async function vscodeFixture(reply = true) {
   const opened = vi.fn(async () => {});
   const identity = { panelId, sessionId, generation: 1, revision: 0 };
   const bridge = new VersionedWebviewBridge({ identity, dispose() {}, invoke: async () => ({}), bootstrap: async () => ({
-    ...identity, state: createReviewState({ sessionId, source: { fileId: 'file', digest: 'a'.repeat(64), byteLength: 1 } }),
+    ...identity, state: createDocumentState({ sessionId, source: { fileId: 'file', digest: 'a'.repeat(64), byteLength: 1 } }),
     scope: { documentTitle: 'Paper.pdf' }, saveStatus: {}, resources: { document: 'https://resource/document', pdfiumWasm: 'https://resource/engine' },
   }) }, value => receive(value), opened);
   const sent: unknown[] = [];

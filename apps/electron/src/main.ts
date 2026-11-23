@@ -9,11 +9,11 @@ import { basename, isAbsolute, join, resolve } from 'node:path';
 import { defaultDaemonPaths, installedSmokeDaemonPaths, installedSmokeDaemonArgs, electronRuntimeThroughDaemon, electronAppControlThroughDaemon, resolveElectronLaunchThroughDaemon, preflightLinkThroughDaemon, openLinkThroughDaemon } from '../../service/src/host/service-daemon.js';
 import { resolvePackagedRuntime, type PackagedRuntimeManifest } from '../../service/src/platform/runtime-layout.js';
 import { encodeElectronHelperFrame } from '../../../packages/core/src/electron-helper-protocol.js';
-import { ReviewBridge, acceptsRenderer } from './review-bridge.js';
+import { DocumentBridge, acceptsRenderer } from './document-bridge.js';
 import { readNativeFrames } from '../../service/src/desktop/framed-input.js';
 import { parseElectronAppControlResponse } from '../../../packages/core/src/electron-app-control-protocol.js';
 import { assetResponse, documentResponse } from './resource-protocol.js';
-import { REVIEW_RUNTIME_PROTOCOL, REVIEW_RUNTIME_VERSION } from '../../../packages/core/src/review-runtime-protocol.js';
+import { DOCUMENT_RUNTIME_PROTOCOL, DOCUMENT_RUNTIME_VERSION } from '../../../packages/core/src/document-runtime-protocol.js';
 import { handleWindowsProtocolInstall } from './protocol-install.js';
 import { parseInstallerRequest, isolateInstallerProfile, runInstallerUI } from './installer-ui.js';
 import { parseStandaloneChooser, runStandaloneChooser } from './standalone-chooser.js';
@@ -33,7 +33,7 @@ import { parseStartupRequest, writeStartupReceipt, writeStartupLoadFailure, reta
 import { alignNativeWindowButtons, nativeTitlebarOptions, trackTitlebarHover } from './titlebar.js';
 import { parseElectronLocation } from '../../../packages/core/src/electron-shell-protocol.js';
 import { decodePlacekeeperLink } from '../../../packages/core/src/placekeeper-link.js';
-import { REVIEW_COMMAND_IDS } from '../../web/src/review/review-command-surface.js';
+import { DOCUMENT_COMMAND_IDS } from '../../web/src/reader/document-command-surface.js';
 import { macAppHasCompletedInstallation } from '../../../packaging/desktop/install-location.mjs';
 const nativeInstaller = parseInstallerRequest(process.argv.slice(1));
 const installerPreflight = process.argv[1] === '--placekeeper-installer-preflight';
@@ -101,12 +101,12 @@ async function start() {
     if (smokePaths !== undefined && smokePaths.isolatedTestRoot === undefined) {
         throw new Error('Electron installed smoke requires an explicit isolated test root');
     }
-    const timing = (stage: string, bridge?: ReviewBridge, details?: { readonly inputLength: number }) => { if (smokePaths) process.stdout.write(JSON.stringify({ type: 'electron-timing', stage, elapsedMs: performance.now() - startupTime, windowId: bridge?.windowId, attemptId: bridge?.attemptId, ...details }) + '\n'); };
+    const timing = (stage: string, bridge?: DocumentBridge, details?: { readonly inputLength: number }) => { if (smokePaths) process.stdout.write(JSON.stringify({ type: 'electron-timing', stage, elapsedMs: performance.now() - startupTime, windowId: bridge?.windowId, attemptId: bridge?.attemptId, ...details }) + '\n'); };
     timing('startup');
     const paths = { ...(smokePaths ?? defaultDaemonPaths()), webAssetsRoot: runtime.webAssetsRoot, packagedRuntime: { root, manifest, expectedIdentity } };
     const appInstanceId = randomUUID();
     const lifecycle = spawn(runtime.nodeExecutable, [runtime.serviceEntry, 'electron-lifecycle-control', ...(startupRequest ? ['--installed-startup-lease'] : []), ...installedSmokeDaemonArgs(paths)], { stdio: ['pipe', 'pipe', 'inherit'], env: { ...process.env, PLACEKEEPER_APP_INSTANCE_ID: appInstanceId, PLACEKEEPER_DAEMON_IDENTITY: manifest.daemonIdentity, PLACEKEEPER_INSTALL_ARTIFACT_IDENTITY: manifest.installArtifactIdentity, PLACEKEEPER_PDFIUM_WASM: join(runtime.webAssetsRoot, 'pdfium.wasm') } });
-    let handleUpgrade: ((status: import("../../../packages/core/src/upgrade-review-protocol.js").UpgradeReviewStatus) => void) | undefined;
+    let handleUpgrade: ((status: import("../../../packages/core/src/upgrade-document-protocol.js").UpgradeDocumentStatus) => void) | undefined;
     let lifecycleStopping = false;
     let lifecycleFailureShown = false;
     const activityAcknowledgements = new ActivityAcknowledgements();
@@ -149,7 +149,7 @@ async function start() {
     lifecycle.stdin.on('error', failLifecycle);
     app.on('will-quit', () => { lifecycleStopping = true; lifecycle.stdin.end(); });
     const registry = new DocumentWindowRegistry<BrowserWindow>();
-    type Entry = { window: BrowserWindow; bridge: ReviewBridge; commands?: WindowCommands; configureSource?: () => void; sourceEndpoint?: { token: string; resolve: (endpoint: string | null) => void }; intent: WindowIntent; closeToken?: string; focusedVisibility: FocusedVisibilityGate; permitClose: boolean; rendererReady: boolean; failureShown: boolean; retirement: AbortController; toolbarHeight: number; timer?: ReturnType<typeof setInterval> };
+    type Entry = { window: BrowserWindow; bridge: DocumentBridge; commands?: WindowCommands; configureSource?: () => void; sourceEndpoint?: { token: string; resolve: (endpoint: string | null) => void }; intent: WindowIntent; closeToken?: string; focusedVisibility: FocusedVisibilityGate; permitClose: boolean; rendererReady: boolean; failureShown: boolean; retirement: AbortController; toolbarHeight: number; timer?: ReturnType<typeof setInterval> };
     const entries = new Map<number, Entry>();
     const ownedWindows = new WindowActivityRegistry();
     const statePath = join(app.getPath('userData'), 'windows.json');
@@ -164,8 +164,8 @@ async function start() {
         if (retirementFailureShown) return;
         retirementFailureShown = true;
         quitState.active = false;
-        if (startupRequest) { console.error('Startup review detach failed', error); app.exit(2); return; }
-        dialog.showErrorBox('Review detach failed', String(error));
+        if (startupRequest) { console.error('Startup document detach failed', error); app.exit(2); return; }
+        dialog.showErrorBox('Document detach failed', String(error));
     };
     const finishQuit = () => {
         if (!quitState.active || entries.size > 0 || quitCompletion) return;
@@ -216,22 +216,22 @@ async function start() {
     const verify = (event: Electron.IpcMainInvokeEvent, identity?: unknown, identityRequest = false) => {
         const entry = entries.get(event.sender.id);
         const id = identity as { windowId?: unknown; attemptId?: unknown } | undefined;
-        if (!entry || event.senderFrame !== event.sender.mainFrame || entry.bridge.retired || (!identityRequest && !id) || (id && !acceptsRenderer({ frame: event.sender.mainFrame, windowId: entry.bridge.windowId, attemptId: entry.bridge.attemptId, retired: entry.bridge.retired }, event.senderFrame, id.windowId, id.attemptId))) throw new Error('Unauthorized review sender');
+        if (!entry || event.senderFrame !== event.sender.mainFrame || entry.bridge.retired || (!identityRequest && !id) || (id && !acceptsRenderer({ frame: event.sender.mainFrame, windowId: entry.bridge.windowId, attemptId: entry.bridge.attemptId, retired: entry.bridge.retired }, event.senderFrame, id.windowId, id.attemptId))) throw new Error('Unauthorized document sender');
         return entry;
     };
-    ipcMain.handle('review:identity', event => { const e = verify(event, undefined, true); return { windowId: e.bridge.windowId, attemptId: e.bridge.attemptId, presentation: e.intent.presentation }; });
-    ipcMain.handle('review:source-endpoint', (event, id, token, endpoint) => {
+    ipcMain.handle('document:identity', event => { const e = verify(event, undefined, true); return { windowId: e.bridge.windowId, attemptId: e.bridge.attemptId, presentation: e.intent.presentation }; });
+    ipcMain.handle('document:source-endpoint', (event, id, token, endpoint) => {
         const e = verify(event, id);
         if (!e.sourceEndpoint || token !== e.sourceEndpoint.token || (endpoint !== null && (typeof endpoint !== 'string' || endpoint.length > 4096 || endpoint.includes('\0')))) throw new Error('Invalid source endpoint');
         const pending = e.sourceEndpoint; delete e.sourceEndpoint; pending.resolve(endpoint);
     });
-    ipcMain.handle('review:open-external-url', async (event, id, value) => {
+    ipcMain.handle('document:open-external-url', async (event, id, value) => {
         const e = verify(event, id);
         const url = externalWebUrl(value);
         if (url === null || !e.bridge.active) throw new Error('Invalid web link request');
         await shell.openExternal(url);
     });
-    ipcMain.handle('review:create-link', async (event, id, value) => {
+    ipcMain.handle('document:create-link', async (event, id, value) => {
         const e = verify(event, id);
         const location = parseElectronLocation(value);
         if (!location || !e.bridge.active) throw new Error('Invalid native link request');
@@ -240,15 +240,15 @@ async function start() {
         decodePlacekeeperLink(result.link);
         return result.link;
     });
-    ipcMain.handle('review:focus-failed', (event, id, token) => { const e = verify(event, id); if (typeof token === 'string' && e.focusedVisibility.current(token)) { e.focusedVisibility.fail(token); dialog.showErrorBox('Location could not be opened', 'The requested PDF location could not be opened. Try the link again.'); } });
-    ipcMain.handle('review:request-close', (event, id) => { const e = verify(event, id); timing('renderer-close-request', e.bridge); e.window.close(); });
-    ipcMain.handle('review:shell-ready', (event, id) => { verify(event, id).rendererReady = true; });
-    ipcMain.handle('review:request', (event, id, value) => {
+    ipcMain.handle('document:focus-failed', (event, id, token) => { const e = verify(event, id); if (typeof token === 'string' && e.focusedVisibility.current(token)) { e.focusedVisibility.fail(token); dialog.showErrorBox('Location could not be opened', 'The requested PDF location could not be opened. Try the link again.'); } });
+    ipcMain.handle('document:request-close', (event, id) => { const e = verify(event, id); timing('renderer-close-request', e.bridge); e.window.close(); });
+    ipcMain.handle('document:shell-ready', (event, id) => { verify(event, id).rendererReady = true; });
+    ipcMain.handle('document:request', (event, id, value) => {
         const e = verify(event, id);
         if (smokePaths && value?.method === 'command' && value?.payload?.type === 'put-draft' && typeof value.payload.draft?.text === 'string') timing('draft-input-request', e.bridge, { inputLength: value.payload.draft.text.length });
         return e.bridge.request(value);
     });
-    ipcMain.handle('review:document-ready', async (event, id, generation) => { const e = verify(event, id); const b = e.bridge; if (generation !== b.validatedGeneration) throw new Error('Unvalidated document'); b.readyGeneration = generation; timing('document-ready', b);
+    ipcMain.handle('document:document-ready', async (event, id, generation) => { const e = verify(event, id); const b = e.bridge; if (generation !== b.validatedGeneration) throw new Error('Unvalidated document'); b.readyGeneration = generation; timing('document-ready', b);
         if (startupRequest) {
             if (!e.rendererReady || e.intent.sourcePath !== startupRequest.fixture) throw new Error('Installed renderer startup was not validated');
             await writeStartupReceipt(startupRequest, manifest.installArtifactIdentity);
@@ -258,26 +258,26 @@ async function start() {
             setImmediate(() => app.quit());
         }
     });
-    ipcMain.handle('review:visible', async (event, id, generation, token) => { const e = verify(event, id); if (!e.focusedVisibility.accepts(token, generation)) throw new Error('Stale activation evidence'); if (generation !== e.bridge.validatedGeneration || generation !== e.bridge.readyGeneration || !e.window.isVisible()) throw new Error('Unvalidated paint'); e.bridge.paintedGeneration = generation; await e.bridge.activate(); if (!e.focusedVisibility.commit(token, generation)) throw new Error('Superseded activation evidence'); ownedWindows.activated(e.bridge.helperId); timing('visible-active', e.bridge); activity(); menus(); });
-    ipcMain.handle('review:clipboard', (event, id, text) => { verify(event, id); if (typeof text !== 'string' || text.length > 4 * 1024 * 1024) throw new Error('Invalid clipboard text'); clipboard.writeText(text); });
-    ipcMain.handle('review:presentation', (event, id, presentation) => { const e = verify(event, id); const clean = parseWindowState([{ ...e.intent, presentation }])[0]; if (clean) { e.intent = clean; void persist(); } });
-    ipcMain.handle('review:toolbar-height', (event, id, height) => {
+    ipcMain.handle('document:visible', async (event, id, generation, token) => { const e = verify(event, id); if (!e.focusedVisibility.accepts(token, generation)) throw new Error('Stale activation evidence'); if (generation !== e.bridge.validatedGeneration || generation !== e.bridge.readyGeneration || !e.window.isVisible()) throw new Error('Unvalidated paint'); e.bridge.paintedGeneration = generation; await e.bridge.activate(); if (!e.focusedVisibility.commit(token, generation)) throw new Error('Superseded activation evidence'); ownedWindows.activated(e.bridge.helperId); timing('visible-active', e.bridge); activity(); menus(); });
+    ipcMain.handle('document:clipboard', (event, id, text) => { verify(event, id); if (typeof text !== 'string' || text.length > 4 * 1024 * 1024) throw new Error('Invalid clipboard text'); clipboard.writeText(text); });
+    ipcMain.handle('document:presentation', (event, id, presentation) => { const e = verify(event, id); const clean = parseWindowState([{ ...e.intent, presentation }])[0]; if (clean) { e.intent = clean; void persist(); } });
+    ipcMain.handle('document:toolbar-height', (event, id, height) => {
         const e = verify(event, id);
         if (typeof height !== 'number' || !Number.isFinite(height) || height < 32 || height > 160) throw new Error('Invalid toolbar height');
         e.toolbarHeight = height;
         alignNativeWindowButtons(e.window, height);
     });
-    ipcMain.handle('review:commands', (event, id, revision, snapshot) => {
+    ipcMain.handle('document:commands', (event, id, revision, snapshot) => {
         const e = verify(event, id);
-        if (!Number.isSafeInteger(revision) || revision <= (e.commands?.revision ?? 0) || !snapshot || !['review', 'editable', 'dialog'].includes(snapshot.focusContext) || !Array.isArray(snapshot.commands) || snapshot.commands.length !== REVIEW_COMMAND_IDS.length || snapshot.commands.some((c: { id: unknown; label: unknown; enabled: unknown }) => !REVIEW_COMMAND_IDS.includes(c.id as never) || typeof c.label !== 'string' || c.label.length > 200 || typeof c.enabled !== 'boolean')) throw new Error('Invalid commands');
+        if (!Number.isSafeInteger(revision) || revision <= (e.commands?.revision ?? 0) || !snapshot || !['reader', 'editable', 'dialog'].includes(snapshot.focusContext) || !Array.isArray(snapshot.commands) || snapshot.commands.length !== DOCUMENT_COMMAND_IDS.length || snapshot.commands.some((c: { id: unknown; label: unknown; enabled: unknown }) => !DOCUMENT_COMMAND_IDS.includes(c.id as never) || typeof c.label !== 'string' || c.label.length > 200 || typeof c.enabled !== 'boolean')) throw new Error('Invalid commands');
         e.commands = { revision, snapshot }; if (focused() === e) menus();
     });
-    ipcMain.handle('review:close-settled', async (event, id, token, error) => {
+    ipcMain.handle('document:close-settled', async (event, id, token, error) => {
         const e = verify(event, id);
         timing(error === undefined ? 'close-settled' : 'close-settlement-failed', e.bridge);
         if (typeof token !== 'string' || e.closeToken !== token) throw new Error('Stale close');
         delete e.closeToken;
-        try { if (error !== undefined) throw new Error(typeof error === 'string' ? error : 'Review input could not be protected'); await e.bridge.settle(); if (e.bridge.retired || entries.get(event.sender.id) !== e) throw new Error('Retired close attempt'); e.permitClose = true; timing('close-protected', e.bridge); e.window.destroy(); }
+        try { if (error !== undefined) throw new Error(typeof error === 'string' ? error : 'Document input could not be protected'); await e.bridge.settle(); if (e.bridge.retired || entries.get(event.sender.id) !== e) throw new Error('Retired close attempt'); e.permitClose = true; timing('close-protected', e.bridge); e.window.destroy(); }
         catch (failure) { quitState.active = false; dialog.showErrorBox('Document remains open', String(failure)); throw failure; }
     });
     const assetRoot = join(root, 'electron-web');
@@ -296,8 +296,8 @@ async function start() {
     isolated.setPermissionCheckHandler(() => false);
     isolated.protocol.handle('placekeeper-app', request => assetResponse(assetRoot, inventory, request.url));
     const retirement = new AbortController();
-    let bridge: ReviewBridge;
-    bridge = new ReviewBridge((message, signal) => electronRuntimeThroughDaemon(appInstanceId, bridge.helperId, message, signal === undefined ? retirement.signal : AbortSignal.any([signal, retirement.signal]), paths, startupRequest ? process.env.PLACEKEEPER_LIFECYCLE_LOCK_TOKEN : undefined), generation => `placekeeper-resource://document/${bridge.attemptId}/${generation}`);
+    let bridge: DocumentBridge;
+    bridge = new DocumentBridge((message, signal) => electronRuntimeThroughDaemon(appInstanceId, bridge.helperId, message, signal === undefined ? retirement.signal : AbortSignal.any([signal, retirement.signal]), paths, startupRequest ? process.env.PLACEKEEPER_LIFECYCLE_LOCK_TOKEN : undefined), generation => `placekeeper-resource://document/${bridge.attemptId}/${generation}`);
     const bounds = restored?.bounds ?? { width: 1200, height: 900 };
     const usable = screen.getAllDisplays().some(d => (bounds.x ?? d.workArea.x) < d.workArea.x + d.workArea.width && (bounds.y ?? d.workArea.y) < d.workArea.y + d.workArea.height && (bounds.x ?? d.workArea.x) + bounds.width > d.workArea.x && (bounds.y ?? d.workArea.y) + bounds.height > d.workArea.y);
     const window = new BrowserWindow({ ...(startupRequest ? { show:false } : {}), ...nativeTitlebarOptions(), ...(usable ? bounds : { width: bounds.width, height: bounds.height }), minWidth: 600, minHeight: 400, title: basename(sourcePath), backgroundColor: '#f7f7f7', webPreferences: { preload: join(__dirname, 'preload.cjs'), session: isolated, sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true } });
@@ -323,7 +323,7 @@ async function start() {
         if (entry.timer) clearInterval(entry.timer);
         ownedWindows.retiring(bridge.helperId); activity();
         retirementPromise = electronAppControlThroughDaemon({ protocolVersion: 1, type: 'detach-helper', appInstanceId, helperId: bridge.helperId }, undefined, paths).then(response => {
-            if (response.type !== 'ack') throw new Error(`Review detach refused: ${response.type}`);
+            if (response.type !== 'ack') throw new Error(`Document detach refused: ${response.type}`);
             ownedWindows.detached(bridge.helperId); return activity();
         });
         return retirementPromise;
@@ -343,7 +343,7 @@ async function start() {
         event.preventDefault();
         if (entry.closeToken) return;
         entry.closeToken = randomUUID();
-        contents.send('review:shell', { type: 'settle-close', token: entry.closeToken });
+        contents.send('document:shell', { type: 'settle-close', token: entry.closeToken });
     });
     window.once('closed', () => {
         // Track detach before removing the last entry: window-all-closed can
@@ -384,7 +384,7 @@ async function start() {
             if (profile.kind === 'neovim') {
                 const endpoint = await new Promise<string | null>(resolve => {
                     const token = randomUUID(); entry.sourceEndpoint = { token, resolve };
-                    contents.send('review:shell', { type: 'source-endpoint', token });
+                    contents.send('document:shell', { type: 'source-endpoint', token });
                 });
                 if (!endpoint || !current()) return false;
                 socket = endpoint;
@@ -399,7 +399,7 @@ async function start() {
         return sourceSetup;
     };
     entry.configureSource = () => { void bridge.onSourceSetup?.(); };
-    bridge.onInvalidation = event => { if (!bridge.retired && !contents.isDestroyed()) contents.send('review:event', event); };
+    bridge.onInvalidation = event => { if (!bridge.retired && !contents.isDestroyed()) contents.send('document:event', event); };
     bridge.onRefreshError = error => { if (!bridge.retired && !window.isDestroyed()) void fail(error); };
     contents.on('render-process-gone', (_event, details) => { void fail(details.reason); });
     bridge.chooseDestination = async method => { const result = await dialog.showOpenDialog(window, { properties: method === 'chooseFolder' ? ['openDirectory', 'createDirectory'] : ['openFile'], ...(method === 'locateSave' ? { filters: [{ name: 'PDF', extensions: ['pdf'] }] } : {}) }); return result.canceled ? null : result.filePaths[0] ?? null; };
@@ -415,7 +415,7 @@ async function start() {
         }, launchId, navigationHandle);
         let checking = false;
         entry.timer = setInterval(() => { if (!bridge.active || bridge.retired || checking) return; checking = true; void bridge.send({ type: 'keepalive' }).then(result => {
-            if (result.type === 'invalidation') contents.send('review:event', { protocol: REVIEW_RUNTIME_PROTOCOL, version: REVIEW_RUNTIME_VERSION, kind: 'event', event: 'session-invalidated', runtimeId: bridge.windowId, payload: { sessionId: bridge.projection!.sessionId, generation: result.generation, revision: result.revision, reason: result.reason === 'save' || result.reason === 'recovery' ? 'freshness' : result.reason } });
+            if (result.type === 'invalidation') contents.send('document:event', { protocol: DOCUMENT_RUNTIME_PROTOCOL, version: DOCUMENT_RUNTIME_VERSION, kind: 'event', event: 'session-invalidated', runtimeId: bridge.windowId, payload: { sessionId: bridge.projection!.sessionId, generation: result.generation, revision: result.revision, reason: result.reason === 'save' || result.reason === 'recovery' ? 'freshness' : result.reason } });
             else return bridge.pollNavigation();
         }).catch(error => { void fail(error); }).finally(() => { checking = false; }); }, 1000);
         if (restored?.maximized) window.maximize();
@@ -432,13 +432,13 @@ async function start() {
         const window = await registry.open(path, canonical => { created = true; return createWindow(canonical, restored, launchId, navigationHandle); }, window => { if (window.isMinimized()) window.restore(); window.show(); window.focus(); });
         if (navigationHandle) {
             const entry = entries.get(window.webContents.id);
-            if (!entry || entry.bridge.retired) throw new Error('Source navigation review is unavailable');
+            if (!entry || entry.bridge.retired) throw new Error('Source navigation document is unavailable');
             const response = await electronAppControlThroughDaemon({ protocolVersion: 1, type: 'bind-navigation', appInstanceId, helperId: entry.bridge.helperId, navigationHandle }, undefined, paths);
             if (response.type !== 'ack' || entry.bridge.retired) throw new Error('Source navigation is no longer available');
         }
         if (launchId && !created) {
             const entry = entries.get(window.webContents.id);
-            if (!entry || entry.bridge.retired) throw new Error('Task review is unavailable');
+            if (!entry || entry.bridge.retired) throw new Error('Task document is unavailable');
             const token = randomUUID();
             const previous = entry.focusedVisibility.begin(token);
             let attached = false;
@@ -450,7 +450,7 @@ async function start() {
                 entry.focusedVisibility.admitted(token, projection.generation);
                 const location = parseElectronLocation(projection.location);
                 if (projection.location !== undefined && !location) throw new Error('Invalid focused launch location');
-                entry.window.webContents.send('review:shell', { type: 'confirm-visible', token, generation: projection.generation, ...(location ? { location } : {}) });
+                entry.window.webContents.send('document:shell', { type: 'confirm-visible', token, generation: projection.generation, ...(location ? { location } : {}) });
             } catch (error) {
                 if (attached) entry.focusedVisibility.fail(token);
                 else entry.focusedVisibility.restore(token, previous);

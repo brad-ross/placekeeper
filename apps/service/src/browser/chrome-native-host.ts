@@ -15,7 +15,7 @@ import {
   ChromeHandoffSession,
   ChromeTransferQuota,
   ChromeTransferStore,
-  type ChromeBrowserReviewOpener,
+  type ChromeBrowserDocumentOpener,
   type SealedBrowserSourceHandle,
 } from "./chrome-handoff.js";
 import { validatePdfInSubprocess } from "./chrome-pdf-validator.js";
@@ -41,7 +41,7 @@ export interface ChromeNativeHostCommandOptions {
   readonly input?: Readable;
   readonly output?: Writable;
   readonly store?: ChromeTransferStore;
-  readonly opener?: ChromeBrowserReviewOpener;
+  readonly opener?: ChromeBrowserDocumentOpener;
   readonly quota?: ChromeTransferQuota;
   readonly maxDurationMs?: number;
   readonly runtimeBackend?: ChromeRuntimeBackend;
@@ -76,7 +76,7 @@ export function createDaemonChromeBrowserOpener(
   store: ChromeTransferStore,
   launch: ChromeBrowserLaunchClient = launchThroughDaemon,
   openBrowserSource: ChromeBrowserSourceLaunchClient = openChromeBrowserSourceThroughDaemon,
-): ChromeBrowserReviewOpener {
+): ChromeBrowserDocumentOpener {
   const browserDestination = async (response: LaunchResponse): Promise<string> => {
     if (
       !response.ok || response.kind === "recovery-offered" || !("url" in response) ||

@@ -4,9 +4,9 @@ import { codexPickerTimeouts, isCodexCapability, parseCodexAppRequest, parseCode
 export const EXTENSION_TOOL = 'extension_app';
 export const EXTENSION_META_KEY = 'placekeeper/extension';
 export type ExtensionPresentation = Extract<CodexAppResponse, { status: 'active' }>;
-export interface RecentReviewSummary { id: string; title: string; updatedAt: string; page?: number }
+export interface RecentDocumentSummary { id: string; title: string; updatedAt: string; page?: number }
 export type ExtensionResult =
-  | { status: 'recent-reviews'; items: RecentReviewSummary[] }
+  | { status: 'recent-reviews'; items: RecentDocumentSummary[] }
   | { status: 'position-saved' }
   | { status: 'provisional'; grant: string; hostFile?: HostResourceFile }
   | { status: 'active'; grant: string; presentation: ExtensionPresentation; contextPublished?: boolean }
@@ -55,12 +55,26 @@ export function parseExtensionRequest(v: unknown): ExtensionRequest | undefined 
   if (v.action === 'app' && keys('action','request')) {const request=parseCodexAppRequest(v.request);if(request?.authority==='presentation')return {action:'app',request};}
 }
 
+/**
+ * Status of the recent-documents listing. The daemon that answers can be older
+ * or newer than the Codex shell and MCP server that read it, so both spellings
+ * are accepted and normalized to the legacy one this build still sends.
+ *
+ * TODO(0.4.0): send "recent-documents" once no daemon or Codex shell older
+ * than 0.3.3 (the first release that accepts it) can still be talking.
+ */
+export const LEGACY_RECENT_DOCUMENTS_STATUS = 'recent-reviews' as const;
+export const RECENT_DOCUMENTS_STATUS = 'recent-documents' as const;
+function isRecentDocumentsStatus(value: unknown): boolean {
+  return value === LEGACY_RECENT_DOCUMENTS_STATUS || value === RECENT_DOCUMENTS_STATUS;
+}
+
 export function parseExtensionResult(value: unknown): ExtensionResult | undefined {
   const host = parseHostResourceResult(value); if (host) return host;
   if(!object(value)) return;
   if(value.status==='position-saved')return {status:'position-saved'};
-  if(value.status==='recent-reviews'&&Array.isArray(value.items)&&value.items.length<=50){
-    const items:RecentReviewSummary[]=[];
+  if(isRecentDocumentsStatus(value.status)&&Array.isArray(value.items)&&value.items.length<=50){
+    const items:RecentDocumentSummary[]=[];
     for(const item of value.items){if(!object(item)||typeof item.id!=='string'||!(/^[A-Za-z0-9_-]{32}$/).test(item.id)||typeof item.title!=='string'||item.title.length>180||typeof item.updatedAt!=='string'||!Number.isFinite(Date.parse(item.updatedAt))||item.page!==undefined&&(!Number.isSafeInteger(item.page)||(item.page as number)<1||(item.page as number)>1000000))return;
       items.push({id:item.id,title:item.title,updatedAt:item.updatedAt,...(item.page===undefined?{}:{page:item.page as number})});}
     return {status:'recent-reviews',items};

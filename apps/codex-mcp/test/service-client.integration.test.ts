@@ -34,11 +34,11 @@ describe("native SDK transport with canonical daemon", () => {
       servers.push(server); clients.push(client);
       const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
       await server.connect(serverTransport); await client.connect(clientTransport);
-      const display = await client.callTool({ name: "display_review", arguments: { handoff: launch.handoff.token } });
+      const display = await client.callTool({ name: "display_document", arguments: { handoff: launch.handoff.token } });
       const pending = parseCodexPendingPresentation(display._meta?.[PENDING_META_KEY]), receipt = parseCodexDisplayReceipt(display.structuredContent);
       if (pending === undefined || receipt === undefined) throw new Error("Private display required");
       expect(JSON.stringify({ content: display.content, structuredContent: display.structuredContent })).not.toContain(pending.pendingCapability);
-      await runHookCommand(["hook", "--event"], JSON.stringify({ session_id: owner, hook_event_name: "PostToolUse", tool_name: "mcp__placekeeper__display_review", tool_input: { handoff: launch.handoff.token }, tool_response: { structuredContent: receipt } }), request, () => {});
+      await runHookCommand(["hook", "--event"], JSON.stringify({ session_id: owner, hook_event_name: "PostToolUse", tool_name: "mcp__placekeeper__display_document", tool_input: { handoff: launch.handoff.token }, tool_response: { structuredContent: receipt } }), request, () => {});
       const ready = await client.callTool({ name: "review_app", arguments: { request: { protocolVersion: 1, runtimeId: pending.runtimeId, attemptId: pending.attemptId, generation: pending.generation, requestId: randomUUID(), capability: pending.pendingCapability, authority: "pending", method: "ready", payload: {} } } });
       const active = parseCodexAppResponse(ready._meta?.[RESPONSE_META_KEY]);
       if (active?.status !== "active") throw new Error("Promotion required");
@@ -77,11 +77,11 @@ it.runIf(process.platform === "darwin")("retains native picker results after the
     await new Promise(resolve => setTimeout(resolve, 5_200)); return undefined;
   });
   try {
-    const opened = await host.broker.openReview({ pdfPath: pdf, surface: "codex-native" });
+    const opened = await host.broker.openDocument({ pdfPath: pdf, surface: "codex-native" });
     if (opened.kind === "recovery-offered") throw new Error("unexpected recovery");
     const sessionId = opened.launch.sessionId, manager = host.codexRuntime;
     const launch = manager.stageLaunch({ sessionId, kind: "opened" })!;
-    expect(manager.claimLaunch({ bindProof: launch.bindProof, reviewSessionId: sessionId, documentGeneration: 1, taskSessionId: "picker-chat" })).toBe(true);
+    expect(manager.claimLaunch({ bindProof: launch.bindProof, documentSessionId: sessionId, documentGeneration: 1, taskSessionId: "picker-chat" })).toBe(true);
     const display = manager.display(launch.handoff.token)!;
     expect(manager.attestDisplay(display.receipt, "picker-chat")).toBe(true);
     const active = await manager.pending({ protocolVersion: 1, runtimeId: display.privateMeta.runtimeId, attemptId: display.privateMeta.attemptId,

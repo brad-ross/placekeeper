@@ -201,7 +201,7 @@ describe("shared distribution contracts", () => {
 
   it.each([
     "missing-launcher", "missing-display", "extra-declaration", "duplicate-display",
-    "malformed-display", "wrong-display-matcher", "wrong-launcher-matcher",
+    "malformed-display", "wrong-display-matcher", "legacy-only-display-matcher", "wrong-launcher-matcher",
     "wrong-display-command", "wrong-display-timeout", "old-display-timeout", "wrong-display-context-limit",
     "wrong-display-status", "extra-display-handler",
   ])("rejects the %s Codex hook contract", async (failure) => {
@@ -222,7 +222,9 @@ describe("shared distribution contracts", () => {
         case "extra-declaration": declarations.push(structuredClone(display)); break;
         case "duplicate-display": declarations[0] = structuredClone(display); break;
         case "malformed-display": declarations[1] = null as unknown as typeof display; break;
-        case "wrong-display-matcher": display.matcher = "^mcp__.*__display_review$"; break;
+        case "wrong-display-matcher": display.matcher = "^mcp__.*__display_(document|review)$"; break;
+        // The hook must keep attesting the deprecated display_review alias.
+        case "legacy-only-display-matcher": display.matcher = "^mcp__placekeeper__display_review$"; break;
         case "wrong-launcher-matcher": declarations[0]!.matcher = "Bash"; break;
         case "wrong-display-command": handler.command = "placekeeper hook --event"; break;
         case "wrong-display-timeout": handler.timeout = 5; break;

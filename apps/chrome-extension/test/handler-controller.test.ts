@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   createHandlerController,
-  type EmbeddedReviewSession,
+  type EmbeddedDocumentSession,
 } from "../src/handler-controller.js";
 
 const streamInfo = {
@@ -11,7 +11,7 @@ const streamInfo = {
   embedded: false,
 };
 
-function reviewSession(overrides: Partial<EmbeddedReviewSession> = {}): EmbeddedReviewSession {
+function documentSession(overrides: Partial<EmbeddedDocumentSession> = {}): EmbeddedDocumentSession {
   return {
     displayName: "Paper.pdf",
     mountAndValidate: vi.fn(async () => undefined),
@@ -27,7 +27,7 @@ function controllerPorts(overrides: Partial<Parameters<typeof createHandlerContr
   return {
     isOptedIn: async () => true,
     getStreamInfo: async () => streamInfo,
-    openEmbedded: vi.fn(async () => reviewSession()),
+    openEmbedded: vi.fn(async () => documentSession()),
     fallback: vi.fn(),
     reloadTab: vi.fn(async (_tabId: number) => undefined),
     ...overrides,
@@ -36,8 +36,8 @@ function controllerPorts(overrides: Partial<Parameters<typeof createHandlerContr
 
 describe("Chrome PDF handler controller", () => {
   it.each(["disconnected", "update-required"] as const)("reopens the owning PDF tab after %s", async (type) => {
-    let lifecycle!: Parameters<EmbeddedReviewSession["subscribeLifecycle"]>[0];
-    const review = reviewSession({ subscribeLifecycle: (listener) => {
+    let lifecycle!: Parameters<EmbeddedDocumentSession["subscribeLifecycle"]>[0];
+    const review = documentSession({ subscribeLifecycle: (listener) => {
       lifecycle = listener;
       return () => undefined;
     } });
@@ -55,11 +55,11 @@ describe("Chrome PDF handler controller", () => {
   });
 
   it("reports failed tab reloads and allows retry without losing the review", async () => {
-    let lifecycle!: Parameters<EmbeddedReviewSession["subscribeLifecycle"]>[0];
+    let lifecycle!: Parameters<EmbeddedDocumentSession["subscribeLifecycle"]>[0];
     const ports = controllerPorts({
       status: vi.fn(),
       reloadTab: vi.fn().mockRejectedValueOnce(new Error("Tab is unavailable")).mockResolvedValue(undefined),
-      openEmbedded: vi.fn(async () => reviewSession({ subscribeLifecycle: (listener) => {
+      openEmbedded: vi.fn(async () => documentSession({ subscribeLifecycle: (listener) => {
         lifecycle = listener;
         return () => undefined;
       } })),
@@ -76,7 +76,7 @@ describe("Chrome PDF handler controller", () => {
 
   it("mounts and validates before activation without replacing the PDF URL", async () => {
     const order: string[] = [];
-    const review = reviewSession({
+    const review = documentSession({
       mountAndValidate: vi.fn(async () => { order.push("document-ready"); }),
       activate: vi.fn(async () => { order.push("active"); }),
     });
@@ -95,7 +95,7 @@ describe("Chrome PDF handler controller", () => {
   it.each(["acquire", "mount", "activate"] as const)(
     "releases provisional state and falls back once when embedded %s fails",
     async (failure) => {
-      const review = reviewSession({
+      const review = documentSession({
         mountAndValidate: vi.fn(async () => {
           if (failure === "mount") throw new Error("document-invalid");
         }),
@@ -123,7 +123,7 @@ describe("Chrome PDF handler controller", () => {
 
   it("never falls back after activation and exposes a protected disconnect state", async () => {
     let lifecycle!: (event: { readonly type: "disconnected"; readonly protected: boolean }) => void;
-    const review = reviewSession({
+    const review = documentSession({
       subscribeLifecycle: vi.fn((listener) => {
         lifecycle = listener;
         return () => undefined;
@@ -143,7 +143,7 @@ describe("Chrome PDF handler controller", () => {
   it("keeps update-required state protected and never invokes Chrome fallback", async () => {
     let lifecycle!: (event: { readonly type: "update-required"; readonly protected: boolean }) => void;
     const status = vi.fn();
-    const review = reviewSession({
+    const review = documentSession({
       subscribeLifecycle: vi.fn((listener) => {
         lifecycle = listener;
         return () => undefined;
@@ -167,7 +167,7 @@ describe("Chrome PDF handler controller", () => {
     let rejectMount!: (error: Error) => void;
     const mounted = new Promise<void>((_resolve, reject) => { rejectMount = reject; });
     const order: string[] = [];
-    const review = reviewSession({
+    const review = documentSession({
       mountAndValidate: vi.fn(async () => mounted),
       release: vi.fn(async () => { order.push("release"); }),
       dispose: vi.fn(() => { order.push("dispose"); }),

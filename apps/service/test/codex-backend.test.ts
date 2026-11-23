@@ -1,4 +1,4 @@
-import { addPageNote, editReviewItem, setAnnotationName } from "../../../packages/core/src/review-commands.js";
+import { addPageNote, editAnnotation, setAnnotationName } from "../../../packages/core/src/document-commands.js";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createHash, randomUUID } from "node:crypto";
 import { canonicalJson } from "../src/runtime/canonical-json.js";
@@ -32,13 +32,13 @@ async function fixture(generated = true, imported = false) {
   let time = 1000;
   const manager = new CodexRuntimeManager(broker, { backend, now: () => new Date(time), panelLeaseMs: 100 });
   cleanups.push(async () => { await manager.close(); await saving.drain(); await broker.quiesceForShutdown(); await rm(root, { recursive: true, force: true }); });
-  const opened = await broker.openReview({ pdfPath, surface: "codex-native", ...(generated ? { workflowMode: "generated-output" as const } : {}) });
+  const opened = await broker.openDocument({ pdfPath, surface: "codex-native", ...(generated ? { workflowMode: "generated-output" as const } : {}) });
   if (opened.kind === "recovery-offered") throw new Error("recovery");
   const sessionId = opened.launch.sessionId;
   // Build the closed pending envelope explicitly, keeping metadata out of requests.
   const panel = async () => {
     const launch = manager.stageLaunch({ sessionId, kind: "opened" })!;
-    expect(manager.claimLaunch({ bindProof: launch.bindProof, reviewSessionId: sessionId, documentGeneration: 1, taskSessionId: "task-native" })).toBe(true);
+    expect(manager.claimLaunch({ bindProof: launch.bindProof, documentSessionId: sessionId, documentGeneration: 1, taskSessionId: "task-native" })).toBe(true);
     const d = manager.display(launch.handoff.token)!;
     manager.attestDisplay(d.receipt, "task-native");
     const a = await manager.pending({ protocolVersion: 1, runtimeId: d.privateMeta.runtimeId, attemptId: d.privateMeta.attemptId,
@@ -88,7 +88,7 @@ describe("active native service backend", () => {
     expect(f.broker.state(f.sessionId)).toMatchObject({ items, pendingDrafts: [] });
     expect(f.broker.saveStatus(f.sessionId)?.sync).toMatchObject({ phase: "clean", desiredRevision: 4, savedRevision: 4 });
     // A real accepted comment change still uses ordinary original autosave.
-    payload(await f.manager.handle(request(a, "command", editReviewItem(f.broker.state(f.sessionId)!, items[0]!.id, { comment: "Accepted imported edit" }), randomUUID())));
+    payload(await f.manager.handle(request(a, "command", editAnnotation(f.broker.state(f.sessionId)!, items[0]!.id, { comment: "Accepted imported edit" }), randomUUID())));
     await f.saving.drain();
     expect(writes).toHaveBeenCalledTimes(1);
     expect(await readFile(f.pdfPath)).not.toEqual(before);
@@ -404,7 +404,7 @@ describe("active native service backend", () => {
     const reached = Promise.withResolvers<void>();
     const original = f.broker.freezeDelivery.bind(f.broker);
     vi.spyOn(f.broker, "freezeDelivery").mockImplementationOnce(async (...args) => { reached.resolve(); await gate.promise; return original(...args); });
-    const exportCopy = vi.spyOn(f.exporting, "exportReviewedCopy");
+    const exportCopy = vi.spyOn(f.exporting, "exportAnnotatedCopy");
     const pending = f.manager.handle(request(a, "exportReviewedCopy", { fence: { expectedRevision: 1, documentGeneration: 2 } }));
     await reached.promise;
     await writeFile(f.pdfPath, "%PDF-1.7\nreplacement before export snapshot\n%%EOF");
@@ -443,7 +443,7 @@ describe("active native service backend", () => {
     expect(await f.manager.handle(request(b, "saveStatus"))).toMatchObject({ status: "ok" });
     const matched = await f.broker.restartReconnects.matchNative({ ticket: a.reconnectTicket, runtimeId: a.runtimeId, attemptId: a.attemptId, documentGeneration: 1 });
     expect(matched).toBeDefined();
-    const scope = matched === undefined ? undefined : f.broker.nativeRestartScope(matched.sourcePathHash, matched.sourceDigest, matched.reviewSessionHash);
+    const scope = matched === undefined ? undefined : f.broker.nativeRestartScope(matched.sourcePathHash, matched.sourceDigest, matched.documentSessionHash);
     expect(scope?.canonicalSourcePath).toContain("relocated.pdf");
     expect(f.broker.taskBindings.nativeReconnectForTask("task-native")?.pdfPath).toBe(scope?.canonicalSourcePath);
     await f.manager.close();
@@ -452,9 +452,9 @@ describe("active native service backend", () => {
     expect(f.broker.taskBindings.nativeReconnectForTask("task-native")).toBeUndefined();
     const broker = new SessionBroker({ recoveryRoot: f.broker.recoveryRoot, portableReader: async () => [] });
     await broker.initialize();
-    const offered = await broker.openReview({ pdfPath: relocated, surface: "codex-native" });
+    const offered = await broker.openDocument({ pdfPath: relocated, surface: "codex-native" });
     if (offered.kind !== "recovery-offered") throw new Error("Expected protected relocation recovery");
-    const recovered = await broker.openReview({ pdfPath: relocated, surface: "codex-native", recoveryDecision: "resume", recoveryOffer: offered.recoveryOffer, recoveryOperationId: "relocation_recovery" });
+    const recovered = await broker.openDocument({ pdfPath: relocated, surface: "codex-native", recoveryDecision: "resume", recoveryOffer: offered.recoveryOffer, recoveryOperationId: "relocation_recovery" });
     if (recovered.kind === "recovery-offered") throw new Error("Expected recovered relocation");
     expect(recovered.launch.sessionId).toBe(f.sessionId);
     const reopened = new CodexRuntimeManager(broker);
@@ -520,7 +520,7 @@ it("preserves native export conflicts from real revision fences and denies detac
   await f.broker.acceptMutation(f.sessionId, setAnnotationName(f.broker.state(f.sessionId)!, "Reviewer"));
   const fence = { expectedRevision: f.broker.state(f.sessionId)!.revision, documentGeneration: 1 };
   await f.broker.acceptMutation(f.sessionId, setAnnotationName(f.broker.state(f.sessionId)!, "Other window"));
-  const exportCopy = vi.spyOn(f.exporting, "exportReviewedCopy");
+  const exportCopy = vi.spyOn(f.exporting, "exportAnnotatedCopy");
   expect(await f.manager.handle(request(active, "exportReviewedCopy", { fence }, "conflict_request"))).toEqual({ status: "operation-error", reason: "export-conflict" });
   expect(exportCopy).not.toHaveBeenCalled();
   const gate = Promise.withResolvers<void>(), reached = Promise.withResolvers<void>();

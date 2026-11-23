@@ -2,7 +2,7 @@
 
 U3 supplies an installed stdio adapter, credential-free versioned shell, private
 app protocol, verified document chunk transfer, and trusted prompt context. The
-shell inspects canonical review state; production reader integration follows in
+shell inspects canonical document state; production reader integration follows in
 U4. Stop dependent native integration until the actual installed host gate passes.
 Unit tests, in-memory SDK bridges, and the previous synthetic probe cannot pass it.
 
@@ -43,7 +43,7 @@ Run `pnpm build:codex-mcp`, `pnpm typecheck`, and `pnpm test:codex-native`.
 Normal `pnpm build` includes the adapter. The macOS builder requires self-contained
 `dist/codex-mcp/server.js` and `review-v1.html` and copies them to
 `Contents/Resources/codex-mcp`. The existing whole-artifact identity and signature
-cover these files. Existing active-review upgrade deferral remains in force.
+cover these files. Existing open-document upgrade deferral remains in force.
 
 The existing compatibility plugin registers `./.mcp.json`, the official
 compatibility format. There is no unused portable `mcp.json` duplicate. Its sole
@@ -58,7 +58,8 @@ cached panel requires restoring/enabling the matching installation, reloading
 Codex, and reopening through `$placekeeper`. A browser fallback cannot pass U3.
 
 The candidate default sets `async:true` only on the exact
-`^mcp__placekeeper__display_review$` PostToolUse handler. The Bash claim,
+`^mcp__placekeeper__display_(document|review)$` PostToolUse handler (`display_review`
+is the deprecated alias of `display_document`). The Bash claim,
 UserPromptSubmit and SessionEnd hooks remain synchronous. The display hook keeps
 its command, matcher and output contract, with a 55-second display-only timeout. Under the official
 [background-hook contract](https://learn.chatgpt.com/docs/hooks), it receives the
@@ -83,7 +84,7 @@ pnpm qualify:codex-native init /absolute/private/path/u3-host-report.json
 ```
 
 Record exact Codex build, OS, plugin version and installed artifact digest. Use
-two small real reviewed PDFs with distinguishable items, such as private copies
+two small real annotated PDFs with distinguishable items, such as private copies
 of `test/fixtures/pdfs/text-native-with-annotations.pdf`. The operator must
 explicitly authorize creating actual chats and performing host qualification.
 
@@ -98,7 +99,7 @@ it cannot certify that self-reported observations are true. Review the evidence.
 
 1. In each actual chat ask `$placekeeper` to open its explicitly named PDF. Exercise
    the shipped direct launcher, trusted Bash claim hook and exact
-   `mcp__placekeeper__display_review` handoff. Confirm a native panel reports
+   `mcp__placekeeper__display_document` handoff. Confirm a native panel reports
    verified generation, revision, Save Sync and digest. Capture actual launcher
    and display PostToolUse field shapes and prove equal trusted hook task identity.
    Display structured output must be exactly the closed correlation receipt.
@@ -114,15 +115,15 @@ it cannot certify that self-reported observations are true. Review the evidence.
    chats. Task mismatch must deny admission. Replay old display results and verify
    they cannot activate a new attempt. Never weaken hooks or manually bind a task
    to manufacture a pass.
-5. Accept a review change through an existing authorized service/CLI operation or
+5. Accept an annotation change through an existing authorized service/CLI operation or
    participating view. A subsequent **real user prompt** must obtain that chat's
-   current revision, Review Items, Existing PDF Annotations and Save Sync, then
+   current revision, Annotations, Existing PDF Annotations and Save Sync, then
    bounded current PDF evidence through the shipped skill's existing commands.
    Pending/failed persistence must preserve accepted work without reporting it as
-   saved. The other chat's actual prompt obtains only its own review.
+   saved. The other chat's actual prompt obtains only its own document.
 6. Exercise protected recovery using shipped resume/discard/fork continuation,
    scoped offer and stable operation ID. Exercise focused ownership denial: the
-   skill explains conflict and offers an explicitly requested independent review
+   skill explains conflict and offers an explicitly requested independent document
    without repeated launches or silent takeover.
 
 ## Per-panel lifecycle gate
@@ -131,7 +132,7 @@ The shell independently renews its authenticated presentation every five seconds
 regardless of visibility. Watermark polling occurs after completion at one second
 while visible and five seconds while hidden; it never renews participation. The
 service disconnect timeout is 30 seconds. A verified document materialization is
-reused only for the same incarnation and exact immutable descriptor; review
+reused only for the same incarnation and exact immutable descriptor; annotation
 revision and Save Sync watermark changes do not poll PDF bytes. The shell imposes
 no document-size cap; host allocation failure has explicit memory recovery guidance.
 Shared stdio process health grants no
@@ -202,7 +203,7 @@ click calls the public pinned SDK `App.requestTeardown()` or `App.close()` on th
 shell's own App instance. Teardown notification completion is recorded as
 `requested`; it does not establish host acceptance. Existing actual host teardown
 still uses the normal authenticated detach path. Bridge close stops local timers,
-clears materialization and current review UI, and closes only the own app bridge;
+clears materialization and current reader UI, and closes only the own app bridge;
 it deliberately does not detach first. Measure ordinary service lease expiry and
 peer preservation. This is not MCP stdio EOF. Local observations contain only
 sanitized action, selector, timestamp and outcome; SDK exception text is discarded.
@@ -403,7 +404,7 @@ This gate does not establish full host parity. The context badge still requires 
 
 ## U8 complete product acceptance
 
-U8 adds `codex-native-review.spec.ts`, `codex-native-lifecycle.spec.ts`, and the
+U8 adds `codex-native-document.spec.ts`, `codex-native-lifecycle.spec.ts`, and the
 resource lifecycle cases in `codex-native-resources.spec.ts`. They run in
 `test:codex-native`, `test:e2e`, and canonical `test:ci:chromium`; the existing CI
 workflow invokes that registry after fixture generation and shared builds.
@@ -462,17 +463,17 @@ checks. Do not rewrite them as observations of the current artifact.
    standalone `ExportCoordinator.replaceOriginal` as a UI action. Do not claim
    that original destination selection exercised the export transaction's
    replacement method. Preserve that method's existing service regression gate.
-   Verify generated-output export and portable reviewed-PDF reopen independently
+   Verify generated-output export and portable Annotated Document reopen independently
    of the former session's private snapshots. Use either a genuinely fresh
    recovery root or the supported fresh native import of a uniquely copied PDF.
-   For the latter, record the copied path and digest, a new Review Session ID,
+   For the latter, record the copied path and digest, a new Document Session ID,
    revision 0, imported portable items, and absence of the former Protected
    Drafts; establish that the fresh-session branch read the copied PDF rather
    than hydrating the former snapshot. This proves independent import within
    the existing recovery root, not a physically new root. Neither route may
-   substitute old snapshot state for annotations read from the reviewed PDF.
+   substitute old snapshot state for annotations read from the Annotated Document.
 3. **AE6–AE8 / R17–R23:** Use two actual chats and multiple presentations. If the owning chat already
-   has an active review, close/disconnect its previous presentations before a
+   has an open document, close/disconnect its previous presentations before a
    normal fresh launch of another PDF; preserve explicit rebind semantics where
    exposed. A denied launch must not proceed to display or silently take ownership. Prompt
    each after accepted unsaved changes and verify current items and truthful Save
@@ -543,7 +544,9 @@ observed refresh endpoint and cannot establish a cold-open endpoint. If the
 recording or reliable endpoint observation is unavailable, leave that measurement
 unproved. Do not add production listeners solely to fill the report.
 
-Use **Close review** in every retained presentation to release its authenticated
-association before opening another document in that chat. Closing one panel keeps
+There is no manual close control. Close each retained presentation normally
+before opening another document in that chat; Placekeeper releases its
+authenticated association when the host delivers its teardown or page-exit
+signal, and an association whose cleanup never arrives expires. Closing one panel keeps
 its peers connected and accepted work recoverable. Closing a host side-panel tab
 alone may leave the inline card alive; it is not proof of service detach.

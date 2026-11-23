@@ -39,7 +39,7 @@ import {
   referencePdfAnnotationSurface,
   type PdfAnnotationSurface,
 } from './annotation-surface.js';
-import type { ReviewAnnotation } from '../../../../packages/core/src/pdf-writer.js';
+import type { PdfWriterAnnotation } from '../../../../packages/core/src/pdf-writer.js';
 import {
   hitTestOwnedMark,
   hitTestOwnedMarkHover,
@@ -51,10 +51,10 @@ import type { ViewerPagePoint } from './viewer-interaction-events.js';
 import type { AnnotationRenderingState } from './PdfAnnotationLayers.js';
 import { PdfAnnotationLayers } from './PdfAnnotationLayers.js';
 import type { PageContextMenuRequest } from './PdfWorkspace.js';
-import type { DestinationBand } from '../review/navigation-coordinator.js';
+import type { DestinationBand } from '../reader/navigation-coordinator.js';
 
 /** Fill token for the transient Destination Band; the link-menu snippet reuses it. */
-export const DESTINATION_BAND_TOKEN = '--review-destination-band';
+export const DESTINATION_BAND_TOKEN = '--reader-destination-band';
 
 export interface DestinationBandLayerProps {
   readonly band: DestinationBand | null | undefined;
@@ -116,13 +116,13 @@ export function DestinationBandLayer({
 }
 
 const PDF_TEXT_SELECTION_STYLE = {
-  background: 'var(--review-pdf-selection-bg)',
+  background: 'var(--reader-pdf-selection-bg)',
 } as const;
 
 const REFERENCE_OWNED_MARK_INTERACTIVE_TARGET = [
   `[${PDF_LINK_INTERACTION_ATTRIBUTE}]`,
-  '[data-review-contextual-ui]',
-  '[data-review-editor]',
+  '[data-reader-contextual-ui]',
+  '[data-reader-editor]',
   'input',
   'textarea',
   '[contenteditable="true"]',
@@ -174,7 +174,7 @@ export interface ReferencePdfViewportProps {
   readonly searchResultsByPage?: ReadonlyMap<number, readonly PdfSearchResult[]>;
   /** The active References tab's Destination Band, passed like search results. */
   readonly destinationBand?: DestinationBand | null;
-  readonly annotationsByPage?: ReadonlyMap<number, readonly ReviewAnnotation[]>;
+  readonly annotationsByPage?: ReadonlyMap<number, readonly PdfWriterAnnotation[]>;
   readonly geometryByPage?: ReadonlyMap<number, readonly OwnedMarkGeometry[]>;
   readonly authoringPreviewIds?: ReadonlySet<string>;
   readonly sourceRendering?: AnnotationRenderingState;

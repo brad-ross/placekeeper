@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { createProofreadInputController } from '../src/review/input-controller.js';
+import { createProofreadInputController } from '../src/reader/input-controller.js';
 
 const selection = {
   pageIndex: 0,

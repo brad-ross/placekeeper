@@ -1,11 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createReviewState } from '../../../packages/core/src/review-model.js';
+import { createDocumentState } from '../../../packages/core/src/document-model.js';
 import { createCodexHostRuntime } from '../src/host/codex-runtime.js';
 import { loadRuntimeDocumentSource, subscribeRuntimeDocumentSource } from '../src/host/runtime-document-source.js';
 import type { HostRuntimeInvalidation } from '../src/host/runtime.js';
 
 const sessionId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
-const state = createReviewState({ sessionId, source: { fileId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', digest: 'a'.repeat(64), byteLength: 3 } });
+const state = createDocumentState({ sessionId, source: { fileId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', digest: 'a'.repeat(64), byteLength: 3 } });
 function fixture() {
   let revision = 0;
   let generation = 1;

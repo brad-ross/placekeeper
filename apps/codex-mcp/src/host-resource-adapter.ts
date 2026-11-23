@@ -180,16 +180,16 @@ export class HostResourceAdapter {
             const result = await this.options.request({ action: 'host-resource', operation: 'export', grant, expectedRevision: fence.expectedRevision, generation: fence.documentGeneration });
             this.#assert(epoch);
             if (result.status !== 'host-save' || result.intent.purpose !== 'export' || result.intent.generation !== fence.documentGeneration || result.intent.revision !== fence.expectedRevision)
-                throw Error('Reviewed export unavailable');
+                throw Error('Annotated Document export unavailable');
             const bytes = await this.#download(grant, result.intent, epoch);
             const filename = (this.#file?.name ?? 'review.pdf').replace(/[\\/\u0000-\u001f]/g, '_').replace(/\.pdf$/i, '') + '-reviewed.pdf';
-            if (!this.options.downloadFile) throw Error('This host does not support PDF downloads. Your review is still protected.');
+            if (!this.options.downloadFile) throw Error('This host does not support PDF downloads. Your work is still protected.');
             const resultDownload = await this.options.downloadFile({ contents: [{ type: 'resource', resource: {
                 uri: `file:///${encodeURIComponent(filename)}`, mimeType: 'application/pdf', blob: encode(bytes),
             } }] }, { timeout: 300000 });
             this.#assert(epoch);
             if (resultDownload.isError) return { kind: 'cancelled' as const };
-            return { kind: 'reviewed-copy' as const, path: filename, revision: result.intent.revision, digest: result.intent.sha256, warning: 'The host accepted the reviewed-copy download. Verify the saved file before closing your protected review.' };
+            return { kind: 'reviewed-copy' as const, path: filename, revision: result.intent.revision, digest: result.intent.sha256, warning: 'The host accepted the Annotated Document download. Verify the saved file before closing your protected work.' };
         });
     }
     async dispose() { this.#epoch++; for (const read of this.#reads) read.abort(); this.#reads.clear(); this.#unsubscribe?.(); this.#unsubscribe = undefined; const file = this.#file; this.#file = undefined; if (file && this.#subscribed)

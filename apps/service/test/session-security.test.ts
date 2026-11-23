@@ -81,8 +81,8 @@ describe("one-use document-scoped session credentials", () => {
       portableReader: async () => [],
       rewriteAssessor: async () => ({ eligible: true }),
     });
-    const codex = await broker.openReview({ pdfPath: pdf, surface: "codex" });
-    const finder = await broker.openReview({ pdfPath: pdf, surface: "finder" });
+    const codex = await broker.openDocument({ pdfPath: pdf, surface: "codex" });
+    const finder = await broker.openDocument({ pdfPath: pdf, surface: "finder" });
     if (codex.kind !== "opened" || finder.kind !== "focused") throw new Error("Expected dual launch");
     const codexCapability = new URLSearchParams(codex.launch.fragment.slice(1)).get("cap");
     const finderCapability = new URLSearchParams(finder.launch.fragment.slice(1)).get("cap");
@@ -168,28 +168,28 @@ describe("authenticated review presence", () => {
     const disconnectFirst = controls.registerSocket("review-a", new PassThrough());
     const disconnectSecond = controls.registerSocket("review-a", new PassThrough());
 
-    expect(controls.activity()).toEqual({ reviewPresence: 2, transientWork: 0 });
+    expect(controls.activity()).toEqual({ documentPresence: 2, transientWork: 0 });
     disconnectFirst();
-    expect(controls.activity()).toEqual({ reviewPresence: 1, transientWork: 0 });
+    expect(controls.activity()).toEqual({ documentPresence: 1, transientWork: 0 });
     disconnectSecond();
-    expect(controls.activity()).toEqual({ reviewPresence: 1, transientWork: 0 });
+    expect(controls.activity()).toEqual({ documentPresence: 1, transientWork: 0 });
 
     now += 250;
     const reconnect = controls.registerSocket("review-a", new PassThrough());
-    expect(controls.activity()).toEqual({ reviewPresence: 1, transientWork: 0 });
+    expect(controls.activity()).toEqual({ documentPresence: 1, transientWork: 0 });
     reconnect();
     now += 499;
-    expect(controls.activity()).toEqual({ reviewPresence: 1, transientWork: 0 });
+    expect(controls.activity()).toEqual({ documentPresence: 1, transientWork: 0 });
     now += 1;
-    expect(controls.activity()).toEqual({ reviewPresence: 0, transientWork: 0 });
+    expect(controls.activity()).toEqual({ documentPresence: 0, transientWork: 0 });
   });
 
   it("counts accepted durable work separately from review presence", () => {
     const controls = new SessionControlRegistry({ heartbeat: false });
     const write = controls.beginWrite("review-a");
-    expect(controls.activity()).toEqual({ reviewPresence: 0, transientWork: 1 });
+    expect(controls.activity()).toEqual({ documentPresence: 0, transientWork: 1 });
     write.complete();
-    expect(controls.activity()).toEqual({ reviewPresence: 0, transientWork: 0 });
+    expect(controls.activity()).toEqual({ documentPresence: 0, transientWork: 0 });
   });
 
   it.each([
@@ -320,7 +320,7 @@ async function openBroker(options: {
   await writeFile(join(assets, "app.js"), "export function start() {}\n");
   await writeFile(pdf, "%PDF-1.7\nprivate document text\n%%EOF");
   const broker = new SessionBroker({ recoveryRoot: join(directory, "recovery") });
-  const opened = await broker.openReview({
+  const opened = await broker.openDocument({
     pdfPath: pdf,
     surface: options.surface ?? "browser",
     ...(options.generatedOutput ? { workflowMode: "generated-output" as const } : {}),
@@ -444,7 +444,7 @@ describe("loopback HTTP boundary", () => {
 
     const foreignPdf = join(directory, "foreign.pdf");
     await writeFile(foreignPdf, "%PDF-1.7\nforeign document text\n%%EOF");
-    const foreign = await broker.openReview({ pdfPath: foreignPdf, surface: "browser" });
+    const foreign = await broker.openDocument({ pdfPath: foreignPdf, surface: "browser" });
     if (foreign.kind !== "opened") throw new Error("Expected a foreign review session");
     const foreignExchange = await postJson(
       `${server.origin}/s/${foreign.launch.sessionId}/exchange`,
@@ -642,9 +642,9 @@ describe("loopback HTTP boundary", () => {
     await broker.quiesceForShutdown();
 
     const restarted = new SessionBroker({ recoveryRoot: join(directory, "recovery") });
-    const offered = await restarted.openReview({ pdfPath: pdf, surface: "browser" });
+    const offered = await restarted.openDocument({ pdfPath: pdf, surface: "browser" });
     if (offered.kind !== "recovery-offered") throw new Error("Expected durable receipt recovery offer");
-    const resumed = await restarted.openReview({
+    const resumed = await restarted.openDocument({
       pdfPath: pdf,
       surface: "browser",
       recoveryDecision: "resume",
@@ -721,7 +721,7 @@ describe("loopback HTTP boundary", () => {
       line: 1,
     }, { authorization: `Bearer ${credential}` });
     expect(forward.status).toBe(403);
-    const editor = await broker.openReview({ pdfPath: pdf, surface: "vscode", workflowMode: "generated-output" });
+    const editor = await broker.openDocument({ pdfPath: pdf, surface: "vscode", workflowMode: "generated-output" });
     if (editor.kind !== "focused") throw new Error("Expected existing review");
     const editorExchange = await postJson(`${server.origin}/s/${launch.sessionId}/exchange`, {
       capability: editor.launch.fragment.slice("#cap=".length),
@@ -768,7 +768,7 @@ describe("loopback HTTP boundary", () => {
     const broker = new SessionBroker({ recoveryRoot: join(directory, "recovery") });
     const approvePdf = vi.spyOn(broker.capabilities, "approvePdf");
     const recoverDraft = vi.spyOn(DraftSnapshotStore.prototype, "recover");
-    const openReview = vi.spyOn(broker, "openReview");
+    const openDocument = vi.spyOn(broker, "openDocument");
     const stageReconnect = vi.spyOn(broker, "stageRestartReconnect");
     const issueBootstrap = vi.spyOn(broker.credentials, "issueBootstrap");
     const server = await startHttpServer(broker, { webAssets: { root: assets } });
@@ -786,7 +786,7 @@ describe("loopback HTTP boundary", () => {
     expect(html).toContain("data-terminal-recovery");
     expect(approvePdf).not.toHaveBeenCalled();
     expect(recoverDraft).not.toHaveBeenCalled();
-    expect(openReview).not.toHaveBeenCalled();
+    expect(openDocument).not.toHaveBeenCalled();
     expect(stageReconnect).not.toHaveBeenCalled();
     expect(issueBootstrap).not.toHaveBeenCalled();
   });
@@ -1065,7 +1065,7 @@ describe("loopback HTTP boundary", () => {
       { headers: { cookie: "placekeeper_view=stale-successor-cookie" } },
     )).status).toBe(404);
 
-    const reopened = await broker.openReview({ pdfPath: pdf, surface: "browser" });
+    const reopened = await broker.openDocument({ pdfPath: pdf, surface: "browser" });
     if (reopened.kind !== "focused") throw new Error("Expected another live view");
     const endedExchange = await postJson(
       `${server.origin}/s/${reopened.launch.sessionId}/exchange`,
@@ -1144,7 +1144,7 @@ describe("loopback HTTP boundary", () => {
         ok: false,
         error: {
           kind: "invalid-review-command",
-          message: "Review command is malformed",
+          message: "Document command is malformed",
         },
       });
     }

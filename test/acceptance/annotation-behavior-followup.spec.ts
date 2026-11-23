@@ -5,7 +5,7 @@ import { basename, join, resolve } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 
 import { PlacekeeperHost } from '../../apps/service/src/host/placekeeper-host.js';
-import { addDelete, addHighlight, addPageNote, addReplace } from '../../packages/core/src/review-commands.js';
+import { addDelete, addHighlight, addPageNote, addReplace } from '../../packages/core/src/document-commands.js';
 import { encodePlacekeeperLink } from '../../packages/core/src/placekeeper-link.js';
 
 let temporaryRoot = '';
@@ -147,7 +147,7 @@ async function openSharedAnnotationFixture(
 }
 
 async function markCenter(page: Page, itemId: string): Promise<{ x: number; y: number }> {
-  const mark = page.locator(`[data-owned-mark][data-review-id="${itemId}"]`).first();
+  const mark = page.locator(`[data-owned-mark][data-annotation-id="${itemId}"]`).first();
   await expect(mark).toBeVisible();
   const bounds = await mark.boundingBox();
   if (bounds === null) throw new Error('Owned annotation mark has no bounds.');
@@ -400,8 +400,8 @@ async function closeSelectedMainCardAfterWorkspaceSettles(
     page,
     options.key,
     `[data-annotation-peek="${options.itemId}"]`,
-    `[data-owned-mark][data-review-id="${options.itemId}"]`,
-    '#review-tools-workspace',
+    `[data-owned-mark][data-annotation-id="${options.itemId}"]`,
+    '#reader-tools-workspace',
   );
   await options.tools.getByRole('button', { name: 'Hide Workspace', exact: true }).click();
   if (options.resizeTo !== undefined) await page.setViewportSize(options.resizeTo);
@@ -433,7 +433,7 @@ async function openAndSelectAnnotationWorkspace(
   selectRow: boolean,
 ): Promise<{ annotations: Locator; navigation: Locator; row: Locator; tools: Locator }> {
   await page.getByRole('button', { name: 'Show Workspace', exact: true }).click();
-  const tools = page.locator('#review-tools-workspace');
+  const tools = page.locator('#reader-tools-workspace');
   const annotations = tools.getByRole('tab', { name: 'Annotations', exact: true });
   if (await annotations.getAttribute('aria-selected') !== 'true') await annotations.click();
   await expect(annotations).toHaveAttribute('aria-selected', 'true');
@@ -441,7 +441,7 @@ async function openAndSelectAnnotationWorkspace(
   await expectWorkspaceAnimationsSettled(tools);
   await expect.poll(() => tools.evaluate((element) => getComputedStyle(element).transform))
     .toBe('none');
-  const row = tools.locator(`[data-review-item="${itemId}"]`);
+  const row = tools.locator(`[data-annotation-item="${itemId}"]`);
   const navigation = row.locator('.annotation-item__navigation');
   await navigation.focus();
   await expect(navigation).toBeFocused();
@@ -479,8 +479,8 @@ async function beginAnnotationEditFrameAudit(page: Page): Promise<void> {
       samples: [] as AnnotationEditFrame[],
     };
     (window as typeof window & { __annotationEditSurfaceAudit?: typeof audit }).__annotationEditSurfaceAudit = audit;
-    const tools = document.querySelector<HTMLElement>('#review-tools-workspace');
-    const references = document.querySelector<HTMLElement>('#review-workspace');
+    const tools = document.querySelector<HTMLElement>('#reader-tools-workspace');
+    const references = document.querySelector<HTMLElement>('#reader-workspace');
     const rect = (element: HTMLElement | null) => {
       if (element === null) return null;
       const bounds = element.getBoundingClientRect();
@@ -530,9 +530,9 @@ async function beginAnnotationEditFrameAudit(page: Page): Promise<void> {
         generationStatus: document.querySelector<HTMLElement>('[data-generation-status]')
           ?.dataset.generationStatus ?? 'idle',
         toolsIdentity: tools !== null && tools.isConnected
-          && document.querySelector('#review-tools-workspace') === tools,
+          && document.querySelector('#reader-tools-workspace') === tools,
         referencesIdentity: references !== null && references.isConnected
-          && document.querySelector('#review-workspace') === references,
+          && document.querySelector('#reader-workspace') === references,
         toolsPainted: painted(tools),
         referencesPainted: painted(references),
         toolsRect: rect(tools),
@@ -638,7 +638,7 @@ interface CompactEditFrame {
   readonly composerPaint: string;
   readonly allRows: readonly {
     readonly origin: string;
-    readonly reviewItemId: string;
+    readonly annotationItemId: string;
     readonly reconciliationEntry: string;
     readonly reconciliationDraftId: string;
     readonly text: string;
@@ -654,7 +654,7 @@ interface CompactEditFrame {
 async function beginCompactEditFrameAudit(page: Page): Promise<void> {
   await page.evaluate(() => {
     const startedAt = performance.now();
-    const list = document.querySelector<HTMLElement>('#review-annotation-list');
+    const list = document.querySelector<HTMLElement>('#reader-annotation-list');
     const audit = { finished: false, stopRequested: false, postSettleFrames: 12, samples: [] as CompactEditFrame[] };
     (window as typeof window & { __compactEditAudit?: typeof audit }).__compactEditAudit = audit;
     const paintedThroughAncestors = (element: HTMLElement | null): boolean => {
@@ -683,9 +683,9 @@ async function beginCompactEditFrameAudit(page: Page): Promise<void> {
       const peek = document.querySelector<HTMLElement>('[data-annotation-peek]:not(.annotation-peek--reader)');
       const bounds = peek?.getBoundingClientRect();
       const panel = document.querySelector<HTMLElement>('#workspace-panel-annotations');
-      const tools = document.querySelector<HTMLElement>('#review-tools-workspace');
+      const tools = document.querySelector<HTMLElement>('#reader-tools-workspace');
       const selectedTab = document.querySelector<HTMLElement>('[data-workspace-mode="annotations"]');
-      const rows = [...list?.querySelectorAll<HTMLElement>('li[data-review-item][data-annotation-origin="owned"]') ?? []];
+      const rows = [...list?.querySelectorAll<HTMLElement>('li[data-annotation-item][data-annotation-origin="owned"]') ?? []];
       const allRows = [...list?.querySelectorAll<HTMLElement>('li[data-annotation-origin]') ?? []];
       const ownedRow = rows.find((candidate) => candidate.innerText.includes('Compact')) ?? rows.at(-1) ?? null;
       const composer = document.querySelector<HTMLElement>('[data-comment-composer]');
@@ -703,7 +703,7 @@ async function beginCompactEditFrameAudit(page: Page): Promise<void> {
         rowText: rows.map((row) => row.innerText).join('\n---\n'),
         panelPainted: paintedThroughAncestors(panel),
         listIdentity: list !== null && list.isConnected
-          && document.querySelector('#review-annotation-list') === list,
+          && document.querySelector('#reader-annotation-list') === list,
         selectedTab: selectedTab?.getAttribute('aria-selected') === 'true',
         toolsInert: tools?.hasAttribute('inert') ?? false,
         generationStatus: document.querySelector<HTMLElement>('[data-generation-status]')
@@ -721,7 +721,7 @@ async function beginCompactEditFrameAudit(page: Page): Promise<void> {
         composerPaint: paint(composer),
         allRows: allRows.map((row) => ({
           origin: row.dataset.annotationOrigin ?? '',
-          reviewItemId: row.dataset.reviewItem ?? '',
+          annotationItemId: row.dataset.annotationItem ?? '',
           reconciliationEntry: row.dataset.reconciliationEntry ?? '',
           reconciliationDraftId: row.dataset.reconciliationDraft ?? '',
           text: row.innerText,
@@ -1000,7 +1000,7 @@ test('does not repaint stale compact annotation content while real lifecycle req
   const afterInTray = 'Compact after tray edit marker.';
   await page.getByRole('button', { name: 'Show Workspace' }).click();
   await page.getByRole('tab', { name: 'Annotations', exact: true }).click();
-  const row = page.locator(`#review-annotation-list [data-review-item="${itemId}"]`);
+  const row = page.locator(`#reader-annotation-list [data-annotation-item="${itemId}"]`);
   await expect(row).toContainText(after);
   await row.hover();
   await row.getByRole('button', { name: 'Edit Page Note annotation on page 1' }).click();
@@ -1052,7 +1052,7 @@ test('keeps live protected drafts out of every attachment and reveals exact aban
   await peer.setViewportSize({ width: 1280, height: 900 });
   const { sessionId, itemId, siblingId } = await openSharedAnnotationFixture(page, peer);
   const composer = page.getByRole('region', { name: 'Edit Page Note' });
-  const row = () => page.locator(`#review-annotation-list [data-review-item="${itemId}"]`);
+  const row = () => page.locator(`#reader-annotation-list [data-annotation-item="${itemId}"]`);
   const openEditor = async () => {
     await row().hover();
     const edit = row().getByRole('button', { name: 'Edit Page Note annotation on page 1' });
@@ -1163,7 +1163,7 @@ test('keeps live protected drafts out of every attachment and reveals exact aban
           reconciliationDraftId === abandonedDraftId && painted
         )))).toBe(true);
       expect(frames.every(({ allRows }) => allRows
-        .some(({ reviewItemId }) => reviewItemId === siblingId))).toBe(true);
+        .some(({ annotationItemId: annotationId }) => annotationId === siblingId))).toBe(true);
     }
   }
   expect(peerActiveBeforeRelease).toBe(0);
@@ -1244,7 +1244,7 @@ test('keeps compact card paint stable through pointer and keyboard Edit and Canc
 
   await page.getByRole('button', { name: 'Show Workspace' }).click();
   await page.getByRole('tab', { name: 'Annotations', exact: true }).click();
-  const row = page.locator(`#review-annotation-list [data-review-item="${itemId}"]`);
+  const row = page.locator(`#reader-annotation-list [data-annotation-item="${itemId}"]`);
   const rowEdit = row.getByRole('button', { name: 'Edit Page Note annotation on page 1' });
   await row.hover();
   await rowEdit.click();
@@ -1346,7 +1346,7 @@ test('uses the hover card and explicitly expands long PDF annotations in a delet
 
   await remove.click();
   await expect(reader).toHaveCount(0);
-  await expect(page.locator(`[data-review-id="${itemId}"]`)).toHaveCount(0);
+  await expect(page.locator(`[data-annotation-id="${itemId}"]`)).toHaveCount(0);
   await expect.poll(() => host.broker.state(sessionId)?.items.some((item) => item.id === itemId)).toBe(false);
 });
 
@@ -1396,9 +1396,9 @@ test.describe('passage edit continuity', () => {
   await chooseCopyDestination(page);
   await openPrimaryReference(page);
   await layout.configure(page);
-  const references = page.locator('#review-workspace');
+  const references = page.locator('#reader-workspace');
   await page.getByRole('tab', { name: 'Annotations', exact: true }).click();
-  const tools = page.locator('#review-tools-workspace');
+  const tools = page.locator('#reader-tools-workspace');
   await expect(references).toHaveAttribute('data-workspace-presentation', layout.referencePresentation);
   await expect(tools).toHaveAttribute('data-workspace-presentation', layout.toolsPresentation);
   await expect(tools).toHaveAttribute('data-tools-workspace-open', 'true');
@@ -1411,7 +1411,7 @@ test.describe('passage edit continuity', () => {
   const [toolsBefore, referencesBefore] = await Promise.all([tools.boundingBox(), references.boundingBox()]);
   if (toolsBefore === null || referencesBefore === null) throw new Error('Tray bounds are unavailable.');
 
-  const row = page.locator(`[data-review-item="${itemId}"]`);
+  const row = page.locator(`[data-annotation-item="${itemId}"]`);
   await row.hover();
   await beginAnnotationEditFrameAudit(page);
   await row.getByRole('button', { name: 'Edit Highlight annotation on page 1' }).click();
@@ -1454,11 +1454,11 @@ test.describe('passage edit continuity', () => {
   const edited = `${LONG_ANNOTATION} Applied without a viewer flash.`;
   await composer.getByRole('textbox', { name: 'Comment (optional)' }).fill(edited);
   await beginAnnotationEditFrameAudit(page);
-  await page.evaluate((reviewId) => {
+  await page.evaluate((documentId) => {
     const image = document.querySelector<HTMLImageElement>(
       ".pdf-workspace:not(.pdf-workspace--reference) [data-page-index='0'] > img",
     );
-    const mark = document.querySelector<HTMLElement>(`[data-review-id="${reviewId}"]`);
+    const mark = document.querySelector<HTMLElement>(`[data-annotation-id="${documentId}"]`);
     if (image === null || mark === null) throw new Error('Viewer continuity targets are unavailable.');
     const baseline = image.getBoundingClientRect();
     const baselineSource = image.currentSrc || image.src;
@@ -1485,7 +1485,7 @@ test.describe('passage edit continuity', () => {
       const currentImage = document.querySelector<HTMLImageElement>(
         ".pdf-workspace:not(.pdf-workspace--reference) [data-page-index='0'] > img",
       );
-      const currentMark = document.querySelector<HTMLElement>(`[data-review-id="${reviewId}"]`);
+      const currentMark = document.querySelector<HTMLElement>(`[data-annotation-id="${documentId}"]`);
       const bounds = image.getBoundingClientRect();
       const style = getComputedStyle(image);
       let ancestor: HTMLElement | null = image;
@@ -1654,9 +1654,9 @@ test('opens a focused Main editor at its PDF anchor before paint and dismisses t
   const { itemId } = await openLongAnnotationFixture(page, 'highlight', {
     content: 'Cancel this edit.',
   });
-  await expect(page.locator('#review-tools-workspace'))
+  await expect(page.locator('#reader-tools-workspace'))
     .toHaveAttribute('data-tools-workspace-open', 'false');
-  const mark = page.locator(`[data-owned-mark][data-review-id="${itemId}"]`).first();
+  const mark = page.locator(`[data-owned-mark][data-annotation-id="${itemId}"]`).first();
   await mark.scrollIntoViewIfNeeded();
   const center = await markCenter(page, itemId);
   await page.mouse.click(center.x, center.y);
@@ -1668,7 +1668,7 @@ test('opens a focused Main editor at its PDF anchor before paint and dismisses t
     page,
     'main-closed-workspace-edit',
     '[data-comment-composer]',
-    `[data-owned-mark][data-review-id="${itemId}"]`,
+    `[data-owned-mark][data-annotation-id="${itemId}"]`,
   );
   await peek.getByRole('button', { name: 'Edit Highlight annotation on page 1' }).click();
   const composer = page.getByRole('region', { name: 'Edit Highlight' });
@@ -1708,7 +1708,7 @@ test('opens a focused Main editor at its PDF anchor before paint and dismisses t
       'a', 'button', 'input', 'textarea',
       '[data-owned-focus-id]', '[data-owned-mark]', '[data-source-reader-mark]',
       '[data-owned-native-geometry]', '[data-source-link-layer]',
-      '[data-pdf-link-interaction]', '[data-review-contextual-ui]',
+      '[data-pdf-link-interaction]', '[data-reader-contextual-ui]',
       '[data-annotation-peek]', '[data-comment-composer]',
     ].join(',');
     for (let y = top; y <= bottom; y += 32) {
@@ -1738,7 +1738,7 @@ test('waits for the closing Annotations tray before first painting the selected 
   const { itemId } = await openLongAnnotationFixture(page, 'highlight', {
     content: 'Restore this selected card after the workspace settles.',
   });
-  const mark = page.locator(`[data-owned-mark][data-review-id="${itemId}"]`).first();
+  const mark = page.locator(`[data-owned-mark][data-annotation-id="${itemId}"]`).first();
   await mark.scrollIntoViewIfNeeded();
   const peek = page.locator(`[data-annotation-peek="${itemId}"]`);
   const { tools } = await openAndSelectAnnotationWorkspace(page, itemId, true);
@@ -1758,8 +1758,8 @@ test('waits for the closing Annotations tray before first painting the selected 
     page,
     'main-card-aborted-tools-close',
     `[data-annotation-peek="${itemId}"]`,
-    `[data-owned-mark][data-review-id="${itemId}"]`,
-    '#review-tools-workspace',
+    `[data-owned-mark][data-annotation-id="${itemId}"]`,
+    '#reader-tools-workspace',
   );
   await reopened.tools.getByRole('button', { name: 'Hide Workspace', exact: true }).click();
   expect(await reopened.tools.evaluate((element) => element.getAnimations().some(
@@ -1803,7 +1803,7 @@ test('settles a reduced-motion Annotations close before painting the selected Ma
   const { itemId } = await openLongAnnotationFixture(page, 'highlight', {
     content: 'Restore this selected card after reduced-motion settlement.',
   });
-  const mark = page.locator(`[data-owned-mark][data-review-id="${itemId}"]`).first();
+  const mark = page.locator(`[data-owned-mark][data-annotation-id="${itemId}"]`).first();
   await mark.scrollIntoViewIfNeeded();
   const peek = page.locator(`[data-annotation-peek="${itemId}"]`);
   const { tools } = await openAndSelectAnnotationWorkspace(page, itemId, true);
@@ -1824,7 +1824,7 @@ for (const [kind, content] of [['highlight', 'Short comment.'], ['highlight', ''
     await page.setViewportSize({ width: 1280, height: 900 });
     const quote = 'This is the complete original passage whose text must remain readable. '.repeat(24) + 'SOURCE PASSAGE END.';
     const { itemId } = await openLongAnnotationFixture(page, kind, { content, quote });
-    await page.locator(`[data-owned-mark][data-review-id="${itemId}"]`).first().scrollIntoViewIfNeeded();
+    await page.locator(`[data-owned-mark][data-annotation-id="${itemId}"]`).first().scrollIntoViewIfNeeded();
     const center = await markCenter(page, itemId);
     await page.mouse.click(center.x, center.y);
     const peek = page.locator(`[data-annotation-peek="${itemId}"]`);
@@ -1859,7 +1859,7 @@ test('keeps the initial Mac workspace toggle above the PDF viewport', async ({ p
   expect(await ownsHitTarget()).toBe(true);
   await toggle.click();
   await expect(page.getByRole('tab', { name: 'Outline', exact: true })).toBeVisible();
-  await page.locator('#review-tools-workspace').getByRole('button', { name: 'Hide Workspace', exact: true }).click();
+  await page.locator('#reader-tools-workspace').getByRole('button', { name: 'Hide Workspace', exact: true }).click();
   await expect(toggle).toBeFocused();
   await expect(toggle).toBeVisible();
   expect(await ownsHitTarget()).toBe(true);
@@ -1876,12 +1876,12 @@ for (const kind of ['highlight', 'pageNote'] as const) {
     await viewport.evaluate((element) => { element.scrollTop = element.scrollHeight; });
     await expect.poll(() => viewport.evaluate((element) => element.scrollTop)).toBeGreaterThan(1000);
 
-    await page.locator(`[data-review-item="${itemId}"] [data-read-full-annotation="true"]`).click();
+    await page.locator(`[data-annotation-item="${itemId}"] [data-read-full-annotation="true"]`).click();
     const reader = page.locator('[data-full-annotation-reader="true"]:visible');
     await expect(reader).toBeVisible();
     await expect(reader.locator('.full-annotation-reader__body')).toContainText('identification concern');
     await expect.poll(async () => {
-      const mark = await page.locator(`[data-owned-mark][data-review-id="${itemId}"]`).first().boundingBox();
+      const mark = await page.locator(`[data-owned-mark][data-annotation-id="${itemId}"]`).first().boundingBox();
       return mark !== null && mark.y > 0 && mark.y < 900;
     }).toBe(true);
     if (kind === 'highlight') {

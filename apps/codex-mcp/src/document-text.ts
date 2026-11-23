@@ -1,4 +1,4 @@
-import type { ReviewAgentPageText } from '../../web/src/host/review-agent-bridge.js';
+import type { DocumentAgentPageText } from '../../web/src/host/document-agent-bridge.js';
 import { READ_DOCUMENT_TEXT_TOOL, READER_TOOL_MAX_RESULT_CHARS, UNTRUSTED_DOCUMENT_LINE } from './reader-tool-definitions.js';
 
 export interface DocumentTextRange { readonly startPage?: number; readonly endPage?: number }
@@ -22,7 +22,7 @@ export interface DocumentTextOptions {
   readonly startPage: number;
   readonly endPage: number;
   /** Reads one-based pages first..last; rejects when the document changed. */
-  readonly read: (firstPage: number, lastPage: number) => Promise<ReviewAgentPageText>;
+  readonly read: (firstPage: number, lastPage: number) => Promise<DocumentAgentPageText>;
   /** False once the document or reader changed; the partial result is discarded. */
   readonly current: () => boolean;
   readonly maxChars?: number;

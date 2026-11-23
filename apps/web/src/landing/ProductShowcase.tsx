@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState, type CSSProperties } from 'react';
-import { ReviewTooltipButton } from '../review/ReviewTooltipButton.js';
-import { ReviewIcon, type ReviewIconName } from '../review/ReviewIcon.js';
+import { ReaderTooltipButton } from '../reader/ReaderTooltipButton.js';
+import { ReaderIcon, type ReaderIconName } from '../reader/ReaderIcon.js';
 
 const features = [
   {
@@ -18,7 +18,7 @@ const features = [
     description: 'Highlight a passage, suggest an edit, or leave a note. The app saves your annotations automatically, and they’re compatible with other viewers. On the web, export a copy to take them with you.',
     actions: ['Select a passage to highlight or comment.', 'Write a comment and save it.', 'Click an annotation to revisit or edit it.'],
   },
-] as const satisfies readonly { id: string; label: string; icon: ReviewIconName; description: string; actions: readonly string[] }[];
+] as const satisfies readonly { id: string; label: string; icon: ReaderIconName; description: string; actions: readonly string[] }[];
 
 export function ProductShowcase() {
   const [index, setIndex] = useState(0);
@@ -50,11 +50,11 @@ export function ProductShowcase() {
   const id = useId();
   const feature = features[index]!;
   return <section className="landing-showcase" id="features" aria-label="Feature demos">
-    <div className="landing-demo-selector review-workspace__activity-strip">
-      <div className="review-workspace__tabs" role="tablist" aria-label="Explore features" data-workspace-mode-count="3">
-        {features.map((item, itemIndex) => <span key={item.id} className="review-workspace__mode-segment" data-workspace-mode-selected={index === itemIndex ? 'true' : 'false'} role="presentation">
-          <ReviewTooltipButton label={item.label} tooltip={compactControls ? item.label : false} type="button" ref={(button) => { controls.current[itemIndex] = button; }}
-            role="tab" className="review-workspace__mode-tab"
+    <div className="landing-demo-selector reader-workspace__activity-strip">
+      <div className="reader-workspace__tabs" role="tablist" aria-label="Explore features" data-workspace-mode-count="3">
+        {features.map((item, itemIndex) => <span key={item.id} className="reader-workspace__mode-segment" data-workspace-mode-selected={index === itemIndex ? 'true' : 'false'} role="presentation">
+          <ReaderTooltipButton label={item.label} tooltip={compactControls ? item.label : false} type="button" ref={(button) => { controls.current[itemIndex] = button; }}
+            role="tab" className="reader-workspace__mode-tab"
             id={`${id}-${item.id}`} aria-label={item.label} aria-selected={index === itemIndex}
             aria-controls={`${id}-panel`} tabIndex={index === itemIndex ? 0 : -1}
             onClick={() => selectFeature(itemIndex)}
@@ -66,9 +66,9 @@ export function ProductShowcase() {
               selectFeature(next);
               controls.current[next]?.focus();
             }}>
-            <ReviewIcon name={item.icon} />
-            <span className="review-workspace__mode-label" aria-hidden="true">{item.label}</span>
-          </ReviewTooltipButton>
+            <ReaderIcon name={item.icon} />
+            <span className="reader-workspace__mode-label" aria-hidden="true">{item.label}</span>
+          </ReaderTooltipButton>
         </span>)}
       </div>
     </div>

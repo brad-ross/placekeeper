@@ -8,11 +8,11 @@ import { createRequire } from "node:module";
 import { promisify } from "node:util";
 import { describe, expect, it, vi } from "vitest";
 import { PDFDocument } from "pdf-lib";
-import { createReviewState } from "../../../packages/core/src/review-model.js";
+import { createDocumentState } from "../../../packages/core/src/document-model.js";
 import {
-  REVIEW_RUNTIME_PROTOCOL,
-  REVIEW_RUNTIME_VERSION,
-} from "../../../packages/core/src/review-runtime-protocol.js";
+  DOCUMENT_RUNTIME_PROTOCOL,
+  DOCUMENT_RUNTIME_VERSION,
+} from "../../../packages/core/src/document-runtime-protocol.js";
 import { startHttpServer } from "../../service/src/server/http-server.js";
 import { SessionBroker } from "../../service/src/sessions/session-broker.js";
 import { subscribeRuntimeDocumentSource } from "../../web/src/host/runtime-document-source.js";
@@ -32,13 +32,13 @@ import {
 } from "../src/local-workspace.js";
 import {
   RECOVERY_CHOICE_LABELS,
-  buildReviewPanelReattachmentHtml,
-  buildReviewWebviewHtml,
+  buildDocumentPanelReattachmentHtml,
+  buildDocumentWebviewHtml,
   parseSharedAssetManifest,
   parseLaunchResponse,
   recoveryDecisionForLabel,
-  reviewPanelOptions,
-} from "../src/review-panel.js";
+  documentPanelOptions,
+} from "../src/document-panel.js";
 import {
   createPrivateSnapshotDirectory,
   exchangeVscodeLaunch,
@@ -70,6 +70,56 @@ describe("VS Code local host adapter", () => {
     const commands = manifest.contributes.commands.map((command: { command: string }) => command.command);
     expect(commands).toContain("placekeeper.forwardSyncTex");
     expect(commands).toContain("placekeeper.goToSource");
+  });
+
+  it("registers the deprecated export command id as an alias and restores the unchanged panel type", async () => {
+    const disposable = () => ({ dispose() {} });
+    const commands = new Map<string, (...args: unknown[]) => Promise<unknown>>();
+    const serializers: string[] = [];
+    const info = vi.fn(async () => undefined);
+    const vscode = {
+      ThemeColor: class {}, RelativePattern: class {}, UIKind: { Desktop: 1 }, env: { uiKind: 1 },
+      Uri: { file: (fsPath: string) => ({ fsPath }) },
+      commands: { registerCommand(name: string, command: (...args: unknown[]) => Promise<unknown>) {
+        commands.set(name, command); return disposable();
+      } },
+      workspace: {
+        isTrusted: true, workspaceFolders: [],
+        getConfiguration: () => ({ get: () => undefined }),
+        onDidSaveTextDocument: disposable, onDidChangeConfiguration: disposable,
+        createFileSystemWatcher: () => ({ dispose() {}, onDidCreate: disposable, onDidChange: disposable, onDidDelete: disposable }),
+      },
+      window: {
+        showInformationMessage: info,
+        createTextEditorDecorationType: disposable, registerUriHandler: disposable,
+        registerWebviewPanelSerializer(type: string) { serializers.push(type); return disposable(); },
+      },
+    };
+    const subscriptions: Array<{ dispose(): unknown }> = [];
+    const context = {
+      subscriptions, globalStorageUri: { fsPath: resolve(tmpdir(), "placekeeper-command-alias") },
+      globalState: { get: () => ({}), update: async () => undefined },
+      asAbsolutePath: (path: string) => resolve("apps/vscode", path),
+    };
+    const require = createRequire(import.meta.url);
+    const module = { exports: {} as { activate(context: unknown): void } };
+    try {
+      runInNewContext(await readFile(resolve("apps/vscode/dist/extension.cjs"), "utf8"), {
+        module, exports: module.exports, Buffer, process, URL, URLSearchParams, AbortController, AbortSignal,
+        setTimeout, clearTimeout, setInterval, clearInterval,
+        require: (id: string) => id === "vscode" ? vscode : require(id),
+      });
+      module.exports.activate(context);
+      expect(serializers).toEqual(["placekeeper.review"]);
+      const current = commands.get("placekeeper.exportAnnotatedDocument");
+      const legacy = commands.get("placekeeper.exportReviewedPdf");
+      expect(current).toBeTypeOf("function");
+      expect(legacy).toBe(current);
+      await legacy!();
+      expect(info).toHaveBeenCalledWith("Open a generated PDF in Placekeeper first.");
+    } finally {
+      for (const subscription of subscriptions) subscription.dispose();
+    }
   });
 
   it("validates a restored panel before its webview starts without needing another focus event", async () => {
@@ -253,7 +303,7 @@ describe("VS Code local host adapter", () => {
       module.exports.activate(context);
       await deserialize!(panel, { panelKey });
       const panelId = /startVscode\(\{ panelId: "([^"]+)"/u.exec(html)![1];
-      await receive!({ protocol: REVIEW_RUNTIME_PROTOCOL, version: REVIEW_RUNTIME_VERSION, kind: "request",
+      await receive!({ protocol: DOCUMENT_RUNTIME_PROTOCOL, version: DOCUMENT_RUNTIME_VERSION, kind: "request",
         panelId, requestId: "bootstrap_request_123456", method: "bootstrap", payload: {} });
       const forward = commands.get("placekeeper.forwardSyncTex")!;
       await forward(uri(outputPath));
@@ -441,6 +491,7 @@ describe("VS Code local host adapter", () => {
           expect.objectContaining({ command: "placekeeper.forwardSyncTex" }),
           expect.objectContaining({ command: "placekeeper.goToSource" }),
           expect.objectContaining({ command: "placekeeper.reattach" }),
+          expect.objectContaining({ command: "placekeeper.exportAnnotatedDocument", title: "Placekeeper: Export Annotated Document" }),
           expect.objectContaining({ command: "placekeeper.exportReviewedPdf" }),
           expect.objectContaining({ command: "placekeeper.configureLatexWorkshop" }),
         ]),
@@ -455,6 +506,21 @@ describe("VS Code local host adapter", () => {
       },
     });
     expect(manifest.description).toContain("Placekeeper");
+    // The pre-rename export id stays contributed and activatable for user
+    // keybindings, but is hidden from the Command Palette.
+    const legacyManifest = manifest as unknown as {
+      activationEvents: string[];
+      contributes: { menus: Record<string, Array<{ command: string; when?: string }>> };
+    };
+    expect(legacyManifest.activationEvents).toEqual(expect.arrayContaining([
+      "onCommand:placekeeper.exportAnnotatedDocument",
+      "onCommand:placekeeper.exportReviewedPdf",
+    ]));
+    expect(legacyManifest.contributes.menus.commandPalette).toEqual([
+      { command: "placekeeper.exportReviewedPdf", when: "false" },
+    ]);
+    expect(legacyManifest.contributes.menus["webview/context"]?.map(({ command }) => command))
+      .toEqual(["placekeeper.goToSource", "placekeeper.exportAnnotatedDocument"]);
     const viewPdf = manifest.contributes.commands.find(({ command }) => command === "placekeeper.viewPdf");
     expect(viewPdf?.icon).toEqual({
       light: "assets/placekeeper-light.svg",
@@ -604,7 +670,7 @@ describe("VS Code local host adapter", () => {
     if (!result.ok) throw new Error("expected a successful launch");
     if (result.kind === "recovery-offered") throw new Error("expected a scoped URL");
     expect(result.kind).toBe("focused");
-    const html = buildReviewWebviewHtml({
+    const html = buildDocumentWebviewHtml({
       nonce: "nonce-value",
       panelId: "panel_identifier_1234",
       panelKey: "opaque-panel-key",
@@ -624,21 +690,21 @@ describe("VS Code local host adapter", () => {
     expect(html).not.toContain("127.0.0.1");
     expect(html).not.toContain("localhost");
     expect(html).not.toContain("cap=secret");
-    expect(() => buildReviewWebviewHtml({
+    expect(() => buildDocumentWebviewHtml({
       nonce: "nonce-value",
       panelId: "panel_identifier_1234",
       scriptUri: "https://file+.vscode-resource.vscode-cdn.net/assets/app.js",
       styleUri: "https://file+.vscode-resource.vscode-cdn.net/assets/app.css",
       cspSource: "'self' https://*.vscode-cdn.net",
     })).not.toThrow();
-    expect(() => buildReviewWebviewHtml({
+    expect(() => buildDocumentWebviewHtml({
       nonce: "nonce-value",
       panelId: "panel_identifier_1234",
       scriptUri: "vscode-webview://authority/assets/app.js",
       styleUri: "vscode-webview://authority/assets/app.css",
       cspSource: "'self' https://*.vscode-cdn.net https://example.com",
     })).toThrow(/CSP source/u);
-    const options = reviewPanelOptions([]);
+    const options = documentPanelOptions([]);
     expect(options.localResourceRoots).toEqual([]);
     expect(options.enableScripts).toBe(true);
     expect(options.retainContextWhenHidden).toBe(false);
@@ -647,7 +713,7 @@ describe("VS Code local host adapter", () => {
   });
 
   it("records the panel key before the shared application can fail to import", () => {
-    const html = buildReviewWebviewHtml({
+    const html = buildDocumentWebviewHtml({
       nonce: "nonce-value",
       panelId: "panel_identifier_1234",
       panelKey: "opaque-panel-key",
@@ -684,7 +750,7 @@ describe("VS Code local host adapter", () => {
     const waiting = bridge.whenReady().then(ready);
     await Promise.resolve();
     expect(ready).not.toHaveBeenCalled();
-    await bridge.receive({ protocol: REVIEW_RUNTIME_PROTOCOL, version: REVIEW_RUNTIME_VERSION,
+    await bridge.receive({ protocol: DOCUMENT_RUNTIME_PROTOCOL, version: DOCUMENT_RUNTIME_VERSION,
       kind: "request", panelId, requestId: "request_identifier_1234", method: "bootstrap", payload: {} });
     await waiting;
     expect(ready).toHaveBeenCalledWith(true);
@@ -704,7 +770,7 @@ describe("VS Code local host adapter", () => {
       identity: { panelId, sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", generation: 1, revision: 0 },
       bootstrap, invoke, dispose: vi.fn(),
     }, post);
-    await bridge.receive({ protocol: REVIEW_RUNTIME_PROTOCOL, version: 1, kind: "request", panelId,
+    await bridge.receive({ protocol: DOCUMENT_RUNTIME_PROTOCOL, version: 1, kind: "request", panelId,
       requestId: "request_identifier_1234", method: "bootstrap", payload: {} });
     expect(post).toHaveBeenCalledWith(expect.objectContaining({ ok: false, error: { kind: "runtime-version-mismatch" } }));
     expect(bootstrap).not.toHaveBeenCalled();
@@ -720,8 +786,8 @@ describe("VS Code local host adapter", () => {
       revision: 7,
     };
     const request = {
-      protocol: REVIEW_RUNTIME_PROTOCOL,
-      version: REVIEW_RUNTIME_VERSION,
+      protocol: DOCUMENT_RUNTIME_PROTOCOL,
+      version: DOCUMENT_RUNTIME_VERSION,
       kind: "request",
       panelId: expected.panelId,
       requestId: "request_identifier_1234",
@@ -756,7 +822,7 @@ describe("VS Code local host adapter", () => {
     const identity = { panelId, sessionId, generation: 1, revision: 0 };
     const listeners = new Set<(message: unknown) => void>();
     const bootstrap = vi.fn(async () => {
-      const state = createReviewState({
+      const state = createDocumentState({
         sessionId,
         source: {
           fileId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
@@ -824,8 +890,8 @@ describe("VS Code local host adapter", () => {
       revision: 7,
     };
     const valid = {
-      protocol: REVIEW_RUNTIME_PROTOCOL,
-      version: REVIEW_RUNTIME_VERSION,
+      protocol: DOCUMENT_RUNTIME_PROTOCOL,
+      version: DOCUMENT_RUNTIME_VERSION,
       kind: "request",
       panelId: expected.panelId,
       requestId: "request_identifier_1234",
@@ -847,8 +913,8 @@ describe("VS Code local host adapter", () => {
       revision: 7,
     };
     const request = {
-      protocol: REVIEW_RUNTIME_PROTOCOL,
-      version: REVIEW_RUNTIME_VERSION,
+      protocol: DOCUMENT_RUNTIME_PROTOCOL,
+      version: DOCUMENT_RUNTIME_VERSION,
       kind: "request",
       panelId: expected.panelId,
       requestId: "request_identifier_1234",
@@ -944,7 +1010,7 @@ describe("VS Code local host adapter", () => {
   });
 
   it("renders an inert neutral reattachment surface for a disconnected panel", () => {
-    const html = buildReviewPanelReattachmentHtml();
+    const html = buildDocumentPanelReattachmentHtml();
 
     expect(html).toContain("Reconnect this document");
     expect(html).toContain("Placekeeper: View PDF");
@@ -1014,7 +1080,7 @@ describe("VS Code local host adapter", () => {
   });
 
   it("pins bootstrap document bytes to the state generation", async () => {
-    const state = createReviewState({
+    const state = createDocumentState({
       sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
       source: {
         fileId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
@@ -1127,7 +1193,7 @@ describe("VS Code local host adapter", () => {
     const bridge = new VersionedWebviewBridge(client, vi.fn());
     let requestNumber = 0;
     const send = async (payload: unknown) => bridge.receive({
-      protocol: REVIEW_RUNTIME_PROTOCOL, version: REVIEW_RUNTIME_VERSION, kind: "request", ...client.identity,
+      protocol: DOCUMENT_RUNTIME_PROTOCOL, version: DOCUMENT_RUNTIME_VERSION, kind: "request", ...client.identity,
       requestId: `request_identifier_${++requestNumber}`, method: "forwardSyncTex", payload,
     });
     for (const payload of [
@@ -1252,7 +1318,7 @@ describe("VS Code local host adapter", () => {
         rewriteAssessor: async () => ({ eligible: true }),
         inspectGeneration: async () => ({ pageCount: 1, pages: [{ pageIndex: 0, text: "successor" }] }),
       });
-      const opened = await broker.openReview({
+      const opened = await broker.openDocument({
         pdfPath,
         surface: "vscode",
         workflowMode: "generated-output",

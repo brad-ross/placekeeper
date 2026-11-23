@@ -12,7 +12,7 @@ export default defineConfig({
   },
   webServer: {
     command: browserTestServerCommand,
-    url: `${browserTestOrigin}/test/acceptance/review-harness/index.html`,
+    url: `${browserTestOrigin}/test/acceptance/reader-harness/index.html`,
     ...serverDefaults,
   },
 });

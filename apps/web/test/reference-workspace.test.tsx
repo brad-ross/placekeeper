@@ -2,47 +2,47 @@ import { PdfZoomMode } from '@embedpdf/models';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 
-import { DestinationSnippetFrame } from '../src/review/DestinationSnippet.js';
+import { DestinationSnippetFrame } from '../src/reader/DestinationSnippet.js';
 import {
   LinkActionMenuContent,
   LinkActionPopover,
   linkActionDismissRestoresFocus,
   placeLinkActionPopover,
   setLinkActionOpenerExpanded,
-} from '../src/review/LinkActionPopover.js';
+} from '../src/reader/LinkActionPopover.js';
 import { PDF_LINK_ACTION_MENU_ID } from '../src/pdf/viewer-interaction-events.js';
-import { OutlineNavigator } from '../src/review/OutlineNavigator.js';
-import { compositeFocusIndex, horizontalTabFocusIndex } from '../src/review/menu-focus.js';
+import { OutlineNavigator } from '../src/reader/OutlineNavigator.js';
+import { compositeFocusIndex, horizontalTabFocusIndex } from '../src/reader/menu-focus.js';
 import {
   createOutlineRowCopyLink,
   createPdfTargetCopyLink,
   createSearchResultRowCopyLink,
-} from '../src/review/row-link-actions.js';
+} from '../src/reader/row-link-actions.js';
 import {
   chooseWorkspaceModeFocusTarget,
   referenceTabFocusIndex,
   ReferenceWorkspace,
   WORKSPACE_MODES,
-} from '../src/review/ReferenceWorkspace.js';
+} from '../src/reader/ReferenceWorkspace.js';
 import {
   ReferenceResizeHandle,
   referenceResizeKeyValue,
   referenceResizePointerValue,
-} from '../src/review/ReferenceResizeHandle.js';
+} from '../src/reader/ReferenceResizeHandle.js';
 import {
   chooseToolModeFocusTarget,
   OutlineAnnotationsWorkspace,
-} from '../src/review/OutlineAnnotationsWorkspace.js';
+} from '../src/reader/OutlineAnnotationsWorkspace.js';
 import type { PdfOutlineItem } from '../src/pdf/pdf-outline.js';
-import { RIGHT_WORKSPACE_MODES } from '../src/review/reference-navigation-state.js';
-import { AnnotationCountBadge } from '../src/review/AnnotationCountBadge.js';
+import { RIGHT_WORKSPACE_MODES } from '../src/reader/reference-navigation-state.js';
+import { AnnotationCountBadge } from '../src/reader/AnnotationCountBadge.js';
 import {
   createOutlineExpansionState,
   setOutlineExpandedItemIds,
   toggleOutlineExpansionState,
-} from '../src/review/outline-expansion-state.js';
-import { OutlineExpansionToggle } from '../src/review/OutlineExpansionToggle.js';
-import { OutlineExpansionProvider } from '../src/review/OutlineExpansionController.js';
+} from '../src/reader/outline-expansion-state.js';
+import { OutlineExpansionToggle } from '../src/reader/OutlineExpansionToggle.js';
+import { OutlineExpansionProvider } from '../src/reader/OutlineExpansionController.js';
 
 const target = (identity: string, pageIndex: number) => ({
   documentGeneration: 3,
@@ -260,7 +260,7 @@ describe('shared reference workspace', () => {
 
   it('shows the annotation count as text for screen readers and a number on screen', () => {
     const many = renderToStaticMarkup(<AnnotationCountBadge count={3} />);
-    expect(many).toBe('<span class="review-workspace__annotation-count" data-annotation-count="3"><span aria-hidden="true">3</span><span class="sr-only">3 annotations</span></span>');
+    expect(many).toBe('<span class="reader-workspace__annotation-count" data-annotation-count="3"><span aria-hidden="true">3</span><span class="sr-only">3 annotations</span></span>');
     expect(renderToStaticMarkup(<AnnotationCountBadge count={1} />)).toContain('<span class="sr-only">1 annotation</span>');
     expect(renderToStaticMarkup(<AnnotationCountBadge count={0} />)).toBe('');
   });
@@ -285,7 +285,7 @@ describe('shared reference workspace', () => {
       </OutlineExpansionProvider>,
     );
 
-    expect(html).toContain('id="review-tools-workspace"');
+    expect(html).toContain('id="reader-tools-workspace"');
     expect(html).not.toContain('id="workspace-mode-outline"');
     expect(html).not.toContain('id="workspace-panel-outline"');
     expect(html).not.toContain('This PDF has no embedded outline.');
@@ -403,7 +403,7 @@ describe('shared reference workspace', () => {
     expect(html).toContain('aria-label="Close active reference"');
     expect(html).not.toMatch(/role="tab"[^>]*>[^<]*Close/u);
     expect(html).toContain('aria-live="polite"');
-    expect(html).toContain('class="review-workspace__activity-strip review-workspace__activity-strip--compound"');
+    expect(html).toContain('class="reader-workspace__activity-strip reader-workspace__activity-strip--compound"');
     expect(html).toContain('aria-label="Outline"');
     expect(html).toContain('aria-label="Outline"');
     expect(html).toContain('aria-label="References"');
@@ -411,17 +411,17 @@ describe('shared reference workspace', () => {
     expect(html.match(/data-workspace-mode-label/g)).toHaveLength(1);
     expect(html).toContain('data-workspace-mode-label="references"');
     expect(html).toContain('>References</span>');
-    expect(html).toContain('review-workspace__mode-segment--compound');
+    expect(html).toContain('reader-workspace__mode-segment--compound');
     expect(html).toMatch(
-      /review-workspace__mode-segment--compound[\s\S]*data-workspace-mode="references"[\s\S]*<\/div><button[^>]*data-reference-move="bottom"/u,
+      /reader-workspace__mode-segment--compound[\s\S]*data-workspace-mode="references"[\s\S]*<\/div><button[^>]*data-reference-move="bottom"/u,
     );
     const workspaceTablist = html.match(
-      /<div class="review-workspace__tabs" role="tablist"[\s\S]*?<\/div>/u,
+      /<div class="reader-workspace__tabs" role="tablist"[\s\S]*?<\/div>/u,
     )?.[0];
     expect(workspaceTablist).toBeDefined();
     expect(workspaceTablist).not.toContain('data-reference-move');
     expect(html).toContain('data-reference-move="bottom"');
-    expect(html).not.toContain('review-workspace__tab-segment--compound');
+    expect(html).not.toContain('reader-workspace__tab-segment--compound');
   });
 
   it('shows References docking only for the selected mode and a visible placement change', () => {
@@ -683,7 +683,7 @@ describe('shared reference workspace', () => {
     expect(html).toContain('aria-label="Workspace modes"');
     expect(html).toContain('data-workspace-mode-count="1"');
     expect(html).toContain('data-workspace-mode-label="references"');
-    expect(html).toContain('review-workspace__activity-strip--title');
+    expect(html).toContain('reader-workspace__activity-strip--title');
     expect(html).toContain('aria-label="Open references"');
     expect(html).toContain('aria-orientation="vertical"');
     expect(html).toContain('data-reference-tabs-orientation="vertical"');

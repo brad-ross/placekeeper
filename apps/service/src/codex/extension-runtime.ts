@@ -1,5 +1,5 @@
 import { realpath } from 'node:fs/promises';
-import { ExtensionRecentReviews } from './extension-recent-reviews.js';
+import { ExtensionRecentDocuments } from './extension-recent-documents.js';
 import { HostResourcePersistence, type HostCopyRecoveryMatch } from './host-resource-persistence.js';
 import type { HostResourceRequest, HostResourceFile } from '../../../../packages/core/src/host-resource-protocol.js';
 import { reconcileNativeSource } from "./reconcile-native-source.js";
@@ -7,10 +7,10 @@ import { randomBytes } from 'node:crypto';
 import { digestSecretHex } from '../../../../packages/core/src/session-security.js';
 import { CODEX_MAX_ENCODED_RESPONSE_BYTES, parseCodexAppRequest, type CodexAppResponse } from '../../../../packages/core/src/codex-mcp-protocol.js';
 import { parseExtensionRequest, type ExtensionResult, type ExtensionPresentation, type ExtensionRequest } from '../../../../packages/core/src/extension-protocol.js';
-import { ReviewExportConflictError } from '../../../../packages/core/src/review-runtime-protocol.js';
-import type { UpgradeReviewStatus } from '../../../../packages/core/src/upgrade-review-protocol.js';
+import { DocumentExportConflictError, LEGACY_ANNOTATION_REVISION_KEY } from '../../../../packages/core/src/document-runtime-protocol.js';
+import type { UpgradeDocumentStatus } from '../../../../packages/core/src/upgrade-document-protocol.js';
 import type { SessionBroker } from '../sessions/session-broker.js';
-import type { OpenReviewResult, RecoveryOfferIdentity } from '../sessions/session-contracts.js';
+import type { OpenDocumentResult, RecoveryOfferIdentity } from '../sessions/session-contracts.js';
 import type { CodexActiveScope, CodexServiceRuntimeBackend } from './codex-runtime-backend.js';
 
 const secret = () => randomBytes(32).toString('base64url');
@@ -26,7 +26,7 @@ type RotationReceipt = {
   record: RecordState;
   result: Extract<ExtensionResult, { status: 'active' }>;
 };
-type Offer = ({ path: string; hostSessionId?: string; resumeLiveHostReview?: true; releasedLocalSessionId?: string; recoveryOffer?: RecoveryOfferIdentity } | { copyRecovery: HostCopyRecoveryMatch }) & {
+type Offer = ({ path: string; hostSessionId?: string; resumeLiveHostDocument?: true; releasedLocalSessionId?: string; recoveryOffer?: RecoveryOfferIdentity } | { copyRecovery: HostCopyRecoveryMatch }) & {
   expires: number;
   live?: LiveOffer | undefined;
   targetSessionId?: string;
@@ -37,7 +37,7 @@ type Offer = ({ path: string; hostSessionId?: string; resumeLiveHostReview?: tru
 
 /** App ownership is independent of trusted chat bindings. Grants never enter browser storage. */
 export class ExtensionRuntimeManager {
-  readonly #recent:ExtensionRecentReviews;
+  readonly #recent:ExtensionRecentDocuments;
   readonly #hostFiles=new Map<string,HostResourceFile>();
   readonly #hostTickets=new Map<string,{file:HostResourceFile;expires:number}>();
   readonly #hostSessions=new Set<string>();
@@ -62,7 +62,7 @@ export class ExtensionRuntimeManager {
   #tail:Promise<unknown>=Promise.resolve();
   #closing=false;
   constructor(readonly broker:SessionBroker,options:{backend:CodexServiceRuntimeBackend;now?:()=>number;panelLeaseMs?:number;grantIdleMs?:number;pickPdf?:()=>Promise<string|undefined>}) {
-    this.#recent=new ExtensionRecentReviews(broker.recoveryRoot,options.now);this.#backend=options.backend;this.#host=new HostResourcePersistence(broker,options.backend);this.#now=options.now??Date.now;this.#lease=options.panelLeaseMs??30_000;this.#idle=options.grantIdleMs??30*60_000;this.#pick=options.pickPdf;
+    this.#recent=new ExtensionRecentDocuments(broker.recoveryRoot,options.now);this.#backend=options.backend;this.#host=new HostResourcePersistence(broker,options.backend);this.#now=options.now??Date.now;this.#lease=options.panelLeaseMs??30_000;this.#idle=options.grantIdleMs??30*60_000;this.#pick=options.pickPdf;
     if(!Number.isSafeInteger(this.#lease)||this.#lease<=0||!Number.isSafeInteger(this.#idle)||this.#idle<=this.#lease)throw Error('Invalid extension lifetimes');
     this.#timer=setInterval(()=>this.#sweep(),Math.min(this.#lease,1000));this.#timer.unref();
     this.#unsubscribe=broker.onStateInvalidation(event=>{for(const r of this.#records.values())if(r.sessionId===event.sessionId){r.watermark++;if(event.reason==='generation')this.#suspend(r);}});
@@ -71,6 +71,7 @@ export class ExtensionRuntimeManager {
   #serial<T>(work:()=>Promise<T>):Promise<T>{const result=this.#tail.then(work,work);this.#tail=result.catch(()=>undefined);return result;}
   async dispatch(raw:unknown):Promise<ExtensionResult|CodexAppResponse>{
     const r=parseExtensionRequest(raw);if(!r||this.#closing)return unavailable();
+    // Legacy wire status: see LEGACY_RECENT_DOCUMENTS_STATUS for when it can flip.
     if(r.action==='recent-list')return {status:'recent-reviews',items:(await this.#recent.list()).map(({id,title,updatedAt,page})=>({id,title,updatedAt,...(page===undefined?{}:{page})}))};
     if(r.action==='recent-open')return this.#serial(()=>this.#openRecent(r.id)).catch(()=>unavailable());
     if(r.action==='reading-position')return this.#serial<ExtensionResult>(async()=>{
@@ -120,7 +121,7 @@ export class ExtensionRuntimeManager {
       if ('copyRecovery' in result) {
         const token = secret(), disconnected = this.#disconnected(result.copyRecovery.sessionId);
         this.#offers.set(digestSecretHex(token), { copyRecovery: result.copyRecovery, live: this.#liveOffer(result.copyRecovery.sessionId), ...(disconnected ? {disconnected} : {}), expires: this.#now() + 60000 });
-        return { status: 'busy', recoveryToken: token, canResume: !this.#hasReviewGrant(result.copyRecovery.sessionId), matchingCopy: true, ...(disconnected ? {canRecover:true} : {}) };
+        return { status: 'busy', recoveryToken: token, canResume: !this.#hasDocumentGrant(result.copyRecovery.sessionId), matchingCopy: true, ...(disconnected ? {canRecover:true} : {}) };
       }
       if(!('opened' in result))return result;
       const opened=result.opened;
@@ -133,9 +134,9 @@ export class ExtensionRuntimeManager {
       if(opened.kind==='focused'){
         const token=secret(),scope=this.broker.nativeAdmissionScope(opened.launch.sessionId);if(!scope)return unavailable();
         const sessionId = opened.launch.sessionId;
-        const canResume = !this.#hasReviewGrant(sessionId) && await this.#host.state(sessionId) !== undefined;
+        const canResume = !this.#hasDocumentGrant(sessionId) && await this.#host.state(sessionId) !== undefined;
         const disconnected = this.#disconnected(sessionId);
-        this.#offers.set(digestSecretHex(token), { path: scope.canonicalSourcePath, hostSessionId: sessionId, live: this.#liveOffer(sessionId), ...(disconnected ? {disconnected} : {}), expires: this.#now() + 60000, ...(canResume ? { resumeLiveHostReview: true } : {}) });
+        this.#offers.set(digestSecretHex(token), { path: scope.canonicalSourcePath, hostSessionId: sessionId, live: this.#liveOffer(sessionId), ...(disconnected ? {disconnected} : {}), expires: this.#now() + 60000, ...(canResume ? { resumeLiveHostDocument: true } : {}) });
         return { status: 'busy', recoveryToken: token, canResume, ...(disconnected ? {canRecover:true} : {}) };
       }
       this.#hostSessions.add(opened.launch.sessionId);return this.#provisional(opened);
@@ -156,7 +157,7 @@ export class ExtensionRuntimeManager {
     const path=input.pdfPath??await this.#pick?.();
     if(!path)return {status:this.#pick?'cancelled':'chooser'};
     if(this.#closing)return unavailable();
-    const opened=await this.broker.openReview({pdfPath:path,surface:'codex-native'});
+    const opened=await this.broker.openDocument({pdfPath:path,surface:'codex-native'});
     if(this.#closing)return unavailable();
     if(opened.kind==='focused'||opened.kind==='recovery-offered') {
       const releasedLocalSessionId = opened.kind === 'focused' && this.#canResumeReleasedLocal(opened.launch.sessionId) ? opened.launch.sessionId : undefined;
@@ -170,14 +171,14 @@ export class ExtensionRuntimeManager {
     this.#sweep();const offer=this.#offers.get(digestSecretHex(input.recoveryToken));
     if(!offer||this.#closing)return unavailable();
     if(offer.result)return offer.result.operationId===input.operationId&&offer.result.choice===input.choice?offer.result.value:unavailable();
-    let result: OpenReviewResult | undefined;
+    let result: OpenDocumentResult | undefined;
     if (input.choice === 'recover') {
       const disconnected = offer.disconnected;
       if (!disconnected || !offer.live || !this.#currentLiveOffer(offer.live) || !this.#stillDisconnected(disconnected)) return unavailable();
       if ('copyRecovery' in offer && !await this.#host.matchesCopyRecovery(offer.copyRecovery)) return unavailable();
       const host = 'copyRecovery' in offer || offer.hostSessionId !== undefined;
       const reopened = host
-        ? await this.broker.reopenLiveHostReview(disconnected.sessionId)
+        ? await this.broker.reopenLiveHostDocument(disconnected.sessionId)
         : await this.broker.reopenLiveLocal(disconnected.sessionId, offer.path);
       this.#sweep();
       if (this.#closing || offer.expires <= this.#now() || reopened?.kind !== 'focused' ||
@@ -198,10 +199,10 @@ export class ExtensionRuntimeManager {
         ? await this.#host.fork(hostSessionId, offer.copyRecovery.sha256)
         : await this.#resumeMatchingCopy(hostSessionId, input.operationId);
     } else {
-      if (input.choice === 'resume' && !offer.recoveryOffer && !offer.resumeLiveHostReview && !offer.releasedLocalSessionId) return unavailable();
+      if (input.choice === 'resume' && !offer.recoveryOffer && !offer.resumeLiveHostDocument && !offer.releasedLocalSessionId) return unavailable();
       hostSessionId = offer.hostSessionId;
       if(input.choice==='fork'&&!hostSessionId&&!offer.recoveryOffer&&offer.targetSessionId){
-        const exact=await this.broker.openReview({pdfPath:offer.path,surface:'codex-native',recoveryTargetSessionId:offer.targetSessionId});
+        const exact=await this.broker.openDocument({pdfPath:offer.path,surface:'codex-native',recoveryTargetSessionId:offer.targetSessionId});
         if(exact.kind!=='recovery-offered'||exact.recoverySessionId!==offer.targetSessionId)return unavailable();
         offer.recoveryOffer=exact.recoveryOffer;
       }
@@ -213,9 +214,9 @@ export class ExtensionRuntimeManager {
         result = reopened;
       } else result = hostSessionId && input.choice === 'fork'
         ? await this.#host.fork(hostSessionId)
-        : hostSessionId && offer.resumeLiveHostReview
+        : hostSessionId && offer.resumeLiveHostDocument
           ? await this.#resumeMatchingCopy(hostSessionId, input.operationId)
-          : await this.broker.openReview({pdfPath:offer.path,surface:'codex-native',recoveryDecision:input.choice,...(offer.targetSessionId?{recoveryTargetSessionId:offer.targetSessionId}:{}),...(offer.recoveryOffer?{recoveryOffer:offer.recoveryOffer,recoveryOperationId:input.operationId}:{})});
+          : await this.broker.openDocument({pdfPath:offer.path,surface:'codex-native',recoveryDecision:input.choice,...(offer.targetSessionId?{recoveryTargetSessionId:offer.targetSessionId}:{}),...(offer.recoveryOffer?{recoveryOffer:offer.recoveryOffer,recoveryOperationId:input.operationId}:{})});
     }
     if(this.#closing||!result||result.kind==='recovery-offered')return unavailable();
     if (input.choice === 'resume' && offer.live &&
@@ -238,14 +239,14 @@ export class ExtensionRuntimeManager {
     if(live){
       const scope=await this.broker.sessionScope(entry.sessionId);
       if(!scope || this.broker.taskBindings.taskForGeneration(entry.sessionId,live.documentGeneration))return unavailable();
-      const disconnected=this.#disconnected(entry.sessionId),unowned=!this.#hasReviewGrant(entry.sessionId);
+      const disconnected=this.#disconnected(entry.sessionId),unowned=!this.#hasDocumentGrant(entry.sessionId);
       if(unowned&&!host)this.#releasedLocalSessions.add(entry.sessionId);
       const token=secret();this.#offers.set(digestSecretHex(token),{path,expires:this.#now()+60000,targetSessionId:entry.sessionId,live:this.#liveOffer(entry.sessionId),
-        ...(hostFile?{hostSessionId:entry.sessionId,hostFile,...(unowned?{resumeLiveHostReview:true as const}:{})}:unowned?{releasedLocalSessionId:entry.sessionId}:{}),
+        ...(hostFile?{hostSessionId:entry.sessionId,hostFile,...(unowned?{resumeLiveHostDocument:true as const}:{})}:unowned?{releasedLocalSessionId:entry.sessionId}:{}),
         ...(disconnected?{disconnected}:{})});
       return {status:'busy',recoveryToken:token,canResume:unowned,...(disconnected?{canRecover:true}:{})};
     }
-    const opened=await this.broker.openReview({pdfPath:path,surface:'codex-native',recoveryTargetSessionId:entry.sessionId});
+    const opened=await this.broker.openDocument({pdfPath:path,surface:'codex-native',recoveryTargetSessionId:entry.sessionId});
     if(opened.kind!=='recovery-offered'||opened.recoverySessionId!==entry.sessionId)return unavailable();
     const token=secret();this.#offers.set(digestSecretHex(token),{path,expires:this.#now()+60000,targetSessionId:entry.sessionId,recoveryOffer:opened.recoveryOffer,
       ...(hostFile?{hostSessionId:entry.sessionId,hostFile}:{})});
@@ -259,7 +260,7 @@ export class ExtensionRuntimeManager {
   }
 
   #currentLiveOffer(offer: LiveOffer, allowRelease = false): LiveOffer | undefined {
-    const current = this.#liveOffer(offer.scope.reviewSessionId);
+    const current = this.#liveOffer(offer.scope.documentSessionId);
     if (!current || current.ownershipEpoch !== offer.ownershipEpoch ||
         current.scope.documentGeneration !== offer.scope.documentGeneration ||
         current.scope.canonicalSourcePath !== offer.scope.canonicalSourcePath ||
@@ -274,7 +275,7 @@ export class ExtensionRuntimeManager {
     const key = digestSecretHex(token), offer = this.#offers.get(key);
     if (this.#closing || !offer?.live || offer.result || !this.#currentLiveOffer(offer.live, true)) return unavailable();
     const { scope } = offer.live;
-    const sessionId = scope.reviewSessionId;
+    const sessionId = scope.documentSessionId;
     const matchingCopy = 'copyRecovery' in offer;
     if (matchingCopy) {
       if (!await this.#host.matchesCopyRecovery(offer.copyRecovery)) return unavailable();
@@ -291,7 +292,7 @@ export class ExtensionRuntimeManager {
       : this.#canResumeReleasedLocal(sessionId);
     const refreshed: Offer = { ...offer, live, disconnected };
     if (canResume && !('copyRecovery' in refreshed)) {
-      if (refreshed.hostSessionId) refreshed.resumeLiveHostReview = true;
+      if (refreshed.hostSessionId) refreshed.resumeLiveHostDocument = true;
       else refreshed.releasedLocalSessionId = sessionId;
     }
     // A lost reply can be retried with the same token until the original expiry.
@@ -311,25 +312,25 @@ export class ExtensionRuntimeManager {
   }
   #canResumeReleasedLocal(sessionId: string): boolean {
     const scope = this.broker.nativeAdmissionScope(sessionId);
-    return this.#releasedLocalSessions.has(sessionId) && !this.#hasReviewGrant(sessionId) &&
+    return this.#releasedLocalSessions.has(sessionId) && !this.#hasDocumentGrant(sessionId) &&
       scope !== undefined && this.broker.taskBindings.taskForGeneration(sessionId, scope.documentGeneration) === undefined;
   }
-  #hasReviewGrant(sessionId: string): boolean {
+  #hasDocumentGrant(sessionId: string): boolean {
     for (const record of this.#records.values()) {
       if (record.sessionId === sessionId) return true;
     }
     return false;
   }
-  async #resumeMatchingCopy(sessionId: string, operationId: string): Promise<OpenReviewResult | undefined> {
-    if (this.#hasReviewGrant(sessionId)) return;
+  async #resumeMatchingCopy(sessionId: string, operationId: string): Promise<OpenDocumentResult | undefined> {
+    if (this.#hasDocumentGrant(sessionId)) return;
     if (this.broker.nativeAdmissionScope(sessionId)) {
-      return this.broker.reopenLiveHostReview(sessionId).catch(() => undefined);
+      return this.broker.reopenLiveHostDocument(sessionId).catch(() => undefined);
     }
     const path = await this.broker.importedRecoveryPath(sessionId);
     if (!path) return;
-    const offered = await this.broker.openReview({ pdfPath: path, surface: 'codex-native' });
+    const offered = await this.broker.openDocument({ pdfPath: path, surface: 'codex-native' });
     if (offered.kind !== 'recovery-offered' || offered.recoverySessionId !== sessionId) return;
-    return this.broker.openReview({
+    return this.broker.openDocument({
       pdfPath: path, surface: 'codex-native', recoveryDecision: 'resume',
       recoveryOffer: offered.recoveryOffer, recoveryOperationId: operationId,
     });
@@ -346,7 +347,7 @@ export class ExtensionRuntimeManager {
         this.#records.get(digestSecretHex(receipt.result.grant)) === receipt.record) return receipt;
   }
 
-  #provisional(result:Exclude<OpenReviewResult,{kind:'recovery-offered'}>, copyAdmission?: RecordState['copyAdmission'], hostFile?:HostResourceFile):ExtensionResult{
+  #provisional(result:Exclude<OpenDocumentResult,{kind:'recovery-offered'}>, copyAdmission?: RecordState['copyAdmission'], hostFile?:HostResourceFile):ExtensionResult{
     this.#releasedLocalSessions.delete(result.launch.sessionId);
     const grant=secret();const record:RecordState={sessionId:result.launch.sessionId,grant,expires:this.#now()+Math.min(60_000,this.#idle),provisional:true,watermark:0,contextPublished:false,...(copyAdmission ? { copyAdmission } : {})};
     this.#registerGrant(record);return {status:'provisional',grant,...(hostFile?{hostFile}:{})};
@@ -379,7 +380,7 @@ export class ExtensionRuntimeManager {
     const sourceScope=await this.broker.sessionScope(record.sessionId);
     const hostFile=this.#hostFiles.get(record.sessionId);
     if(sourceScope && (!this.#hostSessions.has(record.sessionId)||hostFile)){
-      await this.broker.protectChromeReview(record.sessionId);
+      await this.broker.protectChromeDocument(record.sessionId);
       const recent=await this.#recent.remember({sessionId:record.sessionId,title:sourceScope.sourceDisplayName,
         source:hostFile?{kind:'host',file:hostFile}:{kind:'local',path:current.canonicalSourcePath}}).catch(()=>undefined);
       // Reopen hints are optional; durable review protection above is not.
@@ -423,12 +424,12 @@ export class ExtensionRuntimeManager {
     if(!current()||!r)return {status:'denied',reason:'expired'};
     if(request.method==='detach'){this.#remove(r);return {status:'ok',payload:{}};}
     if(request.method==='renew'){r.lease=this.#now()+this.#lease;r.expires=this.#now()+this.#idle;return {status:'ok',payload:{leaseExpiresAt:new Date(r.lease).toISOString()}};}
-    if(request.method==='watermark'){const state=this.broker.state(r.sessionId);return {status:'ok',payload:{watermark:r.watermark,sessionId:r.sessionId,documentGeneration:request.generation,reviewRevision:state?.revision}};}
+    if(request.method==='watermark'){const state=this.broker.state(r.sessionId);return {status:'ok',payload:{watermark:r.watermark,sessionId:r.sessionId,documentGeneration:request.generation,[LEGACY_ANNOTATION_REVISION_KEY]:state?.revision}};}
     try{const payload=await this.#backend.handle(this.#scope(r),request,current);if(!current())return {status:'denied',reason:'revoked'};const response:CodexAppResponse={status:'ok',payload};return Buffer.byteLength(JSON.stringify(response))<=CODEX_MAX_ENCODED_RESPONSE_BYTES?response:{status:'denied',reason:'unavailable'};}
-    catch(error){if(current()&&error instanceof ReviewExportConflictError)return {status:'operation-error',reason:'export-conflict'};return {status:'denied',reason:'unavailable'};}
+    catch(error){if(current()&&error instanceof DocumentExportConflictError)return {status:'operation-error',reason:'export-conflict'};return {status:'denied',reason:'unavailable'};}
   }
   activityCount(){this.#sweep();return this.#panels.size;}
   upgradeCovered(has:(id:string)=>boolean){return [...this.#panels.keys()].every(id=>has(`codex:${id}`));}
-  async closeForUpgrade(_status:UpgradeReviewStatus){await this.close();}
+  async closeForUpgrade(_status:UpgradeDocumentStatus){await this.close();}
   async close(){this.#closing=true;await this.#host.close();await this.#tail;await Promise.allSettled([...this.#requests]);await this.#host.close();this.#hostTickets.clear();this.#hostSessions.clear();this.#hostFiles.clear();clearInterval(this.#timer);this.#unsubscribe();this.#unsubscribeEnd();for(const r of this.#records.values())this.#remove(r);this.#offers.clear();this.#receipts.clear();this.#revoked.clear();this.#ownershipEpochs.clear();this.#releasedLocalSessions.clear();}
 }

@@ -1,17 +1,17 @@
-import { createUpgradeReviewProtection, type UpgradeReviewParticipants } from "../host/upgrade-review-participants.js";
-import type { UpgradeReviewSettlement } from "../../../../packages/core/src/upgrade-review-protocol.js";
+import { createUpgradeDocumentProtection, type UpgradeDocumentParticipants } from "../host/upgrade-document-participants.js";
+import type { UpgradeDocumentSettlement } from "../../../../packages/core/src/upgrade-document-protocol.js";
 import { NativeTaskLaunchRegistry } from "../desktop/native-task-launches.js";
-import { LocalReviewBackend } from "../runtime/local-review-backend.js";
+import { LocalDocumentBackend } from "../runtime/local-document-backend.js";
 import { chromeDownloadFolder } from "./chrome-download-folder.js";
 import { join } from "node:path";
-import type { ReviewRuntimeBrokerMethod } from "../../../../packages/core/src/review-runtime-protocol.js";
+import type { DocumentRuntimeBrokerMethod } from "../../../../packages/core/src/document-runtime-protocol.js";
 import type { ExportCoordinator } from "../export/export-coordinator.js";
 import type { PdfSaveCoordinator } from "../saving/pdf-save-coordinator.js";
 import type { SessionBroker, SessionLaunch } from "../sessions/session-broker.js";
 import type { BrowserSourceStore } from "./browser-source-store.js";
 import { CHROME_RUNTIME_SOURCE_PROTOCOL_VERSION } from "./browser-source-store.js";
 import {
-  ChromeCanonicalReviewIndex,
+  ChromeCanonicalDocumentIndex,
   ChromeRuntimeAggregateQuota,
   ChromeRuntimeServiceAuthority,
   ChromeRuntimeOperationJournal,
@@ -51,7 +51,7 @@ export interface ChromeServiceRuntimeBackendOptions {
  * authority. It retains credentials, paths, source URLs, and presentation
  * leases exclusively on the trusted side. */
 export class ChromeServiceRuntimeBackend implements ChromeRuntimeBackend {
-  upgradeParticipants?: UpgradeReviewParticipants;
+  upgradeParticipants?: UpgradeDocumentParticipants;
   upgradeCovered(): boolean {
     return [...this.#presentations.values()].every(leases => [...leases].every(lease => this.upgradeParticipants?.has(`${this.#runtimeHost}:${lease}`))) && this.#provisionals.size === 0;
   }
@@ -60,8 +60,8 @@ export class ChromeServiceRuntimeBackend implements ChromeRuntimeBackend {
   readonly #browserSources: BrowserSourceStore;
   readonly #transferStore: ChromeTransferStore;
   readonly #saving: PdfSaveCoordinator;
-  readonly #review: LocalReviewBackend;
-  readonly #index = new ChromeCanonicalReviewIndex<CanonicalRecord | ChromeRuntimeRecovery>();
+  readonly #documentSession: LocalDocumentBackend;
+  readonly #index = new ChromeCanonicalDocumentIndex<CanonicalRecord | ChromeRuntimeRecovery>();
   readonly #records = new Map<string, CanonicalRecord>();
   readonly #presentations = new Map<string, Set<string>>();
   readonly #provisionals = new Map<string, number>();
@@ -75,7 +75,7 @@ export class ChromeServiceRuntimeBackend implements ChromeRuntimeBackend {
     this.#browserSources = options.browserSources;
     this.#transferStore = options.transferStore;
     this.#saving = options.saving;
-    this.#review = new LocalReviewBackend(options);
+    this.#documentSession = new LocalDocumentBackend(options);
     this.#runtimeHost = options.runtimeHost ?? "chrome";
     if (this.#runtimeHost === "electron") this.nativeTaskLaunches = new NativeTaskLaunchRegistry(this.#broker);
     this.#downloadFolder = options.downloadFolder ?? chromeDownloadFolder;
@@ -108,11 +108,11 @@ export class ChromeServiceRuntimeBackend implements ChromeRuntimeBackend {
 
   retentionStatus(): {
     readonly records: number; readonly activated: number; readonly presentations: number;
-    readonly provisionals: number; readonly cachedOperations: number; readonly indexedReviews: number;
+    readonly provisionals: number; readonly cachedOperations: number; readonly indexedDocuments: number;
   } {
     return {
       records: this.#records.size, activated: this.#activated.size,
-      indexedReviews: this.#index.size,
+      indexedDocuments: this.#index.size,
       presentations: this.#presentations.size, provisionals: this.#provisionals.size,
       cachedOperations: this.#journal.retentionStatus().cachedOperations,
     };
@@ -170,7 +170,7 @@ export class ChromeServiceRuntimeBackend implements ChromeRuntimeBackend {
     presentations.add(presentationLease);
     this.#activated.add(canonicalKey);
     this.#presentations.set(canonicalKey, presentations);
-    this.upgradeParticipants?.attach(`${this.#runtimeHost}:${presentationLease}`, createUpgradeReviewProtection(this.#broker, this.#saving, record.sessionId));
+    this.upgradeParticipants?.attach(`${this.#runtimeHost}:${presentationLease}`, createUpgradeDocumentProtection(this.#broker, this.#saving, record.sessionId));
     return projection;
   }
 
@@ -180,7 +180,7 @@ export class ChromeServiceRuntimeBackend implements ChromeRuntimeBackend {
 
   async invoke(
     canonicalKey: string,
-    method: ReviewRuntimeBrokerMethod,
+    method: DocumentRuntimeBrokerMethod,
     payload: unknown,
     operation: RuntimeOperation,
   ): Promise<unknown> {
@@ -189,7 +189,7 @@ export class ChromeServiceRuntimeBackend implements ChromeRuntimeBackend {
     if (method === 'upgradePoll' || method === 'upgradeSettle') {
       if (!operation.presentationLease || !this.#presentations.get(canonicalKey)?.has(operation.presentationLease) || !this.upgradeParticipants) throw new Error('Upgrade participant unavailable');
       const id = `${this.#runtimeHost}:${operation.presentationLease}`;
-      return method === 'upgradePoll' ? this.upgradeParticipants.poll(id) : this.upgradeParticipants.settle(id, payload as UpgradeReviewSettlement);
+      return method === 'upgradePoll' ? this.upgradeParticipants.poll(id) : this.upgradeParticipants.settle(id, payload as UpgradeDocumentSettlement);
     }
     if (['command', 'chooseCopy', 'chooseOriginal', 'chooseFolder', 'retrySave', 'locateSave', 'exportReviewedCopy'].includes(method) && operation.presentationLease) this.upgradeParticipants?.assertAuthoring(`${this.#runtimeHost}:${operation.presentationLease}`);
     if (operation.trustedDestinationSelection !== undefined &&
@@ -201,7 +201,7 @@ export class ChromeServiceRuntimeBackend implements ChromeRuntimeBackend {
       const state = this.#broker.state(record.sessionId);
       if (state === undefined || (operation.expectedDocumentGeneration !== undefined
         && state.workflow.documentGeneration !== operation.expectedDocumentGeneration)
-        || (operation.expectedReviewRevision !== undefined && state.revision !== operation.expectedReviewRevision)) {
+        || (operation.expectedAnnotationRevision !== undefined && state.revision !== operation.expectedAnnotationRevision)) {
         throw new Error("stale-native-selection");
       }
     };
@@ -210,7 +210,7 @@ export class ChromeServiceRuntimeBackend implements ChromeRuntimeBackend {
       ? this.#runtimeHost === "chrome"
         ? await this.#saving.browserProposal(record.sessionId, await this.#downloadFolder())
         : this.#saving.proposal(record.sessionId)
-      : await this.#review.invoke(record.sessionId, record.generation, method, payload, {
+      : await this.#documentSession.invoke(record.sessionId, record.generation, method, payload, {
           ...(operation.expectedDocumentGeneration === undefined ? {} : { expectedDocumentGeneration: operation.expectedDocumentGeneration }),
           ...(operation.trustedDestinationSelection === undefined ? {} : {
             trustedDestinationSelection: { ...operation.trustedDestinationSelection, assertAuthority },
@@ -222,21 +222,21 @@ export class ChromeServiceRuntimeBackend implements ChromeRuntimeBackend {
 
   async interaction(
     canonicalKey: string,
-    attachment: import("../sessions/review-interactions.js").ReviewInteractionAttachment,
+    attachment: import("../sessions/document-interactions.js").DocumentInteractionAttachment,
     action: "begin" | "finalize" | "release" | "acknowledge",
     payload: unknown,
     presentationLease?: string,
   ): Promise<unknown> {
     const record = this.#record(canonicalKey);
     if ((action === 'begin' || action === 'finalize') && presentationLease) this.upgradeParticipants?.assertAuthoring(`${this.#runtimeHost}:${presentationLease}`);
-    return this.#review.interaction(record.sessionId, attachment, action, payload);
+    return this.#documentSession.interaction(record.sessionId, attachment, action, payload);
   }
 
   registerInteraction(canonicalKey: string, authenticatedOwnerKey: string) {
     return this.#broker.replaceInteractionAttachment(this.#record(canonicalKey).sessionId, authenticatedOwnerKey);
   }
 
-  disconnectInteraction(canonicalKey: string, attachment: import("../sessions/review-interactions.js").ReviewInteractionAttachment): void {
+  disconnectInteraction(canonicalKey: string, attachment: import("../sessions/document-interactions.js").DocumentInteractionAttachment): void {
     const record = this.#records.get(canonicalKey);
     if (record !== undefined) this.#broker.interactions.disconnect(attachment.attachmentId, attachment.incarnationId);
   }
@@ -293,13 +293,13 @@ export class ChromeServiceRuntimeBackend implements ChromeRuntimeBackend {
         finished = true;
         const canonicalPath = await this.#transferStore.canonicalizeLocal(fileUrl);
         const workflow = request.initialWorkflowMode === undefined ? {} : { initialWorkflowMode: request.initialWorkflowMode };
-        const opened = await this.#broker.openReview({ pdfPath: canonicalPath, surface: this.#runtimeHost, ...workflow });
+        const opened = await this.#broker.openDocument({ pdfPath: canonicalPath, surface: this.#runtimeHost, ...workflow });
         if (opened.kind === "recovery-offered") {
           return {
             choices: ["resume", "discard", "fork"],
             offer: opened.recoveryOffer,
             choose: async (decision, operationId) => {
-              const recovered = await this.#broker.openReview({
+              const recovered = await this.#broker.openDocument({
                 pdfPath: canonicalPath,
                 surface: this.#runtimeHost,
                 ...workflow,
@@ -344,7 +344,7 @@ export class ChromeServiceRuntimeBackend implements ChromeRuntimeBackend {
         choices: ["resume", "discard", "fork"],
         offer: opened.recoveryOffer,
         choose: async (decision, operationId) => {
-          const recovered = await this.#broker.openReview({
+          const recovered = await this.#broker.openDocument({
             pdfPath: recoveryPath,
             surface: "chrome",
             recoveryDecision: decision,

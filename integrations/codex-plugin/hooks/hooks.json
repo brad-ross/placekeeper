@@ -15,7 +15,7 @@
         ]
       },
       {
-        "matcher": "^mcp__placekeeper__display_review$",
+        "matcher": "^mcp__placekeeper__display_(document|review)$",
         "hooks": [
           {
             "type": "command",

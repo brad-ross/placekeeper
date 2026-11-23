@@ -11,8 +11,8 @@ import {
   stat,
 } from "node:fs/promises";
 import { basename, join } from "node:path";
-import { normalizeReviewState, type ReviewState } from "../../../../packages/core/src/review-model.js";
-import { normalizeReviewHistory } from "../../../../packages/core/src/review-history.js";
+import { normalizeDocumentState, type DocumentState } from "../../../../packages/core/src/document-model.js";
+import { normalizeDocumentHistory } from "../../../../packages/core/src/document-history.js";
 import { canonicalSha256 } from "../../../../packages/core/src/live-context.js";
 import type { NativePdfAnnotationIdentityProvenance } from "../../../../packages/core/src/native-pdf-annotation.js";
 import type {
@@ -36,7 +36,7 @@ export interface LegacyRecoverableDraft {
   readonly schemaVersion: 1;
   readonly canonicalSourcePath: string;
   readonly sourceSnapshotPath: string;
-  readonly state: ReviewState;
+  readonly state: DocumentState;
   readonly acknowledgedAt: string;
   readonly lastExportAt?: string;
   readonly acceptedOriginalDigests?: readonly string[];
@@ -91,7 +91,7 @@ export interface RecoverableDraftV2 {
   readonly schemaVersion: 2;
   readonly canonicalSourcePath: string;
   readonly sourceSnapshotPath: string;
-  readonly state: ReviewState;
+  readonly state: DocumentState;
   readonly acknowledgedAt: string;
   readonly lastExportAt?: string;
   readonly acceptedOriginalDigests?: readonly string[];
@@ -131,7 +131,7 @@ export type RecoverableSourceOwnership =
 export interface RecoverableDraftV3 {
   readonly schemaVersion: 3;
   readonly source: RecoverableSourceOwnership;
-  readonly state: ReviewState;
+  readonly state: DocumentState;
   readonly acknowledgedAt: string;
   readonly lastExportAt?: string;
   readonly acceptedOriginalDigests?: readonly string[];
@@ -141,26 +141,68 @@ export interface RecoverableDraftV3 {
   readonly latestObservationEpoch?: number;
   readonly sourceWorkInterruptions?: readonly DurableSourceWorkInterruptionV1[];
   readonly nativeAnnotationLedger?: DurableNativeAnnotationLedgerV1;
-  readonly interactionReceipts?: readonly {
-    readonly status: "finalized";
-    readonly sessionId: string;
-    readonly attachmentId: string;
-    readonly interactionToken: string;
-    readonly draftId?: string;
-    readonly generation: number;
-    readonly outcome: "applied" | "discarded";
-    readonly reviewRevision: number;
-  }[];
+  readonly interactionReceipts?: readonly DurableInteractionReceiptV3[];
   /** A Chrome review that accepted a potentially durable side effect must
    * remain recoverable even when its save state is currently clean. */
   readonly chromeProtected?: true;
 }
 
+export interface DurableInteractionReceiptV3 {
+  readonly status: "finalized";
+  readonly sessionId: string;
+  readonly attachmentId: string;
+  readonly interactionToken: string;
+  readonly draftId?: string;
+  readonly generation: number;
+  readonly outcome: "applied" | "discarded";
+  readonly annotationRevision: number;
+}
+
 export type RecoverableDraft = LegacyRecoverableDraft | RecoverableDraftV2 | RecoverableDraftV3;
+
+/**
+ * On-disk receipt. Recovery written by earlier releases must stay readable and
+ * a rollback must read ours, so `annotationRevision` is stored under its
+ * original `reviewRevision` key. The schema version is unchanged.
+ * `toStoredDraft` and `fromStoredDraft` are the only translation points.
+ */
+type StoredInteractionReceiptV3 = Omit<DurableInteractionReceiptV3, "annotationRevision"> & {
+  readonly reviewRevision: number;
+};
+type StoredRecoverableDraft =
+  | LegacyRecoverableDraft
+  | RecoverableDraftV2
+  | (Omit<RecoverableDraftV3, "interactionReceipts"> & {
+      readonly interactionReceipts?: readonly StoredInteractionReceiptV3[];
+    });
+
+function toStoredDraft(draft: RecoverableDraft): StoredRecoverableDraft {
+  if (draft.schemaVersion !== 3 || draft.interactionReceipts === undefined) return draft as StoredRecoverableDraft;
+  // Replacing the existing key keeps its position, so the payload bytes match
+  // what earlier releases wrote for the same draft.
+  return {
+    ...draft,
+    interactionReceipts: draft.interactionReceipts.map(({ annotationRevision, ...receipt }) => ({
+      ...receipt,
+      reviewRevision: annotationRevision,
+    })),
+  };
+}
+
+function fromStoredDraft(stored: StoredRecoverableDraft): RecoverableDraft {
+  if (stored.schemaVersion !== 3 || stored.interactionReceipts === undefined) return stored as RecoverableDraft;
+  return {
+    ...stored,
+    interactionReceipts: stored.interactionReceipts.map(({ reviewRevision, ...receipt }) => ({
+      ...receipt,
+      annotationRevision: reviewRevision,
+    })),
+  };
+}
 
 interface SnapshotEnvelope {
   readonly checksum: string;
-  readonly payload: RecoverableDraft;
+  readonly payload: StoredRecoverableDraft;
 }
 
 export interface SnapshotHooks {
@@ -173,16 +215,17 @@ export interface SnapshotHooks {
 }
 
 function serialize(draft: RecoverableDraft): string {
-  const payload = JSON.stringify(draft);
+  const stored = toStoredDraft(draft);
+  const payload = JSON.stringify(stored);
   const envelope: SnapshotEnvelope = {
     checksum: createHash("sha256").update(payload).digest("hex"),
-    payload: draft,
+    payload: stored,
   };
   return JSON.stringify(envelope);
 }
 
-export function reviewStateDigest(
-  state: Pick<ReviewState, "items"> & Partial<Pick<ReviewState, "workflow" | "pendingDrafts" | "discardAudit" | "annotationName">>,
+export function documentStateDigest(
+  state: Pick<DocumentState, "items"> & Partial<Pick<DocumentState, "workflow" | "pendingDrafts" | "discardAudit" | "annotationName">>,
 ): string {
   const ordered = [...state.items].sort((left, right) => left.id.localeCompare(right.id));
   return canonicalSha256({
@@ -195,14 +238,14 @@ export function reviewStateDigest(
 }
 
 export function migrateRecoverableDraft(draft: RecoverableDraft): RecoverableDraftV3 {
-  const previousDigest = reviewStateDigest(draft.state);
-  const normalized = normalizeReviewState(draft.state);
-  const { history, historyCursor, historyBoundary } = normalizeReviewHistory(
+  const previousDigest = documentStateDigest(draft.state);
+  const normalized = normalizeDocumentState(draft.state);
+  const { history, historyCursor, historyBoundary } = normalizeDocumentHistory(
     normalized.history, normalized.historyCursor, normalized.workflow.historyBoundary,
   );
-  const state: ReviewState = { ...normalized, history, historyCursor,
+  const state: DocumentState = { ...normalized, history, historyCursor,
     workflow: { ...normalized.workflow, historyBoundary } };
-  const desiredDigest = reviewStateDigest(state);
+  const desiredDigest = documentStateDigest(state);
   const sync = draft.schemaVersion === 1 ? undefined : {
     ...draft.sync,
     ...(draft.sync.desiredDigest === previousDigest ? { desiredDigest } : {}),
@@ -333,7 +376,7 @@ function parse(contents: string, rejectUnsupported = false): InspectedRecoverySn
     ) {
       return undefined;
     }
-    return { schemaVersion: envelope.payload.schemaVersion, draft: migrateRecoverableDraft(envelope.payload) };
+    return { schemaVersion: envelope.payload.schemaVersion, draft: migrateRecoverableDraft(fromStoredDraft(envelope.payload)) };
   } catch (error) {
     if (error instanceof UnsupportedRecoveryFormatError) throw error;
     return undefined;

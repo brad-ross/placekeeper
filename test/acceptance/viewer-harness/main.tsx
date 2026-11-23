@@ -8,7 +8,7 @@ import { App } from '../../../apps/web/src/app/App.js';
 import { inventoryExistingAnnotations } from '../../../apps/web/src/pdf/existing-annotations.js';
 import type { SelectionUpdate } from '../../../apps/web/src/pdf/selection-state.js';
 import type { ViewerInteractionEvent } from '../../../apps/web/src/pdf/viewer-interaction-events.js';
-import { CommentComposer } from '../../../apps/web/src/review/CommentComposer.js';
+import { CommentComposer } from '../../../apps/web/src/reader/CommentComposer.js';
 import {
   readViewerSelectionEvidence,
   type ViewerSelectionEvidence,
@@ -78,8 +78,8 @@ globalThis.viewerAcceptance = {
       scroll.scrollToPage({ pageNumber, behavior: 'instant' });
     }
   },
-  reviewItemCount() {
-    return document.querySelectorAll('[data-review-item]').length;
+  annotationCount() {
+    return document.querySelectorAll('[data-annotation-item]').length;
   },
   interactionCount(type: ViewerInteractionEvent['type']) {
     return viewerInteractionCounts.get(type) ?? 0;
@@ -156,7 +156,7 @@ createRoot(root).render(<>
       reverseSyncTexEnabled={params.get('reverse-synctex') === 'true'}
   />
   {params.get('composer') === 'replacement' ? (
-    <div className="review-layout" data-annotation-presentation="right">
+    <div className="reader-layout" data-annotation-presentation="right">
       <CommentComposer
         title="Replacement"
         fieldLabel="Replacement"
@@ -184,7 +184,7 @@ declare global {
     zoomLevel(): number;
     selectionAnchorStatus(): string;
     goToPage(pageNumber: number): void;
-    reviewItemCount(): number;
+    annotationCount(): number;
     interactionCount(type: ViewerInteractionEvent['type']): number;
     composerActionCount(action: 'apply' | 'cancel'): number;
     caretAnchorPageIndex(): number | null;

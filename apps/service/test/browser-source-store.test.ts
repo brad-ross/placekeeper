@@ -12,7 +12,7 @@ import {
 } from "../src/browser/browser-source-store.js";
 import { DraftSnapshotStore } from "../src/recovery/draft-snapshot.js";
 import { SessionBroker } from "../src/sessions/session-broker.js";
-import { addPageNote } from "../../../packages/core/src/review-commands.js";
+import { addPageNote } from "../../../packages/core/src/document-commands.js";
 import { encodePlacekeeperLink } from "../../../packages/core/src/placekeeper-link.js";
 import { openPlacekeeperLink } from "../src/links/placekeeper-link.js";
 
@@ -167,7 +167,7 @@ describe("temporary browser source ownership", () => {
     const opened = await broker.openChromeBrowserSource(await chromeRequest(), value.store);
     if (opened.kind !== "opened") throw new Error("Expected open");
 
-    await broker.protectChromeReview(opened.launch.sessionId);
+    await broker.protectChromeDocument(opened.launch.sessionId);
     expect(broker.chromeProtected(opened.launch.sessionId)).toBe(true);
     await broker.quiesceForShutdown();
 

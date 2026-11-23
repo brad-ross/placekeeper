@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ExistingPdfAnnotation } from "../../../packages/core/src/live-context.js";
-import type { ReviewItem } from "../../../packages/core/src/review-model.js";
+import type { Annotation } from "../../../packages/core/src/document-model.js";
 import * as embedPdfAdapter from "../../../packages/pdf-backends/src/embedpdf-adapter.js";
 import { inspectLivePdf, LiveContextService } from "../src/context/live-context-service.js";
 import { RestartReconnectStore } from "../src/context/restart-reconnect-store.js";
@@ -21,7 +21,7 @@ afterEach(async () => {
 const id = (suffix: number) =>
   `00000000-0000-4000-8000-${suffix.toString().padStart(12, "0")}`;
 
-function item(suffix: number, proposedText = `replacement ${suffix}`): ReviewItem {
+function item(suffix: number, proposedText = `replacement ${suffix}`): Annotation {
   const rect = { x: 72, y: 100 + suffix * 20, width: 100, height: 14 };
   return {
     id: id(suffix),
@@ -72,7 +72,7 @@ async function fixture(options: {
     portableReader: async () => [],
     rewriteAssessor: async () => ({ eligible: true }),
   });
-  const opened = await broker.openReview({
+  const opened = await broker.openDocument({
     pdfPath,
     surface: "codex",
     ...(options.generatedOutput === true ? { workflowMode: "generated-output" as const } : {}),
@@ -85,7 +85,7 @@ async function fixture(options: {
   expect(broker.taskBindings.claim({
     bindProof: opened.launch.bindProof,
     taskSessionId: "task-a",
-    reviewSessionId: opened.launch.sessionId,
+    documentSessionId: opened.launch.sessionId,
     documentGeneration: opened.launch.documentGeneration,
   }).status).toBe("pending");
   expect(broker.exchangeBootstrap(opened.launch.sessionId, capability)).toBeTypeOf("string");
@@ -121,7 +121,7 @@ describe("atomic live-context service", () => {
       rect: { x: 40, y: 80, width: 100, height: 14 },
       segmentRects: [{ x: 40, y: 80, width: 100, height: 14 }],
     }));
-    const owned: ReviewItem = {
+    const owned: Annotation = {
       ...item(7),
       payload: {
         quote: "claim across\npages",
@@ -193,14 +193,14 @@ describe("atomic live-context service", () => {
       }),
     });
 
-    const opened = await broker.openReview({ pdfPath, surface: "codex" });
+    const opened = await broker.openDocument({ pdfPath, surface: "codex" });
     if (opened.kind !== "opened" || opened.launch.bindProof === undefined) {
       throw new Error("Expected a bindable Codex launch");
     }
     await broker.claimTaskBinding({
       bindProof: opened.launch.bindProof,
       taskSessionId: "task-a",
-      reviewSessionId: opened.launch.sessionId,
+      documentSessionId: opened.launch.sessionId,
       documentGeneration: opened.launch.documentGeneration,
     });
     const view = broker.exchangeBootstrapForHttp(
@@ -240,14 +240,14 @@ describe("atomic live-context service", () => {
       taskBindings,
     });
 
-    const launchA = await broker.openReview({ pdfPath, surface: "codex" });
+    const launchA = await broker.openDocument({ pdfPath, surface: "codex" });
     if (launchA.kind !== "opened" || launchA.launch.bindProof === undefined) {
       throw new Error("Expected task A launch");
     }
     taskBindings.claim({
       bindProof: launchA.launch.bindProof,
       taskSessionId: "task-a",
-      reviewSessionId: launchA.launch.sessionId,
+      documentSessionId: launchA.launch.sessionId,
       documentGeneration: launchA.launch.documentGeneration,
     });
     const viewA = broker.exchangeBootstrapForHttp(
@@ -259,14 +259,14 @@ describe("atomic live-context service", () => {
       .not.toMatchObject({ status: "unbound" });
 
     taskBindings.revokeTask("task-a");
-    const launchB = await broker.openReview({ pdfPath, surface: "codex" });
+    const launchB = await broker.openDocument({ pdfPath, surface: "codex" });
     if (launchB.kind !== "focused" || launchB.launch.bindProof === undefined) {
       throw new Error("Expected task B launch");
     }
     taskBindings.claim({
       bindProof: launchB.launch.bindProof,
       taskSessionId: "task-b",
-      reviewSessionId: launchB.launch.sessionId,
+      documentSessionId: launchB.launch.sessionId,
       documentGeneration: launchB.launch.documentGeneration,
     });
     const viewB = broker.exchangeBootstrapForHttp(
@@ -284,7 +284,7 @@ describe("atomic live-context service", () => {
       .not.toMatchObject({ status: "unbound" });
     expect(taskBindings.bindingForTask("task-b")?.leaseExpiresAt).not.toBe(taskBExpiry);
 
-    const linked = await broker.openReview({
+    const linked = await broker.openDocument({
       pdfPath,
       surface: "browser",
       requestedLocation: { kind: "page", page: 12 },
@@ -649,18 +649,18 @@ describe("atomic live-context service", () => {
     const stale = await fixture();
     stale.broker.taskBindings.revokeTask("task-a");
     const proof = stale.broker.taskBindings.issueBindProof({
-      reviewSessionId: stale.launch.sessionId,
+      documentSessionId: stale.launch.sessionId,
       documentGeneration: 2,
       browserCapability: "browser-capability-stale-generation-aaaaaaaa",
     });
     stale.broker.taskBindings.claim({
       bindProof: proof,
       taskSessionId: "task-stale",
-      reviewSessionId: stale.launch.sessionId,
+      documentSessionId: stale.launch.sessionId,
       documentGeneration: 2,
     });
     stale.broker.taskBindings.activateBrowser({
-      reviewSessionId: stale.launch.sessionId,
+      documentSessionId: stale.launch.sessionId,
       documentGeneration: 2,
       browserCapability: "browser-capability-stale-generation-aaaaaaaa",
     });
@@ -685,7 +685,7 @@ describe("atomic live-context service", () => {
       await readFile(resolve("test/fixtures/pdfs/text-native-with-annotations.pdf")),
     );
     const broker = new SessionBroker({ recoveryRoot: join(directory, "recovery") });
-    const opened = await broker.openReview({ pdfPath, surface: "codex" });
+    const opened = await broker.openDocument({ pdfPath, surface: "codex" });
     if (opened.kind !== "opened" || opened.launch.bindProof === undefined) {
       throw new Error("Expected a bindable annotated PDF");
     }
@@ -693,7 +693,7 @@ describe("atomic live-context service", () => {
     broker.taskBindings.claim({
       bindProof: opened.launch.bindProof,
       taskSessionId: "task-existing",
-      reviewSessionId: opened.launch.sessionId,
+      documentSessionId: opened.launch.sessionId,
       documentGeneration: 1,
     });
     broker.exchangeBootstrap(opened.launch.sessionId, capability);

@@ -1,19 +1,19 @@
 import { qualificationDirectory, readQualificationDescriptor } from "./native-qualification-files.js";
-import { REVIEW_RUNTIME_METHODS } from "../../../../packages/core/src/review-runtime-protocol.js";
+import { DOCUMENT_RUNTIME_METHODS } from "../../../../packages/core/src/document-runtime-protocol.js";
 import { createHmac, randomBytes } from "node:crypto";
 import { closeSync, constants, fstatSync, openSync, writeSync } from "node:fs";
 import { join } from "node:path";
 
 const EVENTS = Object.freeze(["claim-arrived", "claim-accepted", "claim-denied", "claim-conflict", "display-issued", "attestation-arrived", "attestation-accepted", "attestation-denied", "ready-accepted", "pending-denied", "promotion-accepted", "panel-expired", "panel-ended", "app-result", "invocation-issued", "hook-parsed", "hook-result", "experiment-selected", "experiment-delivery", "experiment-incomplete", "hook-delay-start", "hook-delay-end"] as const);
 const DENIALS = Object.freeze(["proof-missing-or-expired", "task-associated-other-review", "review-owned-other-task", "generation-mismatch", "launch-not-current", "invalid", "expired", "replayed", "owner-mismatch", "stale-generation", "revoked", "unavailable"] as const);
-const METHODS = Object.freeze(["ready", "status", "reconnect", "renew", "detach", "watermark", "bootstrap", "resource", ...REVIEW_RUNTIME_METHODS]);
+const METHODS = Object.freeze(["ready", "status", "reconnect", "renew", "detach", "watermark", "bootstrap", "resource", ...DOCUMENT_RUNTIME_METHODS]);
 const STATUSES = Object.freeze(["accepted", "denied", "pending", "active", "ok", "operation-error", "ignored", "claim", "attest", "refresh", "revoke"]);
 const FIELDS = Object.freeze(["session_id", "hook_event_name", "tool_name", "tool_input", "tool_response", "prompt"]);
 const nonce = () => randomBytes(16).toString("hex");
 type Event = typeof EVENTS[number];
 export interface QualificationFields {
   readonly taskSessionId?: string | undefined;
-  readonly reviewSessionId?: string;
+  readonly documentSessionId?: string;
   readonly runtimeId?: string;
   readonly attemptId?: string;
   readonly receiptId?: string;
@@ -104,7 +104,9 @@ export class NativeQualificationObserver {
       if (writer.sequence >= 256) return false;
       const out: Record<string, unknown> = { version: 1, runId: d.runId, source: this.#source, processNonce: this.#processNonce, sequence: writer.sequence + 1, at: new Date().toISOString(), event };
       const hash = (domain: string, value: string) => createHmac("sha256", d.salt).update(domain + "\0" + value).digest("hex");
-      for (const [key, domain, value] of [["taskHash", "task", fields.taskSessionId], ["reviewHash", "review", fields.reviewSessionId], ["envelopeHash", "envelope", fields.envelope]] as const) {
+      // Persisted record format: the `reviewHash` key and its "review" HMAC
+      // domain are frozen so qualification runs stay comparable across releases.
+      for (const [key, domain, value] of [["taskHash", "task", fields.taskSessionId], ["reviewHash", "review", fields.documentSessionId], ["envelopeHash", "envelope", fields.envelope]] as const) {
         if (typeof value === "string" && value.length > 0 && value.length <= 2048) out[key] = hash(domain, value);
       }
       for (const key of ["runtimeId", "attemptId", "receiptId", "invocationNonce"] as const) {

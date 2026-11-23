@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { RESOURCE_MIME_TYPE } from '@modelcontextprotocol/ext-apps/server';
-import { CODEX_REVIEW_UI_RESOURCE } from '../../../packages/core/src/codex-mcp-protocol.js';
+import { CODEX_DOCUMENT_UI_RESOURCE } from '../../../packages/core/src/codex-mcp-protocol.js';
 import { createNativeServer, nativeTools } from '../src/server.js';
 import { extensionTools } from '../src/extension-server.js';
 import { ReaderBridge, callReaderBridgeTool, callReaderServerTool, readerServerTools } from '../src/reader-bridge.js';
@@ -212,7 +212,7 @@ describe('Claude Desktop server relay', () => {
       const shell = (await client.listResources()).resources[0]!.uri;
       const expected = [...nativeTools, ...extensionTools].map(tool => {
         const ui = tool._meta?.ui as Record<string, unknown> | undefined;
-        return ui?.resourceUri === CODEX_REVIEW_UI_RESOURCE ? { ...tool, _meta: { ...tool._meta, ui: { ...ui, resourceUri: shell } } } : tool;
+        return ui?.resourceUri === CODEX_DOCUMENT_UI_RESOURCE ? { ...tool, _meta: { ...tool._meta, ui: { ...ui, resourceUri: shell } } } : tool;
       });
       expect(tools).toEqual(expected);
       expect(tools.map(tool => tool.name)).not.toContain(READER_BRIDGE_TOOL);

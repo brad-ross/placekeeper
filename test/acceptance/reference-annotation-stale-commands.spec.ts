@@ -5,7 +5,7 @@ import { basename, join, resolve } from 'node:path';
 import { expect, test, type Page, type Request } from '@playwright/test';
 
 import { PlacekeeperHost } from '../../apps/service/src/host/placekeeper-host.js';
-import { addPageNote, removeReviewItem } from '../../packages/core/src/review-commands.js';
+import { addPageNote, removeAnnotation } from '../../packages/core/src/document-commands.js';
 
 const READY_TIMEOUT = 15_000;
 
@@ -79,7 +79,7 @@ async function openReferenceEditor(page: Page, itemId: string): Promise<{
   if (await workspace.getAttribute('aria-expanded') !== 'true') await workspace.click();
   const annotations = page.getByRole('tab', { name: 'Annotations', exact: true });
   if (await annotations.getAttribute('aria-selected') !== 'true') await annotations.click();
-  const row = page.locator(`[data-review-item="${itemId}"]`);
+  const row = page.locator(`[data-annotation-item="${itemId}"]`);
   await row.hover();
   await row.getByRole('button', { name: 'Open in References' }).click();
   await expect(page.locator('[data-reference-pdf-viewport]')).toBeVisible({
@@ -196,7 +196,7 @@ test('retains a Reference editor after a deferred draft update returns stale', a
     if (!current) throw new Error('Concurrent Reference state is unavailable.');
     await host.broker.acceptMutation(
       opened.sessionId,
-      removeReviewItem(current, opened.itemId),
+      removeAnnotation(current, opened.itemId),
     );
     await releaseAndWaitForConflict(page, request, gate.release);
     await expectRecoverableEditor({ page, draft, composer, editor, apply });
@@ -229,7 +229,7 @@ test('retains a typed Reference recovery draft when its initial protection retur
     if (!current) throw new Error('Concurrent Reference state is unavailable.');
     await host.broker.acceptMutation(
       opened.sessionId,
-      removeReviewItem(current, opened.itemId),
+      removeAnnotation(current, opened.itemId),
     );
     await releaseAndWaitForConflict(page, request, gate.release);
     await expectRecoverableEditor({ page, draft, composer, editor, apply });

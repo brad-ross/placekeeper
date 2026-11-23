@@ -2,21 +2,21 @@ import { PDFArray, PDFDict, PDFDocument, PDFHexString, PDFName, PDFNumber, PDFSt
 import { READER_APPEARANCE_KEY } from '../../core/src/annotation-appearance.js';
 import { type PdfAnnotationObject } from '@embedpdf/models';
 import { canEditPdfAnnotationComment, canDeletePdfAnnotation, isEditablePdfAnnotationSubtype, nativePdfAnnotationIdentity, VERIFIED_NATIVE_PDF_ANNOTATION_NAME_PREFIX } from '../../core/src/native-pdf-annotation.js';
-import { PdfWriterError, type ReviewAnnotation, type PdfWriteRequest, type PdfWriteResult, type PdfRewriteEligibility, type PdfWrittenAnnotationEvidence } from '../../core/src/pdf-writer.js';
+import { PdfWriterError, type PdfWriterAnnotation, type PdfWriteRequest, type PdfWriteResult, type PdfRewriteEligibility, type PdfWrittenAnnotationEvidence } from '../../core/src/pdf-writer.js';
 import { embedPdfSubtypeName } from './embedpdf-annotation.js';
-import type { ReviewItem } from '../../core/src/review-model.js';
-import { assertReviewItem } from '../../core/src/review-reducer.js';
-import { projectReviewItems } from '../../core/src/annotation-projection.js';
+import type { Annotation } from '../../core/src/document-model.js';
+import { assertAnnotation } from '../../core/src/document-reducer.js';
+import { projectAnnotations } from '../../core/src/annotation-projection.js';
 
 export interface NativePdfAnnotation {
-  readonly item: ReviewItem;
+  readonly item: Annotation;
   readonly pageIndex: number;
   readonly annotationIndex: number;
   readonly annotationId: string;
 }
 
 export interface NativePdfSnapshot {
-  readonly portableItems?: readonly ReviewItem[];
+  readonly portableItems?: readonly Annotation[];
   readonly nativeAnnotations: readonly NativePdfAnnotation[];
   readonly annotations: readonly (PdfWrittenAnnotationEvidence & { readonly pageIndex: number })[];
 }
@@ -24,12 +24,12 @@ export interface NativePdfSnapshot {
 interface PortableCommentEdit {
   readonly pageIndex: number;
   readonly annotationIndex: number;
-  readonly requested: ReviewAnnotation;
+  readonly requested: PdfWriterAnnotation;
 }
 
-function portableCommentEdits(source: NativePdfSnapshot, requested: readonly ReviewAnnotation[]): PortableCommentEdit[] {
-  const projections = projectReviewItems((source.portableItems ?? []).filter(({ kind }) => kind !== 'pdfAnnotation'));
-  const geometry = (annotation: ReviewAnnotation) => JSON.stringify({ kind: annotation.kind,
+function portableCommentEdits(source: NativePdfSnapshot, requested: readonly PdfWriterAnnotation[]): PortableCommentEdit[] {
+  const projections = projectAnnotations((source.portableItems ?? []).filter(({ kind }) => kind !== 'pdfAnnotation'));
+  const geometry = (annotation: PdfWriterAnnotation) => JSON.stringify({ kind: annotation.kind,
     pageIndex: annotation.pageIndex, rect: annotation.rect, quads: annotation.quadPoints, author: annotation.author });
   return projections.flatMap((before) => {
     const after = requested.find(({ pageIndex, id }) => pageIndex === before.pageIndex && id === before.id);
@@ -80,7 +80,7 @@ export async function writeWithNativePdfAnnotations(
   const eligibility = await backend.assess(request.sourcePdf);
   if (!eligibility.eligible) throw new PdfWriterError(eligibility.code, eligibility.message);
   const source = await backend.inspect(request.sourcePdf);
-  const ordinalRequestsByPage = new Map<number, Map<number, ReviewAnnotation>>();
+  const ordinalRequestsByPage = new Map<number, Map<number, PdfWriterAnnotation>>();
   for (const annotation of nativeRequests) {
     if (annotation.nativeIdentityProvenance !== 'generation-ordinal' || annotation.nativeSourceObject === undefined) continue;
     let requestsByIndex = ordinalRequestsByPage.get(annotation.nativeSourceObject.pageIndex);
@@ -164,7 +164,7 @@ export function nativeAnnotationsFromPages(
       return;
     }
     seenIds.add(id);
-    const item: ReviewItem = {
+    const item: Annotation = {
       id, kind: 'pdfAnnotation', pageIndex,
       createdAt: timestamp(annotation.created),
       updatedAt: timestamp(annotation.modified ?? annotation.created),
@@ -179,7 +179,7 @@ export function nativeAnnotationsFromPages(
         ...(annotation.flags?.some((flag) => flag === 'readOnly' || flag === 'locked') ? { deletionLocked: true } : {}),
       },
     };
-    try { assertReviewItem(item); } catch { return; }
+    try { assertAnnotation(item); } catch { return; }
     result.push({ item, pageIndex, annotationIndex, annotationId: annotation.id });
   }));
   return result;
@@ -192,7 +192,7 @@ export function nativeAnnotationsFromPages(
 async function prepareNativePdfAnnotations(
   bytes: Uint8Array,
   source: readonly NativePdfAnnotation[],
-  requested: readonly ReviewAnnotation[],
+  requested: readonly PdfWriterAnnotation[],
   ownedEdits: readonly PortableCommentEdit[] = [],
 ): Promise<{ pdfBytes: Uint8Array; appearanceLessNames: Map<number, Set<string>> }> {
   const appearanceLessNames = new Map<number, Set<string>>();
@@ -303,7 +303,7 @@ async function prepareNativePdfAnnotations(
 export async function rewriteNativePdfAnnotations(
   bytes: Uint8Array,
   source: readonly NativePdfAnnotation[],
-  requested: readonly ReviewAnnotation[],
+  requested: readonly PdfWriterAnnotation[],
   ownedEdits: readonly PortableCommentEdit[] = [],
 ): Promise<Uint8Array> {
   return (await prepareNativePdfAnnotations(bytes, source, requested, ownedEdits)).pdfBytes;

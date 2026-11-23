@@ -1,7 +1,7 @@
 import { NativeQualificationExperiments } from "../codex/native-qualification-experiments.js";
 import { NativeQualificationObserver } from "../codex/native-qualification.js";
 import {
-  CODEX_DISPLAY_TOOL,
+  isCodexDisplayTool,
   parseCodexDisplayRequest,
   parseCodexDisplayReceipt,
   parseCodexNativeLaunchSuccess,
@@ -23,7 +23,7 @@ const MAX_HOOK_INPUT_BYTES = 128 * 1024;
 const MAX_PROMPT_CONTEXT_BYTES = 128 * 1024;
 const MAX_INLINE_DELTA_BYTES = 48 * 1024;
 const IDENTIFIER = /^[A-Za-z0-9._:-]{1,256}$/u;
-const REVIEW_IDENTIFIER = /^[A-Za-z0-9_-]{1,256}$/u;
+const DOCUMENT_IDENTIFIER = /^[A-Za-z0-9_-]{1,256}$/u;
 const SECRET = /^[A-Za-z0-9_-]{43}$/u;
 const INSTALLED_LAUNCHER_RELATIVE_PATH = "Applications/Placekeeper.app/Contents/MacOS/placekeeper";
 
@@ -59,7 +59,7 @@ export type HookLifecycleEvent =
   | {
       readonly kind: "claim";
       readonly taskSessionId: string;
-      readonly reviewSessionId: string;
+      readonly documentSessionId: string;
       readonly documentGeneration: number;
       readonly bindProof: string;
       readonly native?: true;
@@ -177,19 +177,19 @@ function launchResponse(value: unknown, surface: "codex" | "codex-native" | "ele
   try { parsed = JSON.parse(serialized) as unknown; } catch { return undefined; }
   if (surface === "electron") {
     if (!isObject(parsed) || parsed.ok !== true || parsed.surface !== "electron" || parsed.native !== true ||
-        !["opened", "focused"].includes(String(parsed.kind)) || typeof parsed.sessionId !== "string" || !REVIEW_IDENTIFIER.test(parsed.sessionId) ||
+        !["opened", "focused"].includes(String(parsed.kind)) || typeof parsed.sessionId !== "string" || !DOCUMENT_IDENTIFIER.test(parsed.sessionId) ||
         !Number.isSafeInteger(parsed.documentGeneration) || (parsed.documentGeneration as number) < 1 || typeof parsed.bindProof !== "string" || !SECRET.test(parsed.bindProof) ||
         typeof parsed.launchId !== "string" || !SECRET.test(parsed.launchId) || typeof parsed.expiresAt !== "string" || !Number.isFinite(Date.parse(parsed.expiresAt))) return undefined;
-    return { reviewSessionId: parsed.sessionId, documentGeneration: parsed.documentGeneration as number, bindProof: parsed.bindProof, native: true, desktop: true };
+    return { documentSessionId: parsed.sessionId, documentGeneration: parsed.documentGeneration as number, bindProof: parsed.bindProof, native: true, desktop: true };
   }
   if (surface === "codex-native") {
     const native = parseCodexNativeLaunchSuccess(parsed);
-    return native === undefined ? undefined : { reviewSessionId: native.sessionId, documentGeneration: native.documentGeneration, bindProof: native.bindProof, native: true };
+    return native === undefined ? undefined : { documentSessionId: native.sessionId, documentGeneration: native.documentGeneration, bindProof: native.bindProof, native: true };
   }
   if (
     !isObject(parsed) || parsed.ok !== true ||
     (parsed.kind !== "opened" && parsed.kind !== "focused") ||
-    typeof parsed.sessionId !== "string" || !REVIEW_IDENTIFIER.test(parsed.sessionId) ||
+    typeof parsed.sessionId !== "string" || !DOCUMENT_IDENTIFIER.test(parsed.sessionId) ||
     typeof parsed.documentGeneration !== "number" ||
     !Number.isSafeInteger(parsed.documentGeneration) || parsed.documentGeneration < 0 ||
     typeof parsed.bindProof !== "string" || !SECRET.test(parsed.bindProof) ||
@@ -205,7 +205,7 @@ function launchResponse(value: unknown, surface: "codex" | "codex-native" | "ele
     ) return undefined;
   } catch { return undefined; }
   return {
-    reviewSessionId: parsed.sessionId,
+    documentSessionId: parsed.sessionId,
     documentGeneration: parsed.documentGeneration,
     bindProof: parsed.bindProof,
   };
@@ -217,7 +217,7 @@ export function inspectHookEvent(value: unknown): HookLifecycleEvent {
   const taskSessionId = taskIdentity(value);
   if (taskSessionId === undefined) return { kind: "ignored" };
   if (value.hook_event_name === "PostToolUse") {
-    if (value.tool_name === CODEX_DISPLAY_TOOL) {
+    if (isCodexDisplayTool(value.tool_name)) {
       if (parseCodexDisplayRequest(value.tool_input) === undefined || !isObject(value.tool_response)) return { kind: "ignored" };
       const receipt = parseCodexDisplayReceipt(value.tool_response.structuredContent);
       return receipt === undefined ? { kind: "ignored" } : { kind: "attest", taskSessionId, receipt };
@@ -234,7 +234,7 @@ export function inspectHookEvent(value: unknown): HookLifecycleEvent {
   return { kind: "ignored" };
 }
 
-function compactReviewChanges(result: Extract<LiveContextRefreshResult, { status: "current" }>): JsonObject {
+function compactDocumentChanges(result: Extract<LiveContextRefreshResult, { status: "current" }>): JsonObject {
   const changes = result.reviewItems;
   if (changes.mode === "full") {
     const intentCounts: Record<string, number> = {};
@@ -361,7 +361,7 @@ export function formatPromptContext(
     },
     saveSync: result.saveStatus,
     ...(result.reviewState === undefined ? {} : { reviewState: result.reviewState }),
-    reviewItems: compactReviewChanges(result),
+    reviewItems: compactDocumentChanges(result),
     existingPdfAnnotations: {
       dataClassification: "untrusted-data",
       count: result.existingPdfAnnotations.count,
@@ -457,12 +457,12 @@ export async function runHookCommand(
       const response = await control({
         kind: "claim-binding",
         taskSessionId: event.taskSessionId,
-        reviewSessionId: event.reviewSessionId,
+        documentSessionId: event.documentSessionId,
         documentGeneration: event.documentGeneration,
         bindProof: event.bindProof,
         ...(event.native === true ? { native: true as const } : {}),
       });
-      qualification.record("hook-result", { status: response.kind === "codex-binding" ? response.status : response.kind === "binding" ? response.result.status : "ignored", taskSessionId: event.taskSessionId, reviewSessionId: event.reviewSessionId });
+      qualification.record("hook-result", { status: response.kind === "codex-binding" ? response.status : response.kind === "binding" ? response.result.status : "ignored", taskSessionId: event.taskSessionId, documentSessionId: event.documentSessionId });
       if ((response.kind === "binding" && response.result.status === "denied") || (response.kind === "codex-binding" && response.status === "denied")) {
         await write(`${JSON.stringify(hookOutput(
           "PostToolUse",

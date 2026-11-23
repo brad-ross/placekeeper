@@ -1,14 +1,14 @@
 import { describe, expect, it } from 'vitest';
 
-import { measureReviewOverlayGeometry } from '../src/review/use-review-overlay-geometry.js';
+import { measureReaderOverlayGeometry } from '../src/reader/use-reader-overlay-geometry.js';
 import {
   chooseContextActionAvailableRect,
   chooseContextActionPlacement,
-} from '../src/review/ContextActionPalette.js';
+} from '../src/reader/ContextActionPalette.js';
 import {
   choosePassageEditorPlacement,
   passageEditorPlacementForRequest,
-} from '../src/review/use-passage-editor-placement.js';
+} from '../src/reader/use-passage-editor-placement.js';
 
 const rect = (left: number, top: number, width: number, height: number) => ({
   left,
@@ -21,7 +21,7 @@ const rect = (left: number, top: number, width: number, height: number) => ({
 
 describe('neutral overlay geometry', () => {
   it('backs the twelve-pixel tray gutters from actual right and bottom bounds', () => {
-    const geometry = measureReviewOverlayGeometry({
+    const geometry = measureReaderOverlayGeometry({
       stage: rect(100, 50, 1_000, 700),
       surfaces: [
         { open: true, presentation: 'right', bounds: rect(784, 50, 304, 394) },
@@ -34,7 +34,7 @@ describe('neutral overlay geometry', () => {
   });
 
   it('keeps classic scrollbars inside the common outside inset and fades only before extents', () => {
-    const geometry = measureReviewOverlayGeometry({
+    const geometry = measureReaderOverlayGeometry({
       stage: rect(0, 0, 800, 600),
       surfaces: [],
       scrollport: {

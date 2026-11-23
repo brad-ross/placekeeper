@@ -1,5 +1,5 @@
 import { ExtensionRuntimeManager } from "../codex/extension-runtime.js";
-import { createUpgradeReviewProtection, UpgradeReviewParticipants } from "./upgrade-review-participants.js";
+import { createUpgradeDocumentProtection, UpgradeDocumentParticipants } from "./upgrade-document-participants.js";
 import { UpgradePreparationCoordinator } from "./upgrade-preparation.js";
 import type { NativeTaskLaunchReceipt } from "../desktop/native-task-launches.js";
 import { NativeSyncTex } from "../synctex/native-synctex.js";
@@ -29,8 +29,8 @@ import { TaskBindingRegistry } from "../context/task-binding-registry.js";
 import { DaemonLifecycleCoordinator } from "./daemon-lifecycle.js";
 import { decodePlacekeeperLink } from "../../../../packages/core/src/placekeeper-link.js";
 import { decodeHostPlacekeeperLink, openPlacekeeperLink } from "../links/placekeeper-link.js";
-import type { ReviewWorkflowMode } from "../../../../packages/core/src/review-model.js";
-import { ExportCoordinator, type FrozenReviewDelivery } from "../export/export-coordinator.js";
+import type { DocumentWorkflowMode } from "../../../../packages/core/src/document-model.js";
+import { ExportCoordinator, type FrozenDocumentDelivery } from "../export/export-coordinator.js";
 import {
   BrowserSourceStore,
   type ChromeBrowserSourceOpenRequest,
@@ -58,7 +58,7 @@ export interface LaunchRequest {
   readonly recoveryOffer?: RecoveryOfferIdentity;
   readonly recoveryOperationId?: string;
   readonly surface?: LaunchSurface;
-  readonly workflowMode?: ReviewWorkflowMode;
+  readonly workflowMode?: DocumentWorkflowMode;
 }
 
 export interface LaunchFailure {
@@ -151,7 +151,7 @@ function upgradeFailure(): { readonly ok: false; readonly error: LaunchFailure }
     error: {
       kind: "upgrade-required",
       message: "Placekeeper is restarting after an upgrade. Retry this launch.",
-      recoveryAction: "Close Placekeeper reviews and retry",
+      recoveryAction: "Close Placekeeper documents and retry",
     },
   };
 }
@@ -186,7 +186,7 @@ export class PlacekeeperHost {
   readonly exporting: ExportCoordinator;
   readonly lifecycle: DaemonLifecycleCoordinator;
   readonly upgradePreparation: UpgradePreparationCoordinator;
-  readonly upgradeParticipants: UpgradeReviewParticipants;
+  readonly upgradeParticipants: UpgradeDocumentParticipants;
   readonly browserSources: BrowserSourceStore;
   readonly chromeRuntime: ChromeRuntimeManager;
   readonly electronRuntime: NativeRuntimeManager;
@@ -216,7 +216,7 @@ export class PlacekeeperHost {
     codexRuntime: CodexRuntimeManager,
     extensionRuntime: ExtensionRuntimeManager,
     upgradePreparation: UpgradePreparationCoordinator,
-    upgradeParticipants: UpgradeReviewParticipants,
+    upgradeParticipants: UpgradeDocumentParticipants,
   ) {
     this.broker = broker;
     this.server = server;
@@ -266,7 +266,7 @@ export class PlacekeeperHost {
       capabilities: broker.capabilities,
       controls: broker.controls,
       recordSuccessfulExport: (sessionId) => broker.recordSuccessfulExport(sessionId),
-      validateFrozenDelivery: (delivery) => broker.isFrozenDeliveryCurrent(delivery as FrozenReviewDelivery),
+      validateFrozenDelivery: (delivery) => broker.isFrozenDeliveryCurrent(delivery as FrozenDocumentDelivery),
     });
     broker.onSessionEnd((sessionId) => exporting.releaseSession(sessionId));
     const chromeTransferStore = await ChromeTransferStore.create({
@@ -309,7 +309,7 @@ export class PlacekeeperHost {
         const electronAppActivity = electronLifecycle.activity();
         return {
           ...activity,
-          reviewPresence: activity.reviewPresence + chromeActivity.connections
+          documentPresence: activity.documentPresence + chromeActivity.connections
             + electronActivity.helpers + electronAppActivity.appInstances + codexRuntime.activityCount() + extensionRuntime.activityCount(),
           transientWork: activity.transientWork + saving.activityCount() + editorNavigation.activity(),
         };
@@ -320,7 +320,7 @@ export class PlacekeeperHost {
       },
     });
     const upgradePreparation = new UpgradePreparationCoordinator(lifecycle);
-    const participants = new UpgradeReviewParticipants(upgradePreparation);
+    const participants = new UpgradeDocumentParticipants(upgradePreparation);
     participants.attach('task-authority', {
       revision: () => broker.taskBindings.upgradeRevision(),
       protect: async () => { await lifecycle.settlementBarrier(); await saving.drain(); await broker.drainWrites(); },
@@ -343,7 +343,7 @@ export class PlacekeeperHost {
       exporting,
       lifecycle,
       upgradeParticipants: participants,
-      protectUpgradeReview: sessionId => createUpgradeReviewProtection(broker, saving, sessionId).protect(),
+      protectUpgradeDocument: sessionId => createUpgradeDocumentProtection(broker, saving, sessionId).protect(),
     });
     const context = new LiveContextService({ broker });
     const reconciliation = new SourceReconciliationService({ broker });
@@ -416,7 +416,7 @@ export class PlacekeeperHost {
           ok: true,
           kind: "link-preflight",
           path: decoded.path,
-          confirmationRequired: !this.broker.activeReviewOwnsPath(decoded.path),
+          confirmationRequired: !this.broker.activeDocumentOwnsPath(decoded.path),
         };
       } catch (error) {
         return failure(
@@ -497,7 +497,7 @@ export class PlacekeeperHost {
       request.fork === true ? "fork" : request.recovery;
     try {
       const surface = request.desktop === "electron" ? "codex-native" : trustedSurface(request.surface);
-      const opened = await this.broker.openReview({
+      const opened = await this.broker.openDocument({
         pdfPath: request.pdfPath,
         ...(request.sourceRootPath === undefined
           ? {}

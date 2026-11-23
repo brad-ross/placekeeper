@@ -60,7 +60,7 @@ describe("explicit suite contracts", () => {
 
   it("runs all native corpus/lifecycle/resource acceptance in the native and canonical Chromium gates", () => {
     for (const suite of ["test:codex-native", "test:e2e", "test:ci:chromium"]) {
-      for (const file of ["codex-native-review.spec.ts", "codex-native-lifecycle.spec.ts", "codex-native-resources.spec.ts"]) expect(suiteCommand(suite)).toContain(file);
+      for (const file of ["codex-native-document.spec.ts", "codex-native-lifecycle.spec.ts", "codex-native-resources.spec.ts"]) expect(suiteCommand(suite)).toContain(file);
     }
     expect(suiteCommand("test:codex-native")).toContain("pnpm fixtures:pdf");
     expect(suiteCommand("test:codex-native")).toContain("pnpm build:codex");
@@ -87,8 +87,8 @@ describe("explicit suite contracts", () => {
     for (const file of [
       "apps/electron/test/standalone-chooser.test.ts", "apps/electron/test/open-intent.test.ts",
       "apps/electron/test/protocol-install.test.ts", "packaging/desktop/linux-sandbox.test.ts",
-      "apps/electron/test/open-link.test.ts", "apps/electron/test/review-bridge.test.ts", "apps/electron/test/menus.test.ts",
-      "packages/core/test/electron-helper-protocol.test.ts", "packages/core/test/review-runtime-protocol.test.ts",
+      "apps/electron/test/open-link.test.ts", "apps/electron/test/document-bridge.test.ts", "apps/electron/test/menus.test.ts",
+      "packages/core/test/electron-helper-protocol.test.ts", "packages/core/test/document-runtime-protocol.test.ts",
       "packaging/desktop/setup-codex.test.ts", "packaging/desktop/integration-registration.test.ts",
       "apps/service/test/integration-registration-command.test.ts", "apps/service/test/hook-contract.test.ts",
     ]) {
@@ -110,9 +110,9 @@ describe("explicit suite contracts", () => {
     expect(suiteCommand("test:e2e:webkit")).not.toContain("neutral-design-conformance.spec.ts");
     expect(suiteCommand("test:e2e:webkit")).not.toContain("host-interface.spec.ts");
     expect(suites["test:pdf-conformance"]).toEqual([
-      "pnpm fixtures:pdf", "pnpm test:pdf-writer", "pnpm test:reviewed-pdf", "pnpm test:pdf-viewer",
+      "pnpm fixtures:pdf", "pnpm test:pdf-writer", "pnpm test:annotated-pdf", "pnpm test:pdf-viewer",
     ]);
-    expect(suites["test:reviewed-pdf"]?.[0]).toBe("pnpm fixtures:pdf");
+    expect(suites["test:annotated-pdf"]?.[0]).toBe("pnpm fixtures:pdf");
   });
 
   it("keeps the cross-host refresh and recovery matrix in host integration", () => {

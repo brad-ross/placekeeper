@@ -70,7 +70,12 @@ it("materializes the complete native plugin with installation-scoped paths and r
   expect(JSON.parse(content("codex-plugin/.mcp.json")).mcpServers.placekeeper).toEqual({ command: launcher, args: ["codex-mcp"] });
   const hooks = JSON.parse(content("codex-plugin/hooks/hooks.json"));
   expect(Object.keys(hooks.hooks)).toEqual(["PostToolUse", "UserPromptSubmit", "SessionEnd"]);
-  expect(hooks.hooks.PostToolUse[1].matcher).toBe("^mcp__placekeeper__display_review$");
+  expect(hooks.hooks.PostToolUse[1].matcher).toBe("^mcp__placekeeper__display_(document|review)$");
+  // Both the primary tool and its deprecated alias trigger the trusted display hook.
+  const matcher = new RegExp(hooks.hooks.PostToolUse[1].matcher);
+  expect(matcher.test("mcp__placekeeper__display_document")).toBe(true);
+  expect(matcher.test("mcp__placekeeper__display_review")).toBe(true);
+  expect(matcher.test("mcp__other__display_document")).toBe(false);
   expect(hooks.hooks.PostToolUse[1].hooks[0].async).toBe(true);
   for (const groups of Object.values(hooks.hooks) as Array<Array<{ hooks: Array<{ command: string }> }>>) for (const group of groups) for (const hook of group.hooks) expect(hook.command).toBe(`'${launcher.replaceAll("'", "'\\''")}' hook --event`);
   const skill = content("codex-plugin/skills/placekeeper/SKILL.md");

@@ -5,12 +5,12 @@ import { createHash } from "node:crypto";
 import { lstat, open, realpath } from "node:fs/promises";
 import { basename, dirname, isAbsolute, relative, resolve } from "node:path";
 
-import type { SourceHint } from "../../../../packages/core/src/structured-review-item.js";
+import type { SourceHint } from "../../../../packages/core/src/structured-annotation.js";
 import {
-  anchorEvidenceFromReviewItem,
-  type ReviewItem,
-} from "../../../../packages/core/src/review-model.js";
-import type { FrozenReviewDelivery } from "../export/export-coordinator.js";
+  anchorEvidenceFromAnnotation,
+  type Annotation,
+} from "../../../../packages/core/src/document-model.js";
+import type { FrozenDocumentDelivery } from "../export/export-coordinator.js";
 import { isContained } from "../files/file-capabilities.js";
 import {
   canonicalSourceRoot,
@@ -168,9 +168,9 @@ export async function querySyncTex(input: QuerySyncTexInput): Promise<SourceHint
   return undefined;
 }
 
-function geometryPoint(item: ReviewItem): { x: number; y: number } | undefined {
+function geometryPoint(item: Annotation): { x: number; y: number } | undefined {
   try {
-    const { rect } = anchorEvidenceFromReviewItem(item);
+    const { rect } = anchorEvidenceFromAnnotation(item);
     return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
   } catch {
     return undefined;
@@ -178,7 +178,7 @@ function geometryPoint(item: ReviewItem): { x: number; y: number } | undefined {
 }
 
 export async function querySyncTexHints(input: {
-  readonly delivery: FrozenReviewDelivery;
+  readonly delivery: FrozenDocumentDelivery;
   readonly pdfPath: string;
   readonly run?: SyncTexRunner;
 }): Promise<ReadonlyMap<string, SourceHint>> {
@@ -192,7 +192,7 @@ export async function querySyncTexHints(input: {
 }
 
 export async function querySyncTexHintsForItems(input: {
-  readonly items: readonly ReviewItem[];
+  readonly items: readonly Annotation[];
   readonly sourceRoot: string;
   readonly pdfPath: string;
   readonly run?: SyncTexRunner;
@@ -203,7 +203,7 @@ export async function querySyncTexHintsForItems(input: {
     const point = geometryPoint(item);
     if (point === undefined) continue;
     const pageIndex = (() => {
-      try { return anchorEvidenceFromReviewItem(item).pageIndex; }
+      try { return anchorEvidenceFromAnnotation(item).pageIndex; }
       catch { return undefined; }
     })();
     if (pageIndex === undefined) continue;

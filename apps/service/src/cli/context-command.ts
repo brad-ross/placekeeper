@@ -293,6 +293,7 @@ export async function runContextCommand(
     }
     try {
       const response = await control({
+        // Legacy spellings: see ANNOTATIONS_BY_HANDLE_KINDS for when they can flip.
         kind: args[1] === "changes"
           ? "retrieve-review-changes-by-handle"
           : "retrieve-review-items-by-handle",
@@ -308,6 +309,7 @@ export async function runContextCommand(
       }
       write(`${JSON.stringify({
         ok: true,
+        // Agent-facing output read through hook instructions: keep this shape stable.
         kind: args[1] === "changes" ? "review-changes" : "review-items",
         mediaType: response.result.mediaType,
         byteLength: Buffer.byteLength(response.result.dataBase64, "base64"),

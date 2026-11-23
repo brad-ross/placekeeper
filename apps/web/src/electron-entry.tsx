@@ -1,18 +1,18 @@
 import { useState, useRef, useCallback, useEffect, useLayoutEffect } from 'react';
 import { createRoot } from 'react-dom/client';
 import { flushSync } from 'react-dom';
-import { RuntimeProductionReviewApp } from './production-entry.js';
+import { RuntimeProductionReaderApp } from './production-entry.js';
 import { FocusedLaunchNavigation } from './host/electron-focused-navigation.js';
 import { ElectronSourceEndpointDialog } from './host/ElectronSourceEndpointDialog.js';
 import { createElectronHostRuntime } from './host/electron-runtime.js';
 import type { ElectronShellBridge, ElectronShellIdentity } from '../../../packages/core/src/electron-shell-protocol.js';
-import type { ReviewCommandInvocation, ReviewCommandSurfaceSnapshot } from './review/review-command-surface.js';
-import './app/review-layout.css';
+import type { DocumentCommandInvocation, DocumentCommandSurfaceSnapshot } from './reader/document-command-surface.js';
+import './app/reader-layout.css';
 declare global { interface Window { placekeeper: ElectronShellBridge } }
 const windowControlsOverlay = (navigator as Navigator & {
     windowControlsOverlay?: EventTarget & { readonly visible: boolean; getTitlebarAreaRect(): DOMRect };
 }).windowControlsOverlay;
-function ElectronReview({ bridge, identity }: { bridge: ElectronShellBridge; identity: ElectronShellIdentity & { presentation?: { pageIndex: number; zoom: number } } }) {
+function ElectronDocument({ bridge, identity }: { bridge: ElectronShellBridge; identity: ElectronShellIdentity & { presentation?: { pageIndex: number; zoom: number } } }) {
     const [chromeMetrics, setChromeMetrics] = useState(() => bridge.windowChromeMetrics?.());
     useLayoutEffect(() => {
         const update = () => {
@@ -42,14 +42,14 @@ function ElectronReview({ bridge, identity }: { bridge: ElectronShellBridge; ide
         visible: (generation, token) => bridge.visible(identity, generation, token),
         failed: token => bridge.focusFailed(identity, token),
     }));
-    const [command, setCommand] = useState<ReviewCommandInvocation>();
+    const [command, setCommand] = useState<DocumentCommandInvocation>();
     const revision = useRef(0);
     const sourceModalOpen = useRef(false);
-    const currentSurface = useRef<ReviewCommandSurfaceSnapshot | undefined>(undefined);
+    const currentSurface = useRef<DocumentCommandSurfaceSnapshot | undefined>(undefined);
     const settle = useRef<(() => Promise<void>) | undefined>(undefined);
     const [sourceEndpoint, setSourceEndpoint] = useState<{ token: string }>();
     const [closing, setClosing] = useState(false);
-    const publish = useCallback((snapshot: ReviewCommandSurfaceSnapshot) => {
+    const publish = useCallback((snapshot: DocumentCommandSurfaceSnapshot) => {
         currentSurface.current = snapshot;
         const active = document.activeElement;
         const editable = active instanceof HTMLElement && (active.isContentEditable || active.matches('textarea,input:not([type="button"]):not([type="submit"]):not([type="checkbox"]):not([type="radio"])'));
@@ -84,8 +84,8 @@ function ElectronReview({ bridge, identity }: { bridge: ElectronShellBridge; ide
         return () => window.removeEventListener('beforeunload', beforeUnload);
     }, [bridge, identity]);
     useEffect(() => { const dispose = () => { focusedNavigation.dispose(); runtime.dispose(); }; window.addEventListener('pagehide', dispose, { once: true }); return () => window.removeEventListener('pagehide', dispose); }, [runtime]);
-    return <div className="electron-review-shell" data-native-platform={chromeMetrics?.platform} style={{ '--electron-interface-scale': chromeMetrics?.scale ?? 1 } as React.CSSProperties} data-window-controls-overlay={overlayVisible} data-toolbar-hovered={toolbarHovered} inert={closing}>
-        <RuntimeProductionReviewApp runtime={runtime} loadingDocumentTitle="Opening PDF"
+    return <div className="electron-reader-shell" data-native-platform={chromeMetrics?.platform} style={{ '--electron-interface-scale': chromeMetrics?.scale ?? 1 } as React.CSSProperties} data-window-controls-overlay={overlayVisible} data-toolbar-hovered={toolbarHovered} inert={closing}>
+        <RuntimeProductionReaderApp runtime={runtime} loadingDocumentTitle="Opening PDF"
             {...(identity.presentation ? { initialPresentation: identity.presentation } : {})}
             onPresentationChange={state => { void bridge.presentation(identity, state); }}
             registerCloseSettlement={handler => { settle.current = handler; }}
@@ -104,13 +104,13 @@ async function start() {
     // that operation where Chromium denies custom-scheme clipboard access.
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: Object.freeze({ writeText: (text: string) => bridge.writeClipboard(identity, text) }) });
     const root = document.getElementById('root');
-    if (!root) throw new Error('Missing review root');
+    if (!root) throw new Error('Missing document root');
     root.dataset.productionRoot = 'true';
     if (identity.sourceEndpointToken) {
         const token = identity.sourceEndpointToken;
         createRoot(root).render(<ElectronSourceEndpointDialog onConfirm={endpoint => { void bridge.sourceEndpoint(identity, token, endpoint); }} onCancel={() => { void bridge.sourceEndpoint(identity, token, null); }} />);
         return;
     }
-    createRoot(root).render(<ElectronReview bridge={bridge} identity={identity} />);
+    createRoot(root).render(<ElectronDocument bridge={bridge} identity={identity} />);
 }
 void start();

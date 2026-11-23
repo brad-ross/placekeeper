@@ -3,9 +3,9 @@ import { describe, expect, it } from 'vitest';
 
 import type { DocumentContextState } from '../src/host/document-in-context.js';
 import { unavailableViewerControls } from '../src/pdf/viewer-controls.js';
-import { DocumentContextButton } from '../src/review/DocumentContextButton.js';
-import { ReviewChrome } from '../src/review/ReviewChrome.js';
-import { REVIEW_CHROME_PRESENTATIONS } from '../src/review/review-chrome-layout.js';
+import { DocumentContextButton } from '../src/reader/DocumentContextButton.js';
+import { ReaderChrome } from '../src/reader/ReaderChrome.js';
+import { READER_CHROME_PRESENTATIONS } from '../src/reader/reader-chrome-layout.js';
 
 describe('document context button', () => {
   it.each([
@@ -39,7 +39,7 @@ describe('document context button', () => {
   );
 
   it('renders one app-owned control and includes its footprint in each sizing candidate', () => {
-    const markup = renderToStaticMarkup(<ReviewChrome
+    const markup = renderToStaticMarkup(<ReaderChrome
       documentTitle="paper.pdf"
       viewerState={unavailableViewerControls()}
       canUndo={false}
@@ -50,6 +50,6 @@ describe('document context button', () => {
     />);
 
     expect(markup.match(/data-document-context="idle"/gu)).toHaveLength(1);
-    expect(markup.match(/review-chrome__context--document/gu)).toHaveLength(1 + REVIEW_CHROME_PRESENTATIONS.length);
+    expect(markup.match(/reader-chrome__context--document/gu)).toHaveLength(1 + READER_CHROME_PRESENTATIONS.length);
   });
 });

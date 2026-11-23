@@ -9,18 +9,18 @@ export interface MimeHandlerContext extends PdfStreamInfo {
   readonly embedded: boolean;
 }
 
-export type EmbeddedReviewLifecycleEvent =
+export type EmbeddedDocumentLifecycleEvent =
   | { readonly type: "disconnected"; readonly protected: boolean }
   | { readonly type: "update-required"; readonly protected: boolean };
 
-export interface EmbeddedReviewSession {
+export interface EmbeddedDocumentSession {
   readonly displayName: string;
   /** Resolves only after the main PDF generation has been parsed and accepted by the viewer. */
   mountAndValidate(signal: AbortSignal): Promise<void>;
   activate(signal: AbortSignal): Promise<void>;
   release(): Promise<void>;
   dispose(): void;
-  subscribeLifecycle(listener: (event: EmbeddedReviewLifecycleEvent) => void): () => void;
+  subscribeLifecycle(listener: (event: EmbeddedDocumentLifecycleEvent) => void): () => void;
 }
 
 export type HandlerState =
@@ -38,7 +38,7 @@ export type HandlerState =
 export interface HandlerPorts {
   isOptedIn(): Promise<boolean>;
   getStreamInfo(): Promise<unknown>;
-  openEmbedded(info: MimeHandlerContext, signal: AbortSignal): Promise<EmbeddedReviewSession>;
+  openEmbedded(info: MimeHandlerContext, signal: AbortSignal): Promise<EmbeddedDocumentSession>;
   pendingTitle?(originalUrl: string): void;
   fallback(): void;
   reloadTab(tabId: number): Promise<void>;
@@ -75,7 +75,7 @@ export function createHandlerController(ports: HandlerPorts): HandlerController 
   let activeCommitted = false;
   let tabId: number | undefined;
   let reopening = false;
-  let review: EmbeddedReviewSession | undefined;
+  let documentSession: EmbeddedDocumentSession | undefined;
   let unsubscribeLifecycle: (() => void) | undefined;
 
   const fallbackOnce = (): void => {
@@ -129,15 +129,15 @@ export function createHandlerController(ports: HandlerPorts): HandlerController 
         tabId = info.tabId;
         current = "pending";
         ports.status?.("Opening this PDF in Placekeeper…");
-        review = await ports.openEmbedded(info, abort.signal);
+        documentSession = await ports.openEmbedded(info, abort.signal);
         if (terminal || bypassRequested) {
-          await review.release();
-          review.dispose();
-          review = undefined;
+          await documentSession.release();
+          documentSession.dispose();
+          documentSession = undefined;
           fallbackOnce();
           return;
         }
-        unsubscribeLifecycle = review.subscribeLifecycle((event) => {
+        unsubscribeLifecycle = documentSession.subscribeLifecycle((event) => {
           if (!activeCommitted || terminal) return;
           current = event.type === "update-required"
             ? "update-required"
@@ -152,21 +152,21 @@ export function createHandlerController(ports: HandlerPorts): HandlerController 
         });
         current = "mounting";
         ports.status?.("Preparing the Placekeeper viewer…");
-        await review.mountAndValidate(abort.signal);
+        await documentSession.mountAndValidate(abort.signal);
         if (terminal || bypassRequested) throw new Error("bypassed");
         current = "activating";
         ports.status?.("Activating this document…");
-        await review.activate(abort.signal);
+        await documentSession.activate(abort.signal);
         activeCommitted = true;
         current = "active";
         ports.status?.("Document ready.");
       } catch {
-        if (!activeCommitted && review !== undefined) {
+        if (!activeCommitted && documentSession !== undefined) {
           unsubscribeLifecycle?.();
           unsubscribeLifecycle = undefined;
-          await review.release().catch(() => undefined);
-          review.dispose();
-          review = undefined;
+          await documentSession.release().catch(() => undefined);
+          documentSession.dispose();
+          documentSession = undefined;
         }
         if (terminal) return;
         if (bypassRequested) {

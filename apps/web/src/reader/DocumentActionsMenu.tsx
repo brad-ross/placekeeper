@@ -1,0 +1,409 @@
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type FocusEvent,
+  type KeyboardEvent,
+} from 'react';
+
+import type { DocumentStateSummaryV1 } from '../../../../packages/core/src/live-context.js';
+import type { GenerationRefreshStatus } from '../generation-status.js';
+import { enabledMenuItems, menuRovingFocusIndex } from './menu-focus.js';
+import { ReaderIcon } from './ReaderIcon.js';
+import { ReaderTooltipButton } from './ReaderTooltipButton.js';
+
+export interface DocumentExportPresentation {
+  readonly canExport: boolean;
+  readonly requiresStaleConfirmation: boolean;
+  readonly annotationBlocked: boolean;
+  readonly message: string;
+}
+
+export function documentExportPresentation(input: {
+  readonly refreshStatus: GenerationRefreshStatus;
+  readonly summary: DocumentStateSummaryV1;
+}): DocumentExportPresentation {
+  if (input.refreshStatus === 'reconciling') {
+    return {
+      canExport: false,
+      requiresStaleConfirmation: false,
+      annotationBlocked: false,
+      message: 'Export becomes available after document reconciliation finishes.',
+    };
+  }
+  const unresolvedItems = input.summary.reconciliation.unresolvedItemIds.length;
+  const pendingDrafts = input.summary.reconciliation.pendingDraftIds.length;
+  if (!input.summary.reconciliation.complete) {
+    const attentionCount = unresolvedItems + pendingDrafts;
+    const message = attentionCount === 0
+      ? 'Annotations to resolve.'
+      : `${attentionCount} annotation${attentionCount === 1 ? '' : 's'} to resolve.`;
+    return {
+      canExport: false,
+      requiresStaleConfirmation: false,
+      annotationBlocked: true,
+      message,
+    };
+  }
+  if (input.summary.export.requiresStaleConfirmation || input.refreshStatus === 'failed') {
+    return {
+      canExport: true,
+      requiresStaleConfirmation: true,
+      annotationBlocked: false,
+      message: 'The last successful PDF may be stale. Confirm before exporting this generation.',
+    };
+  }
+  return {
+    canExport: input.summary.export.eligible,
+    requiresStaleConfirmation: false,
+    annotationBlocked: false,
+    message: input.summary.export.eligible ? '' : 'Annotated Document export is not available yet.',
+  };
+}
+
+export interface DocumentActionsMenuProps {
+  readonly documentTitle: string;
+  /** The PDF's own title when it has one; the filename otherwise. */
+  readonly displayTitle?: string;
+  readonly savedLabel: string;
+  readonly showSaveStatusDot?: boolean;
+  readonly savePhase?: 'clean' | 'saving' | 'not-saved';
+  readonly presentation: DocumentExportPresentation;
+  readonly onExport: (confirmPossiblyStale?: true) => Promise<DocumentExportResult | void>;
+  readonly onOpenAnnotations?: () => void;
+  readonly onSaveOptions?: () => void;
+  readonly open?: boolean;
+  readonly onOpenChange?: (open: boolean) => void;
+  readonly onPendingChange?: (pending: boolean) => void;
+  readonly requestToken?: number;
+  readonly onRequestHandled?: (token: number) => void;
+}
+
+type ExportOutcome = 'idle' | 'pending' | 'success' | 'failure';
+
+export interface DocumentExportResult {
+  readonly kind?: string;
+  readonly warning?: string;
+}
+
+function exportMessageFromResult(result: DocumentExportResult | void): string {
+  if (result?.warning !== undefined && result.warning.trim() !== '') return result.warning;
+  return 'Annotated Document exported.';
+}
+
+const EXPORT_OUTCOME_MESSAGES: Readonly<Record<ExportOutcome, string>> = {
+  idle: '',
+  pending: '',
+  success: 'Annotated Document exported.',
+  failure: 'Export failed. Your annotations are still available; try again.',
+};
+
+export const DocumentActionsEnabled = createContext(true);
+
+/** Names the document by its title, keeping the filename when the two differ. */
+export function documentIdentityLabel(displayTitle: string, filename: string): string {
+  return displayTitle === filename ? filename : `${displayTitle}, ${filename}`;
+}
+
+export function DocumentActionsMenu({
+  showSaveStatusDot = true,
+  documentTitle,
+  displayTitle = documentTitle,
+  savedLabel,
+  savePhase = 'clean',
+  presentation,
+  onExport,
+  onOpenAnnotations,
+  onSaveOptions,
+  open: controlledOpen,
+  onOpenChange,
+  onPendingChange,
+  requestToken,
+  onRequestHandled,
+}: DocumentActionsMenuProps) {
+  const enabled = useContext(DocumentActionsEnabled);
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
+  const open = enabled && (controlledOpen ?? uncontrolledOpen);
+  const [staleConfirmation, setStaleConfirmation] = useState(false);
+  const [outcome, setOutcome] = useState<ExportOutcome>('idle');
+  const [exportDetail, setExportDetail] = useState('');
+  const generatedId = useId().replaceAll(':', '');
+  const menuId = `document-actions-menu-${generatedId}`;
+  const reasonId = `document-export-reason-${generatedId}`;
+  const resultId = `document-export-result-${generatedId}`;
+  const rootRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const exportRef = useRef<HTMLButtonElement>(null);
+  const saveOptionsRef = useRef<HTMLButtonElement>(null);
+  const annotationActionRef = useRef<HTMLButtonElement>(null);
+  const confirmationRef = useRef<HTMLButtonElement>(null);
+  const pendingRef = useRef(false);
+  const handledRequestTokenRef = useRef(0);
+  const pending = outcome === 'pending';
+
+  const setOpen = (nextOpen: boolean) => {
+    if (controlledOpen === undefined) setUncontrolledOpen(nextOpen);
+    onOpenChange?.(nextOpen);
+  };
+
+  const closeAndRestore = (restoreFocus = true) => {
+    if (pending) return;
+    setOpen(false);
+    setStaleConfirmation(false);
+    setOutcome('idle');
+    setExportDetail('');
+    if (restoreFocus) requestAnimationFrame(() => triggerRef.current?.focus({ preventScroll: true }));
+  };
+
+  const closeForAction = () => {
+    if (pending) return;
+    setOpen(false);
+    setStaleConfirmation(false);
+    setOutcome('idle');
+    setExportDetail('');
+  };
+
+  useLayoutEffect(() => {
+    if (!open) return;
+    const target = staleConfirmation
+      ? confirmationRef.current
+      : !presentation.canExport && annotationActionRef.current !== null
+        ? annotationActionRef.current
+        : saveOptionsRef.current ?? exportRef.current;
+    target?.focus({ preventScroll: true });
+  }, [open, presentation.canExport, staleConfirmation]);
+
+  useEffect(() => {
+    if (!open) return;
+    const outside = (event: PointerEvent) => {
+      if (event.target instanceof Node && rootRef.current?.contains(event.target)) return;
+      const switchingTopBarMenu = event.target instanceof Element
+        && event.target.closest('[data-reader-chrome-group]') !== null;
+      closeAndRestore(!switchingTopBarMenu);
+    };
+    document.addEventListener('pointerdown', outside);
+    return () => document.removeEventListener('pointerdown', outside);
+  }, [open, pending]);
+
+  useEffect(() => {
+    if (open || pending) return;
+    setStaleConfirmation(false);
+    setOutcome('idle');
+    setExportDetail('');
+  }, [open, pending]);
+
+  const exportAnnotatedPdf = async (confirmPossiblyStale?: true) => {
+    if (pendingRef.current) return;
+    pendingRef.current = true;
+    setOutcome('pending');
+    setExportDetail('');
+    onPendingChange?.(true);
+    try {
+      const result = await onExport(confirmPossiblyStale);
+      setStaleConfirmation(false);
+      setExportDetail(result?.kind === 'cancelled' ? '' : exportMessageFromResult(result));
+      setOutcome(result?.kind === 'cancelled' ? 'idle' : 'success');
+    } catch {
+      setStaleConfirmation(false);
+      setOutcome('failure');
+    } finally {
+      pendingRef.current = false;
+      onPendingChange?.(false);
+    }
+    requestAnimationFrame(() => exportRef.current?.focus({ preventScroll: true }));
+  };
+
+  useEffect(() => {
+    const token = requestToken ?? 0;
+    if (token <= 0 || token === handledRequestTokenRef.current) return;
+    handledRequestTokenRef.current = token;
+    onRequestHandled?.(token);
+    setOpen(true);
+    if (pendingRef.current) return;
+    setOutcome('idle');
+    setExportDetail('');
+    if (!presentation.canExport) {
+      setStaleConfirmation(false);
+      return;
+    }
+    if (presentation.requiresStaleConfirmation) {
+      setStaleConfirmation(true);
+      return;
+    }
+    setStaleConfirmation(false);
+    void exportAnnotatedPdf();
+  }, [requestToken]);
+
+  const onMenuKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === 'Escape' && !event.nativeEvent.isComposing) {
+      event.preventDefault();
+      event.stopPropagation();
+      closeAndRestore();
+      return;
+    }
+    const items = enabledMenuItems(event.currentTarget);
+    const nextIndex = menuRovingFocusIndex({
+      items,
+      activeElement: document.activeElement,
+      eventTarget: event.target,
+      key: event.key,
+    });
+    if (nextIndex === null) return;
+    event.preventDefault();
+    items[nextIndex]?.focus({ preventScroll: true });
+  };
+
+  const onBlur = (event: FocusEvent<HTMLDivElement>) => {
+    if (!open || pending) return;
+    // WebKit can dispatch a null relatedTarget while clicking a control inside
+    // the menu. The pointerdown listener remains the authority for outside
+    // dismissal in that case, so do not unmount before the control's click runs.
+    if (event.relatedTarget === null) return;
+    if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) return;
+    setOpen(false);
+    setStaleConfirmation(false);
+    setOutcome('idle');
+  };
+
+  const resultMessage = exportDetail || EXPORT_OUTCOME_MESSAGES[outcome];
+  const exportUnavailable = !presentation.canExport || pending;
+  const annotationAttentionVisible = presentation.annotationBlocked && onOpenAnnotations !== undefined;
+  const reasonVisible = presentation.message !== '' && !annotationAttentionVisible;
+  const exportDescriptionIds = [
+    presentation.message === '' ? '' : reasonId,
+    resultMessage ? resultId : '',
+  ].filter(Boolean).join(' ');
+  const exportLabel = pending ? 'Exporting…' : outcome === 'failure' ? 'Retry export' : 'Export';
+  const identityLabel = documentIdentityLabel(displayTitle, documentTitle);
+
+  return <div
+    ref={rootRef}
+    className="document-actions"
+    data-document-actions
+    data-document-actions-open={open ? 'true' : undefined}
+    onBlur={onBlur}
+  >
+    <ReaderTooltipButton
+      label={enabled ? `${identityLabel}, ${savedLabel}. Open document actions` : identityLabel}
+      tooltip={documentTitle}
+      ref={triggerRef}
+      type="button"
+      className="reader-chrome__save-identity document-actions__trigger"
+      data-document-actions-trigger
+      aria-label={enabled ? `${identityLabel}, ${savedLabel}. Open document actions` : identityLabel}
+      aria-haspopup={enabled ? "menu" : undefined}
+      aria-expanded={enabled ? open : undefined}
+      aria-controls={enabled ? menuId : undefined}
+      onClick={() => {
+        if (!enabled) return;
+        if (open) closeAndRestore();
+        else setOpen(true);
+      }}
+    >
+      <ReaderIcon name="file" size={16} />
+      <span className="reader-chrome__filename">{displayTitle}</span>
+      {!showSaveStatusDot || savePhase === 'clean' ? null : <span className="reader-chrome__save-dot" data-save-phase={savePhase} aria-hidden="true" />}
+      <span className="sr-only" data-reader-saved-status>{savedLabel}</span>
+    </ReaderTooltipButton>
+    {open ? <div
+      id={menuId}
+      className="document-actions__menu"
+      role="menu"
+      aria-label={`Actions for ${documentTitle}`}
+      data-export-eligibility={presentation.canExport ? 'eligible' : 'blocked'}
+      onKeyDown={onMenuKeyDown}
+    >
+      {staleConfirmation ? <>
+        <p className="document-actions__heading">Export the last successful PDF?</p>
+        <p id={reasonId} className="document-actions__message">{presentation.message}</p>
+        <div className="document-actions__confirmation" role="group" aria-label="Confirm possibly stale export">
+          <button
+            ref={confirmationRef}
+            type="button"
+            role="menuitem"
+            title="Cancel export confirmation"
+            aria-disabled={pending}
+            onClick={() => {
+              if (pending) return;
+              setStaleConfirmation(false);
+              queueMicrotask(() => exportRef.current?.focus({ preventScroll: true }));
+            }}
+          ><ReaderIcon name="close" /><span>Cancel</span></button>
+          <button
+            type="button"
+            role="menuitem"
+            title="Confirm export"
+            aria-disabled={pending}
+            onClick={() => void exportAnnotatedPdf(true)}
+          ><ReaderIcon name="download" /><span>Confirm export</span></button>
+        </div>
+        {resultMessage ? <p
+          id={resultId}
+          className="document-actions__result"
+          role="status"
+          aria-live="polite"
+          data-export-result={outcome}
+        >{resultMessage}</p> : null}
+      </> : <>
+        {onSaveOptions === undefined ? null : <button ref={saveOptionsRef} type="button" role="menuitem" title="Open automatic save options" aria-disabled={pending} onClick={() => { if (pending) return; closeForAction(); onSaveOptions(); }}><ReaderIcon name="file" /><span>Save options</span></button>}
+        <button
+          ref={exportRef}
+          type="button"
+          role="menuitem"
+          title={exportLabel}
+          className="document-actions__export"
+          aria-disabled={exportUnavailable}
+          {...(exportDescriptionIds === '' ? {} : { 'aria-describedby': exportDescriptionIds })}
+          onClick={() => {
+            if (exportUnavailable) return;
+            if (presentation.requiresStaleConfirmation) {
+              setStaleConfirmation(true);
+              return;
+            }
+            void exportAnnotatedPdf();
+          }}
+        >
+          <ReaderIcon
+            name={pending ? 'loading' : outcome === 'success' ? 'check' : 'download'}
+
+            className={pending ? 'reader-icon document-actions__loading' : 'reader-icon'}
+          />
+          <span>{exportLabel}</span>
+        </button>
+        {annotationAttentionVisible ? <div
+          className="document-actions__attention"
+          data-document-actions-attention
+        >
+          <p id={reasonId} className="document-actions__attention-label">
+            <ReaderIcon name="warning" />
+            <span>{presentation.message}</span>
+          </p>
+          <button
+            ref={annotationActionRef}
+            type="button"
+            role="menuitem"
+            title="Open Annotations"
+            className="reader-button reader-button--secondary document-actions__annotations-link"
+            onClick={() => {
+              closeForAction();
+              requestAnimationFrame(onOpenAnnotations);
+            }}
+          ><ReaderIcon name="annotations" /><span>Open Annotations</span></button>
+        </div> : reasonVisible ? <p id={reasonId} className="document-actions__message">
+          {presentation.message}
+        </p> : null}
+        {resultMessage ? <p
+          id={resultId}
+          className="document-actions__result"
+          role="status"
+          aria-live="polite"
+          data-export-result={outcome}
+        >{resultMessage}</p> : null}
+      </>}
+    </div> : null}
+  </div>;
+}

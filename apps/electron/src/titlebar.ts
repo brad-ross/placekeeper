@@ -41,7 +41,7 @@ export function trackTitlebarHover(window: BrowserWindow, cursor: () => Point, h
     const publish = (next: boolean) => {
         if (hovered === next || contents.isDestroyed()) return;
         hovered = next;
-        contents.send('review:shell', { type: 'toolbar-hover', hovered: next });
+        contents.send('document:shell', { type: 'toolbar-hover', hovered: next });
     };
     const sample = () => {
         const point = cursor();

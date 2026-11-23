@@ -66,7 +66,7 @@ export async function setupCodex({ appPath, codexPath, marketplacePath, marketpl
     ]),
     `  ${installed ? 3 : 4}. Review any trust or permission prompt, then enable the plugin if you approve.`,
     `  ${installed ? 4 : 5}. Fully quit and restart Codex, then start a new task and ask it to open a local PDF with $placekeeper.`,
-    '  Confirm the Placekeeper skill and mcp__placekeeper__display_review tool are available; opening and fresh prompt context require trusted hooks too.',
+    '  Confirm the Placekeeper skill and mcp__placekeeper__display_document tool are available; opening and fresh prompt context require trusted hooks too.',
     `  If the skill is old or the tool is missing, update or reinstall codex-plugin from ${marketplaceIdentity} in Codex, review trust and enablement, then fully quit and restart again.`,
     '  If local marketplace controls are unavailable, update Codex and rerun the installer.',
   ].join('\n');

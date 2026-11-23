@@ -18,7 +18,7 @@ describe("explicit service switching", () => {
       candidate: { daemonIdentity: "candidate", installArtifactIdentity: "candidate" },
       recoveryCompatible: async () => { events.push("compatible"); return true; },
       backupAndVerify: async () => { events.push("backup"); },
-      inspect: async () => ({ kind: "incompatible", status: { protocolVersion: 1, upgradePreparationVersion: 1, daemonIdentity: "old", lifecycle: "accepting", activity: { reviewPresence: 1, codexTasks: 0, transientWork: 0 } } }),
+      inspect: async () => ({ kind: "incompatible", status: { protocolVersion: 1, upgradePreparationVersion: 1, daemonIdentity: "old", lifecycle: "accepting", activity: { documentPresence: 1, codexTasks: 0, transientWork: 0 } } }),
       shutdown: async () => { events.push("shutdown"); return { status: "accepted" }; },
       waitForRetirement: async () => { events.push("retired"); },
       replaceAndReady: async () => { events.push("ready"); },
@@ -45,7 +45,7 @@ function fixture(events: string[]): CoordinateServiceSwitchOptions {
     candidate: { daemonIdentity: "candidate", installArtifactIdentity: "candidate" },
     recoveryCompatible: async () => { events.push("compatible"); return true; },
     backupAndVerify: async () => { events.push("backup"); },
-    inspect: async () => ({ kind: "incompatible", status: { protocolVersion: 1, upgradePreparationVersion: 1, daemonIdentity: "old", lifecycle: "accepting", activity: { reviewPresence: 0, codexTasks: 0, transientWork: 0 } } }),
+    inspect: async () => ({ kind: "incompatible", status: { protocolVersion: 1, upgradePreparationVersion: 1, daemonIdentity: "old", lifecycle: "accepting", activity: { documentPresence: 0, codexTasks: 0, transientWork: 0 } } }),
     shutdown: async () => { events.push("shutdown"); return { status: "accepted" }; },
     waitForRetirement: async () => { events.push("retired"); },
     replaceAndReady: async () => { events.push("ready"); },
@@ -58,7 +58,7 @@ it("requires recovery compatibility before retiring the incumbent", async () => 
 });
 it("rechecks idleness at shutdown when activity arrives after inspection", async () => {
   const events: string[] = []; const options = fixture(events);
-  await expect(coordinateServiceSwitch({ ...options, shutdown: async () => ({ status: "refused", activity: { reviewPresence: 1, codexTasks: 0, transientWork: 0 } }) })).rejects.toThrow("active reviews");
+  await expect(coordinateServiceSwitch({ ...options, shutdown: async () => ({ status: "refused", activity: { documentPresence: 1, codexTasks: 0, transientWork: 0 } }) })).rejects.toThrow("open documents");
   expect(events).toEqual(["compatible"]);
 });
 it("does not start the candidate without proven incumbent retirement", async () => {

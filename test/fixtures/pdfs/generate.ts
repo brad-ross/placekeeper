@@ -20,8 +20,8 @@ import { createFixturePdf } from './fixture-document.js';
 import { largeTextHeavyPdf } from './large-text-heavy.js';
 import { fitTextBookPdf } from './fit-text-book.js';
 
-import { projectReviewItem } from '../../../packages/core/src/annotation-projection.js';
-import type { ReviewItem } from '../../../packages/core/src/review-model.js';
+import { projectAnnotation } from '../../../packages/core/src/annotation-projection.js';
+import type { Annotation } from '../../../packages/core/src/document-model.js';
 import { createSelectedPdfWriter } from '../../../packages/pdf-backends/src/selected-writer.js';
 
 const reportedMathSymbolInventory = [
@@ -431,7 +431,7 @@ async function referenceNavigationPdf() {
     annotations.push(context.register(annotation));
   }
 
-  const reviewAppearance = context.register(context.flateStream(
+  const documentAppearance = context.register(context.flateStream(
     '0.95 0.83 0.2 rg 0 0 148 18 re f',
     {
       Type: 'XObject',
@@ -440,7 +440,7 @@ async function referenceNavigationPdf() {
       Resources: {},
     },
   ));
-  function addReviewAnnotation(
+  function addPdfWriterAnnotation(
     page: PDFPage,
     id: string,
     contents: string,
@@ -455,7 +455,7 @@ async function referenceNavigationPdf() {
       QuadPoints: [rect[0], rect[3], rect[2], rect[3], rect[0], rect[1], rect[2], rect[1]],
       C: [0.95, 0.83, 0.2],
       F: 4,
-      AP: context.obj({ N: reviewAppearance }),
+      AP: context.obj({ N: documentAppearance }),
     });
     let annotations = page.node.lookupMaybe(PDFName.of('Annots'), PDFArray);
     if (!annotations) {
@@ -465,13 +465,13 @@ async function referenceNavigationPdf() {
     annotations.push(context.register(annotation));
   }
 
-  addReviewAnnotation(
+  addPdfWriterAnnotation(
     tocPage,
     'reference-overview-note',
     'Unsectioned review note',
     [72, 700, 220, 718],
   );
-  addReviewAnnotation(
+  addPdfWriterAnnotation(
     detailPage,
     'reference-details-note',
     'Nested result review note',
@@ -818,7 +818,7 @@ async function legibleLinkDestinationsPdf(options: { readonly outline: boolean }
 
 async function annotatedReferenceNavigationPdf(sourcePdf: Uint8Array): Promise<Uint8Array> {
   const timestamp = '2026-08-23T12:00:00.000Z';
-  const item: ReviewItem = {
+  const item: Annotation = {
     id: '51000000-0000-4000-8000-000000000051',
     kind: 'delete',
     pageIndex: 0,
@@ -838,7 +838,7 @@ async function annotatedReferenceNavigationPdf(sourcePdf: Uint8Array): Promise<U
     sourcePdf,
     sourceSha256: createHash('sha256').update(sourcePdf).digest('hex'),
     revision: 1,
-    annotations: [projectReviewItem(item)],
+    annotations: [projectAnnotation(item)],
   });
   return written.pdfBytes;
 }

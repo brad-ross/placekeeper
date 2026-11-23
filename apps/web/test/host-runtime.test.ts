@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { setAnnotationName } from "../../../packages/core/src/review-commands.js";
-import { createReviewState } from "../../../packages/core/src/review-model.js";
+import { setAnnotationName } from "../../../packages/core/src/document-commands.js";
+import { createDocumentState } from "../../../packages/core/src/document-model.js";
 import {
-  REVIEW_RUNTIME_PROTOCOL,
-  REVIEW_RUNTIME_VERSION,
-} from "../../../packages/core/src/review-runtime-protocol.js";
+  DOCUMENT_RUNTIME_PROTOCOL,
+  DOCUMENT_RUNTIME_VERSION,
+} from "../../../packages/core/src/document-runtime-protocol.js";
 import { createBrowserHostRuntime } from "../src/host/browser-runtime.js";
 import {
   subscribeRuntimeDocumentSource,
@@ -33,7 +33,7 @@ describe("host-neutral review runtime", () => {
       subscribe(listener) { receive = listener; return () => undefined; },
       postMessage(raw) {
         const request = raw as { requestId: string };
-        queueMicrotask(() => receive({ protocol: REVIEW_RUNTIME_PROTOCOL, version: 1,
+        queueMicrotask(() => receive({ protocol: DOCUMENT_RUNTIME_PROTOCOL, version: 1,
           kind: "response", panelId, requestId: request.requestId, ok: true }));
       },
     });
@@ -43,7 +43,7 @@ describe("host-neutral review runtime", () => {
   it("bootstraps the packaged Electron runtime without exposing native paths", async () => {
     const sessionId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
     const identity = { windowId: "runtime_identifier_1234", attemptId: "attempt_identifier_1234" };
-    const state = createReviewState({ sessionId, source: { fileId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", digest: "a".repeat(64), byteLength: 100 } });
+    const state = createDocumentState({ sessionId, source: { fileId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", digest: "a".repeat(64), byteLength: 100 } });
     const resources = { document: "placekeeper-resource://document/resource_12345678/1", pdfiumWasm: "placekeeper-app://bundle/assets/pdfium.wasm", worker: "placekeeper-app://bundle/assets/pdfium-worker.js" };
     const runtime = createElectronHostRuntime({
       identity: async () => identity, sourceEndpoint: async () => {},
@@ -113,7 +113,7 @@ describe("host-neutral review runtime", () => {
   });
 
   it("waits for the real browser attachment handshake instead of exposing legacy authoring", async () => {
-    const state = createReviewState({
+    const state = createDocumentState({
       sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaab",
       source: { fileId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbc", digest: "a".repeat(64), byteLength: 100 },
     });
@@ -187,7 +187,7 @@ describe("host-neutral review runtime", () => {
   });
 
   it("keeps browser bootstrap, scope, assets, presence, and export on authenticated HTTP/WebSocket", async () => {
-    const state = createReviewState({
+    const state = createDocumentState({
       sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
       source: { fileId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", digest: "a".repeat(64), byteLength: 100 },
     });
@@ -294,12 +294,12 @@ describe("host-neutral review runtime", () => {
       headers: expect.objectContaining({ "x-placekeeper-generation": "1" }),
     }));
     const fence = { expectedRevision: 1, documentGeneration: 1 };
-    await expect(runtime.exportReviewedCopy(true, fence)).resolves.toMatchObject({ kind: "reviewed-copy" });
+    await expect(runtime.exportAnnotatedCopy(true, fence)).resolves.toMatchObject({ kind: "reviewed-copy" });
     expect(fetch).toHaveBeenCalledWith(`/s/${state.sessionId}/export`, expect.objectContaining({
       body: JSON.stringify({ confirmPossiblyStale: true, fence }),
     }));
     fetch.mockResolvedValueOnce(Response.json({ error: { kind: "export-conflict" } }, { status: 409 }));
-    await expect(runtime.exportReviewedCopy(true, fence)).rejects.toThrow("Confirm the annotation name again");
+    await expect(runtime.exportAnnotatedCopy(true, fence)).rejects.toThrow("Confirm the annotation name again");
     expect(FakeSocket.created[0]).toMatchObject({
       protocols: [
         "placekeeper",
@@ -346,7 +346,7 @@ describe("host-neutral review runtime", () => {
       generation,
       revision,
       session: { sessionId },
-      state: createReviewState({
+      state: createDocumentState({
         sessionId,
         source: {
           fileId: `file-${generation}`,
@@ -415,7 +415,7 @@ describe("host-neutral review runtime", () => {
       revision,
       session: { sessionId },
       state: {
-        ...createReviewState({
+        ...createDocumentState({
           sessionId,
           source: { fileId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", digest: "a".repeat(64), byteLength: 100 },
           workflowMode: "generated-output",
@@ -423,7 +423,7 @@ describe("host-neutral review runtime", () => {
         }),
         revision,
         workflow: {
-          ...createReviewState({
+          ...createDocumentState({
             sessionId,
             source: { fileId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", digest: "a".repeat(64), byteLength: 100 },
             workflowMode: "generated-output",
@@ -475,7 +475,7 @@ describe("host-neutral review runtime", () => {
       revision,
       session: { sessionId },
       state: {
-        ...createReviewState({
+        ...createDocumentState({
           sessionId,
           source: { fileId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", digest: "a".repeat(64), byteLength: 100 },
           workflowMode: "generated-output",
@@ -529,7 +529,7 @@ describe("host-neutral review runtime", () => {
       generation,
       revision,
       session: { sessionId },
-      state: createReviewState({
+      state: createDocumentState({
         sessionId,
         source: { fileId: `file-${generation}`, digest: String(generation).repeat(64), byteLength: generation },
         workflowMode: "generated-output",
@@ -584,7 +584,7 @@ describe("host-neutral review runtime", () => {
       revision: 0,
       activeAuthoringDraftIds,
       session: { sessionId },
-      state: createReviewState({
+      state: createDocumentState({
         sessionId,
         source: { fileId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", digest: "a".repeat(64), byteLength: 100 },
         workflowMode: "generated-output",
@@ -621,7 +621,7 @@ describe("host-neutral review runtime", () => {
       generation,
       revision: generation,
       session: { sessionId },
-      state: createReviewState({
+      state: createDocumentState({
         sessionId,
         source: {
           fileId: `file-${generation}`,
@@ -682,7 +682,7 @@ describe("host-neutral review runtime", () => {
       generation,
       revision: generation,
       session: { sessionId },
-      state: createReviewState({
+      state: createDocumentState({
         sessionId,
         source: { fileId: `file-${generation}`, digest: String(generation).repeat(64), byteLength: generation },
         workflowMode: "generated-output",
@@ -722,7 +722,7 @@ describe("host-neutral review runtime", () => {
     const sessionId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
     const loaded = (generation: number): HostRuntimeBootstrap => ({
       sessionId, generation, revision: generation, session: { sessionId },
-      state: createReviewState({ sessionId,
+      state: createDocumentState({ sessionId,
         source: { fileId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", digest: "a".repeat(64), byteLength: 100 },
         workflowMode: "generated-output", documentGeneration: generation }),
       scope: { documentTitle: "paper.pdf" },
@@ -765,14 +765,14 @@ describe("host-neutral review runtime", () => {
         const request = message as { requestId: string; method: string };
         if (request.method !== "bootstrap") return;
         queueMicrotask(() => {
-          const state = createReviewState({
+          const state = createDocumentState({
             sessionId,
             source: { fileId: `file-${generation}`, digest: String(generation).repeat(64), byteLength: generation },
             workflowMode: "generated-output",
             documentGeneration: generation,
           });
           for (const listener of listeners) listener({
-            protocol: REVIEW_RUNTIME_PROTOCOL, version: REVIEW_RUNTIME_VERSION, kind: "response",
+            protocol: DOCUMENT_RUNTIME_PROTOCOL, version: DOCUMENT_RUNTIME_VERSION, kind: "response",
             panelId: "panel_identifier_1234", requestId: request.requestId, sessionId,
             generation, revision: generation, ok: true,
             payload: { sessionId, generation, revision: generation, state, scope: {}, saveStatus: {},
@@ -798,8 +798,8 @@ describe("host-neutral review runtime", () => {
       const request = message as { requestId: string; method: string };
       queueMicrotask(() => {
         for (const listener of listeners) listener({
-          protocol: REVIEW_RUNTIME_PROTOCOL,
-          version: REVIEW_RUNTIME_VERSION,
+          protocol: DOCUMENT_RUNTIME_PROTOCOL,
+          version: DOCUMENT_RUNTIME_VERSION,
           kind: "response",
           panelId: "panel_identifier_1234",
           sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
@@ -852,8 +852,8 @@ describe("host-neutral review runtime", () => {
       .map(([message]) => message as Record<string, unknown>)
       .find((message) => message.method === "scope");
     expect(scopeRequest).toEqual({
-      protocol: REVIEW_RUNTIME_PROTOCOL,
-      version: REVIEW_RUNTIME_VERSION,
+      protocol: DOCUMENT_RUNTIME_PROTOCOL,
+      version: DOCUMENT_RUNTIME_VERSION,
       kind: "request",
       panelId: "panel_identifier_1234",
       requestId: expect.any(String),
@@ -873,7 +873,7 @@ describe("host-neutral review runtime", () => {
     const requests: Record<string, unknown>[] = [];
     const extensionOrigin = "chrome-extension://abcdefghijklmnopabcdefghijklmnop";
     const sessionId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
-    const state = createReviewState({
+    const state = createDocumentState({
       sessionId,
       source: {
         fileId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
@@ -889,8 +889,8 @@ describe("host-neutral review runtime", () => {
         requests.push(request);
         if (request.kind !== "request") return;
         queueMicrotask(() => listeners.forEach((listener) => listener({
-          protocol: REVIEW_RUNTIME_PROTOCOL,
-          version: REVIEW_RUNTIME_VERSION,
+          protocol: DOCUMENT_RUNTIME_PROTOCOL,
+          version: DOCUMENT_RUNTIME_VERSION,
           kind: "response",
           runtimeId: "chrome_connection_1234",
           sessionId,
@@ -962,7 +962,7 @@ describe("host-neutral review runtime", () => {
       },
     });
     const sessionId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
-    const state = createReviewState({
+    const state = createDocumentState({
       sessionId,
       source: { fileId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", digest: "a".repeat(64), byteLength: 100 },
       workflowMode: "generated-output",
@@ -970,8 +970,8 @@ describe("host-neutral review runtime", () => {
     });
     const respond = (request: Record<string, unknown>, revision: number, payload: unknown) => {
       const message = {
-        protocol: REVIEW_RUNTIME_PROTOCOL,
-        version: REVIEW_RUNTIME_VERSION,
+        protocol: DOCUMENT_RUNTIME_PROTOCOL,
+        version: DOCUMENT_RUNTIME_VERSION,
         kind: "response",
         panelId: "panel_identifier_1234",
         sessionId,
@@ -1029,7 +1029,7 @@ describe("host-neutral review runtime", () => {
       },
     });
     const sessionId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
-    const state = createReviewState({
+    const state = createDocumentState({
       sessionId,
       source: { fileId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", digest: "a".repeat(64), byteLength: 100 },
       workflowMode: "generated-output",
@@ -1037,8 +1037,8 @@ describe("host-neutral review runtime", () => {
     });
     const respond = (request: Record<string, unknown>, revision: number, payload: unknown) => {
       const message = {
-        protocol: REVIEW_RUNTIME_PROTOCOL,
-        version: REVIEW_RUNTIME_VERSION,
+        protocol: DOCUMENT_RUNTIME_PROTOCOL,
+        version: DOCUMENT_RUNTIME_VERSION,
         kind: "response",
         panelId: "panel_identifier_1234",
         sessionId,
@@ -1074,8 +1074,8 @@ describe("host-neutral review runtime", () => {
     expect(requests.at(-1)).toMatchObject({ method, payload: method === "command" ? confirmation.command : { confirmation } });
     const commandRequest = requests.at(-1)!;
     const ownRevision = {
-      protocol: REVIEW_RUNTIME_PROTOCOL,
-      version: REVIEW_RUNTIME_VERSION,
+      protocol: DOCUMENT_RUNTIME_PROTOCOL,
+      version: DOCUMENT_RUNTIME_VERSION,
       kind: "event",
       event: "session-invalidated",
       panelId: "panel_identifier_1234",
@@ -1113,7 +1113,7 @@ describe("host-neutral review runtime", () => {
       },
     });
     const sessionId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
-    const state = createReviewState({
+    const state = createDocumentState({
       sessionId,
       source: { fileId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", digest: "a".repeat(64), byteLength: 100 },
       workflowMode: "generated-output",
@@ -1121,8 +1121,8 @@ describe("host-neutral review runtime", () => {
     });
     const respond = (request: Record<string, unknown>, ok: boolean, payload: unknown) => {
       listeners.forEach((listener) => listener({
-        protocol: REVIEW_RUNTIME_PROTOCOL,
-        version: REVIEW_RUNTIME_VERSION,
+        protocol: DOCUMENT_RUNTIME_PROTOCOL,
+        version: DOCUMENT_RUNTIME_VERSION,
         kind: "response",
         panelId: "panel_identifier_1234",
         sessionId,
@@ -1153,8 +1153,8 @@ describe("host-neutral review runtime", () => {
     const command = runtime.command({ type: "undo", expectedRevision: 0 });
     const commandRequest = requests.at(-1)!;
     listeners.forEach((listener) => listener({
-      protocol: REVIEW_RUNTIME_PROTOCOL,
-      version: REVIEW_RUNTIME_VERSION,
+      protocol: DOCUMENT_RUNTIME_PROTOCOL,
+      version: DOCUMENT_RUNTIME_VERSION,
       kind: "event",
       event: "session-invalidated",
       panelId: "panel_identifier_1234",
@@ -1181,12 +1181,12 @@ describe("host-neutral review runtime", () => {
       subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); },
     });
     const sessionId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
-    const state = createReviewState({ sessionId, source: {
+    const state = createDocumentState({ sessionId, source: {
       fileId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", digest: "a".repeat(64), byteLength: 100,
     }, workflowMode: "generated-output", documentGeneration: 1 });
     const respond = (request: Record<string, unknown>, payload: unknown, generation = 1, revision = 0) => {
-      listeners.forEach((listener) => listener({ protocol: REVIEW_RUNTIME_PROTOCOL,
-        version: REVIEW_RUNTIME_VERSION, kind: "response", panelId: "panel_identifier_1234",
+      listeners.forEach((listener) => listener({ protocol: DOCUMENT_RUNTIME_PROTOCOL,
+        version: DOCUMENT_RUNTIME_VERSION, kind: "response", panelId: "panel_identifier_1234",
         sessionId, generation, revision, requestId: request.requestId, ok: true, payload }));
     };
     const bootstrapping = runtime.bootstrap();
@@ -1203,8 +1203,8 @@ describe("host-neutral review runtime", () => {
       .then((value) => { delivery.push("receipt"); return value; });
     const request = requests.at(-1)!;
     const publishDiscardedRevision = () => listeners.forEach((listener) => listener({
-      protocol: REVIEW_RUNTIME_PROTOCOL,
-      version: REVIEW_RUNTIME_VERSION,
+      protocol: DOCUMENT_RUNTIME_PROTOCOL,
+      version: DOCUMENT_RUNTIME_VERSION,
       kind: "event",
       event: "session-invalidated",
       panelId: "panel_identifier_1234",
@@ -1239,8 +1239,8 @@ describe("host-neutral review runtime", () => {
     });
     const respond = (request: Record<string, unknown>, payload: unknown, revision: number) => {
       listeners.forEach((listener) => listener({
-        protocol: REVIEW_RUNTIME_PROTOCOL,
-        version: REVIEW_RUNTIME_VERSION,
+        protocol: DOCUMENT_RUNTIME_PROTOCOL,
+        version: DOCUMENT_RUNTIME_VERSION,
         kind: "response",
         panelId: "panel_identifier_1234",
         sessionId,
@@ -1251,7 +1251,7 @@ describe("host-neutral review runtime", () => {
         payload,
       }));
     };
-    const state = createReviewState({
+    const state = createDocumentState({
       sessionId,
       source: { fileId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", digest: "a".repeat(64), byteLength: 100 },
       documentGeneration: 1,
@@ -1288,8 +1288,8 @@ describe("host-neutral review runtime", () => {
     const invalidations: HostRuntimeInvalidation[] = [];
     runtime.subscribeInvalidations((event) => invalidations.push(event));
     listeners.forEach((listener) => listener({
-      protocol: REVIEW_RUNTIME_PROTOCOL,
-      version: REVIEW_RUNTIME_VERSION,
+      protocol: DOCUMENT_RUNTIME_PROTOCOL,
+      version: DOCUMENT_RUNTIME_VERSION,
       kind: "event",
       event: "session-invalidated",
       panelId: "panel_identifier_1234",
@@ -1342,73 +1342,73 @@ describe("host-neutral review runtime", () => {
     const publish = (message: unknown) => listeners.forEach((listener) => listener(message));
 
     publish({
-      protocol: REVIEW_RUNTIME_PROTOCOL,
-      version: REVIEW_RUNTIME_VERSION,
+      protocol: DOCUMENT_RUNTIME_PROTOCOL,
+      version: DOCUMENT_RUNTIME_VERSION,
       kind: "event",
       event: "host-command",
       panelId: "other_panel_identifier",
       payload: { command: "reattach" },
     });
     publish({
-      protocol: REVIEW_RUNTIME_PROTOCOL,
-      version: REVIEW_RUNTIME_VERSION,
+      protocol: DOCUMENT_RUNTIME_PROTOCOL,
+      version: DOCUMENT_RUNTIME_VERSION,
       kind: "event",
       event: "host-command",
       panelId: "panel_identifier_1234",
       payload: { command: "reattach", path: "/Users/reader/paper.tex" },
     });
     publish({
-      protocol: REVIEW_RUNTIME_PROTOCOL,
-      version: REVIEW_RUNTIME_VERSION,
+      protocol: DOCUMENT_RUNTIME_PROTOCOL,
+      version: DOCUMENT_RUNTIME_VERSION,
       kind: "event",
       event: "host-command",
       panelId: "panel_identifier_1234",
       payload: { command: "reattach" },
     });
     publish({
-      protocol: REVIEW_RUNTIME_PROTOCOL,
-      version: REVIEW_RUNTIME_VERSION,
+      protocol: DOCUMENT_RUNTIME_PROTOCOL,
+      version: DOCUMENT_RUNTIME_VERSION,
       kind: "event",
       event: "host-command",
       panelId: "panel_identifier_1234",
-      payload: { command: "export-reviewed-pdf", path: "/Users/reader/reviewed.pdf" },
+      payload: { command: "export-annotated-document", path: "/Users/reader/reviewed.pdf" },
     });
     publish({
-      protocol: REVIEW_RUNTIME_PROTOCOL,
-      version: REVIEW_RUNTIME_VERSION,
+      protocol: DOCUMENT_RUNTIME_PROTOCOL,
+      version: DOCUMENT_RUNTIME_VERSION,
       kind: "event",
       event: "host-command",
       panelId: "panel_identifier_1234",
-      payload: { command: "export-reviewed-pdf" },
+      payload: { command: "export-annotated-document" },
     });
 
     publish({
-      protocol: REVIEW_RUNTIME_PROTOCOL,
-      version: REVIEW_RUNTIME_VERSION,
+      protocol: DOCUMENT_RUNTIME_PROTOCOL,
+      version: DOCUMENT_RUNTIME_VERSION,
       kind: "event",
       event: "host-command",
       panelId: "panel_identifier_1234",
       payload: { command: "forward-synctex", pageIndex: 2, point: { x: 72, y: 144 } },
     });
     publish({
-      protocol: REVIEW_RUNTIME_PROTOCOL,
-      version: REVIEW_RUNTIME_VERSION,
+      protocol: DOCUMENT_RUNTIME_PROTOCOL,
+      version: DOCUMENT_RUNTIME_VERSION,
       kind: "event",
       event: "host-command",
       panelId: "panel_identifier_1234",
       payload: { command: "forward-synctex", documentGeneration: 4, pageIndex: 2, point: { x: 72, y: 144 } },
     });
     publish({
-      protocol: REVIEW_RUNTIME_PROTOCOL,
-      version: REVIEW_RUNTIME_VERSION,
+      protocol: DOCUMENT_RUNTIME_PROTOCOL,
+      version: DOCUMENT_RUNTIME_VERSION,
       kind: "event",
       event: "host-command",
       panelId: "panel_identifier_1234",
       payload: { command: "forward-synctex", pageIndex: -1, point: { x: 72, y: 144 } },
     });
     publish({
-      protocol: REVIEW_RUNTIME_PROTOCOL,
-      version: REVIEW_RUNTIME_VERSION,
+      protocol: DOCUMENT_RUNTIME_PROTOCOL,
+      version: DOCUMENT_RUNTIME_VERSION,
       kind: "event",
       event: "host-command",
       panelId: "panel_identifier_1234",
@@ -1416,23 +1416,23 @@ describe("host-neutral review runtime", () => {
     });
 
     for (const id of ["fit-width", "toggle-horizontal-scroll-lock", "open-outline", "open-annotations", "open-references"]) {
-      publish({ protocol: REVIEW_RUNTIME_PROTOCOL, version: REVIEW_RUNTIME_VERSION,
+      publish({ protocol: DOCUMENT_RUNTIME_PROTOCOL, version: DOCUMENT_RUNTIME_VERSION,
         kind: "event", event: "host-command", panelId: "panel_identifier_1234",
-        payload: { command: "review-command", id } });
+        payload: { command: "document-command", id } });
     }
-    for (const payload of [{ command: "review-command", id: "unknown" },
-      { command: "review-command", id: "fit-width", extra: true }]) {
-      publish({ protocol: REVIEW_RUNTIME_PROTOCOL, version: REVIEW_RUNTIME_VERSION,
+    for (const payload of [{ command: "document-command", id: "unknown" },
+      { command: "document-command", id: "fit-width", extra: true }]) {
+      publish({ protocol: DOCUMENT_RUNTIME_PROTOCOL, version: DOCUMENT_RUNTIME_VERSION,
         kind: "event", event: "host-command", panelId: "panel_identifier_1234", payload });
     }
 
     expect(commands).toEqual([
       { command: "reattach" },
-      { command: "export-reviewed-pdf" },
+      { command: "export-annotated-document" },
       { command: "forward-synctex", documentGeneration: 4, pageIndex: 2, point: { x: 72, y: 144 } },
       { command: "reverse-synctex" },
       ...["fit-width", "toggle-horizontal-scroll-lock", "open-outline", "open-annotations", "open-references"]
-        .map((id) => ({ command: "review-command", id })),
+        .map((id) => ({ command: "document-command", id })),
     ]);
     unsubscribe?.();
     runtime.dispose();
@@ -1456,8 +1456,8 @@ describe("host-neutral review runtime", () => {
       previousGeneration: 1,
     } as const;
     for (const listener of listeners) listener({
-      protocol: REVIEW_RUNTIME_PROTOCOL,
-      version: REVIEW_RUNTIME_VERSION,
+      protocol: DOCUMENT_RUNTIME_PROTOCOL,
+      version: DOCUMENT_RUNTIME_VERSION,
       kind: "event",
       event: "session-invalidated",
       panelId: "panel_identifier_1234",
@@ -1475,12 +1475,12 @@ describe("host-neutral review runtime", () => {
     const runtime = createRpcHostRuntime({ runtimeId: "runtime_native_1234", postMessage: vi.fn(),
       subscribe(listener) { receive = listener; return () => {}; } }, { host: "electron" });
     const state = { status: "ready", sequence: 8, generation: 3, pageIndex: 2, point: { x: 5, y: 10 } };
-    const send = (payload: unknown) => receive({ protocol: REVIEW_RUNTIME_PROTOCOL, version: REVIEW_RUNTIME_VERSION,
+    const send = (payload: unknown) => receive({ protocol: DOCUMENT_RUNTIME_PROTOCOL, version: DOCUMENT_RUNTIME_VERSION,
       kind: "event", event: "host-command", runtimeId: "runtime_native_1234", payload });
     send({ command: "source-navigation", state });
     const commands: unknown[] = [];
     runtime.subscribeHostCommands?.(command => commands.push(command));
-    send({ command: "review-command", id: "undo" });
+    send({ command: "document-command", id: "undo" });
     send({ command: "source-navigation", state: { ...state, point: { x: Infinity, y: 10 } } });
     send({ command: "reverse-synctex" });
     expect(commands).toEqual([{ command: "source-navigation", state }, { command: "reverse-synctex" }]);
@@ -1498,8 +1498,8 @@ describe("host-neutral review runtime", () => {
       },
     });
     for (const listener of listeners) listener({
-      protocol: REVIEW_RUNTIME_PROTOCOL,
-      version: REVIEW_RUNTIME_VERSION,
+      protocol: DOCUMENT_RUNTIME_PROTOCOL,
+      version: DOCUMENT_RUNTIME_VERSION,
       kind: "event",
       event: "host-command",
       panelId: "panel_identifier_1234",
@@ -1509,7 +1509,7 @@ describe("host-neutral review runtime", () => {
     const commands: unknown[] = [];
     runtime.subscribeHostCommands?.((command) => commands.push(command));
     expect(commands).toEqual([{ command: "reverse-synctex" }]);
-    for (const listener of listeners) listener({ protocol: REVIEW_RUNTIME_PROTOCOL, version: REVIEW_RUNTIME_VERSION,
+    for (const listener of listeners) listener({ protocol: DOCUMENT_RUNTIME_PROTOCOL, version: DOCUMENT_RUNTIME_VERSION,
       kind: "event", event: "host-command", panelId: "panel_identifier_1234", payload: { command: "cancel-synctex" } });
     expect(commands.at(-1)).toEqual({ command: "cancel-synctex" });
     runtime.dispose();
