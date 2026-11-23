@@ -14,7 +14,7 @@ const windowCaptures = {
 };
 const surfaces = [
   { id: 'mac', label: 'Desktop', icon: [macIcon], description: 'Open local files via the desktop app for macOS, Windows, or Linux.' },
-  { id: 'codex', label: 'ChatGPT / Claude', icon: [chatgptIcon, claudeIcon], description: 'Read PDFs beside ChatGPT or Claude Desktop. Open one from chat or with Open in Claude, then share the document or a selection and let the assistant search it.' },
+  { id: 'codex', label: 'ChatGPT / Claude', icon: [chatgptIcon, claudeIcon], description: 'Read and annotate PDFs beside your chat with the native Placekeeper plugin.' },
   { id: 'chrome', label: 'Chrome Extension', icon: [chromeIcon], description: 'Open a document on the web and keep reading in its original tab, with Placekeeper’s tools at hand.' },
   { id: 'vscode', label: 'SyncTeX', icon: null, description: 'Jump between your LaTeX source and the matching passage in your PDF with SyncTeX, e.g. via the Placekeeper VS Code extension.' },
   { id: 'browser', label: 'Web', icon: null, description: 'Open a local document or a public link without installing anything. Export a copy to keep your annotations.' },
