@@ -464,7 +464,8 @@ html, body, #root {
   background: transparent;
   text-align: left;
 }
-.landing-surfaces__list button > .landing-surface-icon { flex: none; margin-top: 2px; }
+.landing-surfaces__list button > :is(.landing-surface-icon, .landing-surface-icons) { flex: none; margin-top: 2px; }
+.landing-surface-icons { display: flex; flex-direction: column; gap: 6px; }
 .landing-surfaces__list strong { display: block; font-size: 18px; font-weight: 500; }
 .landing-surfaces__list button > span > span { display: block; margin-top: 5px; font-size: 16px; line-height: 1.65; color: var(--reader-ink-muted); }
 .landing-host { margin: 0; border: 1px solid var(--reader-border); border-radius: 13px; overflow: hidden; background: #f7f7f7; box-shadow: var(--reader-shadow-page); }

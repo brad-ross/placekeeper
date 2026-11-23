@@ -32,3 +32,8 @@ Captured on September 12, 2026, without reconstructed window chrome. Web uses a 
 - `surface-codex.png` (3104 × 2024, PNG with alpha): user-supplied capture on October 7, 2026 at 2:14 AM EDT, with the chat titled “Counterfactual Matrix Means,” replacing the ChatGPT in-app-browser showcase. The window size was confirmed by the user as 1440 × 900 macOS points; the supplied image includes surrounding capture padding. Original pixels are preserved. The showcase clips the surrounding shadow/padding with CSS to the measured opaque window bounds: x=112, y=76, width=2880, height=1800, matching the other 16:10 captures.
 - Shows the native Placekeeper tab beside a conversation explaining Theorem 1, with original page 15 of arXiv:2312.07520v3 visible.
 - Installed from revision `dcd0ad64`, including the toolbar title-width fix and shorter tool description. Installed reader and server bundles were verified against the build. Codex host build was not recorded.
+
+## Host app icons
+
+- `chatgpt.png` and `chrome.png` (128 × 128) are the vendors' macOS app icons.
+- `claude.png` (128 × 128) is Anthropic's Claude app icon as published at `https://claude.ai/images/claude_app_icon.png` (Claude spark in `#D97757` on the `#F3E9D7` app-icon background). Its drop shadow is cropped off, the artwork is not recolored or redrawn, and it is masked to the same macOS squircle and size as `chatgpt.png` so the two marks read as a pair.
