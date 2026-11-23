@@ -12,6 +12,8 @@ On macOS, the installer checks the service launcher and desktop app before movin
 
 The Debian package stages immutable root-owned versions. Each user switches on their next explicit launch, with the same preparation/consent checks. Other users may keep using earlier versions. The stable `/usr/bin/placekeeper` dispatcher keeps integrations independent of a version directory. Sandbox/mount errors block activation with guidance; they do not authorize disabling the sandbox.
 
+The first launch after an upgrade refreshes the integrations you set up before and reports any that changed or need host action. For Codex, update or reinstall the plugin, review trust and fully restart Codex. For Claude Desktop, fully quit and reopen Claude Desktop so that it starts the refreshed `placekeeper` server. If a refresh reports a failure, follow its message, then rerun **Help → Set Up Integrations**.
+
 ## Moving from public 0.2.4 on macOS
 
 The public app's identity is **Placekeeper**, bundle ID `local.placekeeper`, executable `PlacekeeperMac`; it is not an Electron build with an old version label. Before retrying its upgrade:

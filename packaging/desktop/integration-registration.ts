@@ -110,7 +110,9 @@ export async function repairCandidateIntegration(options: Parameters<typeof regi
 /** Remove only byte-identical files recorded by this installation. User edits,
  * another installation's files, and all review data remain untouched. */
 export async function unregisterCandidateIntegration(receiptPath: string, installationId: string, registryDriver?: ChromeRegistryDriver): Promise<{ removed: string[]; retained: string[] }> {
-  const receipt = JSON.parse(await readFile(receiptPath, "utf8")) as RegistrationReceipt;
+  const parsed = JSON.parse(await readFile(receiptPath, "utf8")) as RegistrationReceipt | ClaudeDesktopReceipt;
+  if ("host" in parsed && parsed.host === "claude-desktop") return unregisterClaudeDesktopServer(receiptPath, installationId);
+  const receipt = parsed as RegistrationReceipt;
   if (receipt.schemaVersion !== 1 || receipt.installationId !== installationId || !/^[a-f0-9]{64}$/u.test(installationId) || !Array.isArray(receipt.files)) throw new Error("Registration receipt does not belong to this installation");
   validatePaths(receiptPath, receipt.files.map(file => ({ path: file.path, content: "" })));
   const removed: string[] = []; const retained: string[] = [];
@@ -279,14 +281,47 @@ export async function registerClaudeDesktopServer(options: {
   if (receipt === undefined) await record({ entrySha256: wanted }, "wx");
   else await record({ entrySha256: receipt.entrySha256, pendingSha256: wanted });
   const next = { ...config, mcpServers: { ...(servers ?? {}), [CLAUDE_DESKTOP_SERVER_NAME]: entry } };
+  await replaceClaudeDesktopConfig(target, text, next);
+  await record({ entrySha256: wanted });
+  return receipt === undefined ? "registered" : "repaired";
+}
+
+/** Replace the configuration atomically, keeping its mode, unless Claude Desktop
+ * rewrote it after `text` was read. */
+async function replaceClaudeDesktopConfig(target: string, text: string | undefined, next: Record<string, unknown>): Promise<void> {
   const mode = text === undefined ? 0o600 : (await stat(target)).mode & 0o777;
   const temporary = join(dirname(target), `.claude_desktop_config.${randomUUID()}.tmp`);
   try {
     await writeFile(temporary, `${JSON.stringify(next, null, 2)}\n`, { flag: "wx", mode });
     if (process.platform !== "win32") await chmod(temporary, mode);
-    if (await readFile(target, "utf8").catch(missing) !== text) throw new Error("Claude Desktop changed its configuration during setup; it was left unchanged. Retry setup");
+    if (await readFile(target, "utf8").catch(missing) !== text) throw new Error("Claude Desktop changed its configuration while Placekeeper was updating it; it was left unchanged. Retry");
     await rename(temporary, target);
   } finally { await rm(temporary, { force: true }); }
-  await record({ entrySha256: wanted });
-  return receipt === undefined ? "registered" : "repaired";
+}
+
+/** Remove the `placekeeper` server only while it is still the entry this
+ * installation recorded. A missing entry or file needs no change; a malformed
+ * file or an edited or foreign entry is retained, and so is the receipt. */
+export async function unregisterClaudeDesktopServer(receiptPath: string, installationId: string): Promise<{ removed: string[]; retained: string[] }> {
+  const receipt = JSON.parse(await readFile(receiptPath, "utf8")) as ClaudeDesktopReceipt;
+  if (receipt.schemaVersion !== 1 || receipt.host !== "claude-desktop" || receipt.installationId !== installationId || !/^[a-f0-9]{64}$/u.test(installationId) ||
+      !/^[a-f0-9]{64}$/u.test(receipt.entrySha256) || (receipt.pendingSha256 !== undefined && !/^[a-f0-9]{64}$/u.test(receipt.pendingSha256)) || typeof receipt.configPath !== "string") {
+    throw new Error("Registration receipt does not belong to this installation");
+  }
+  const { configPath } = receipt;
+  validatePaths(receiptPath, [{ path: configPath, content: "" }]);
+  const target = await realpath(configPath).catch(missing) ?? configPath;
+  const text = await readFile(target, "utf8").catch(missing);
+  const done = async (removed: string[]) => { await unlink(receiptPath); return { removed, retained: [] }; };
+  if (text === undefined) return done([]);
+  let config: unknown;
+  try { config = JSON.parse(text); } catch { return { removed: [], retained: [configPath] }; }
+  if (!isRecord(config) || (config.mcpServers !== undefined && !isRecord(config.mcpServers))) return { removed: [], retained: [configPath] };
+  const servers = config.mcpServers;
+  if (servers === undefined || !Object.hasOwn(servers, CLAUDE_DESKTOP_SERVER_NAME)) return done([]);
+  const found = entryDigest(servers[CLAUDE_DESKTOP_SERVER_NAME]);
+  if (found !== receipt.entrySha256 && found !== receipt.pendingSha256) return { removed: [], retained: [configPath] };
+  const remaining = Object.fromEntries(Object.entries(servers).filter(([name]) => name !== CLAUDE_DESKTOP_SERVER_NAME));
+  await replaceClaudeDesktopConfig(target, text, { ...config, mcpServers: remaining });
+  return done([configPath]);
 }

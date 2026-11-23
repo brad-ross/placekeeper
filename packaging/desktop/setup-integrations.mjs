@@ -67,7 +67,7 @@ export async function setupIntegrations({appPath, resources, choices = {}, state
         destination = claudeDesktopConfigPath(home,platform,env);
         // Create Claude's configuration file only inside a folder Claude Desktop already made.
         if (!await stat(dirname(destination)).then(info=>info.isDirectory(),()=>false)) {
-          outcomes.push({host,status:'pending',hostAction:'host-not-found',path:destination,message:`Claude Desktop was not found (${dirname(destination)} does not exist); nothing was changed. Install Claude Desktop and open it once, then rerun setup from Help → Set Up Integrations.`});
+          outcomes.push({host,status:'pending',hostAction:'host-not-found',path:destination,message:`Claude Desktop was not found (${dirname(destination)} does not exist); nothing was changed. Install Claude Desktop and open it once, then quit it and rerun setup from Help → Set Up Integrations.`});
           continue;
         }
         args = ['--destination',destination,'--node',join(resources,`node/bin/node${suffix}`),'--server',join(resources,'codex-mcp/server.js'),'--launcher',launcher];
@@ -101,7 +101,7 @@ export async function setupIntegrations({appPath, resources, choices = {}, state
         }
         message = `VS Code launcher setting prepared at ${destination}. Apply it in VS Code settings. ${code && platform !== 'win32' ? 'The bundled extension was submitted to VS Code.' : `Install ${vsix} using Extensions: Install from VSIX.`} Reload VS Code, check enablement, and verify a PDF handoff.`;
       } else if (host === 'chrome') message = `Chrome native host registered. Load or update the unpacked extension at ${join(resources,'integrations/chrome-extension')}, approve permissions, reload Chrome and verify a PDF handoff. A previous 0.2.4 extension must be reloaded from this folder.`;
-      else if (host === 'claude') message = `Claude Desktop server "placekeeper" ${registration === 'current' ? 'is current' : 'was written'} in ${destination}; other servers and settings were preserved. Fully quit Claude Desktop (not just its window) and reopen it, check that the placekeeper connector is enabled, then ask Claude to open a local PDF in Placekeeper.`;
+      else if (host === 'claude') message = `Claude Desktop server "placekeeper" ${registration === 'current' ? 'is current' : 'was written'} in ${destination}; other servers and settings were preserved. Fully quit Claude Desktop (not just its window) and reopen it. In Settings → Developer, check that the placekeeper server is running and its tools are enabled. Then ask Claude to open a local PDF in Placekeeper, or open a PDF here and choose File → Open in Claude, and allow the Placekeeper tool when Claude asks. Rerun this setup after moving Placekeeper.`;
       else message = `Codex plugin prepared at ${destination}. In Codex Plugins add this local marketplace, install or update codex-plugin, review trust and enablement, fully restart Codex, and verify the Placekeeper skill, display tool and trusted hooks. Previous 0.2.4 plugin caches require reinstall or update and restart.`;
       outcomes.push({host,status:'pending',registration,hostAction:'pending',path:destination,message});
     } catch (error) { outcomes.push({host,status:'failed',message:`${error.message}. Existing edited or unowned registrations are preserved; inspect the ownership receipt before retrying.`}); }

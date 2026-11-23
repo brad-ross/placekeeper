@@ -45,7 +45,7 @@ The old animation-frame behavior reproduced a preparation timeout before its fix
 
 - Final Windows, macOS Intel and Debian installer lifecycle evidence, including Linux multi-user activation and remove/purge.
 - Browser-downloaded unsigned artifacts and actual OS approval behavior. Local builds do not prove Gatekeeper, SmartScreen or organization policy behavior.
-- Real VS Code, Chrome and Codex trust/activation, and simultaneous mixed-host consented closure.
+- Real VS Code, Chrome, Codex and Claude Desktop trust/activation, and simultaneous mixed-host consented closure.
 - Full legacy AppKit UI/preferences migration. The authentic old-service fixture is narrower.
 - Accessibility, Wayland, macOS 13, large scanned/recovery corpora, named-editor placement and physical display latency.
 

@@ -7,7 +7,8 @@ Start with [Contributing](../CONTRIBUTING.md) for code ownership, builds, and te
 - [Installation and removal](installation.md): native app, updates, and optional integrations.
 - [Privacy and recovery](privacy-and-recovery.md): local storage and durability boundaries.
 - [Support and diagnostics](support.md): troubleshooting and evidence collection.
-- [Claude Desktop](guides/claude-desktop.md): experimental PDF review in Claude Desktop from a development candidate.
+- [Documents in chat](guides/chatgpt-extension.md): open PDFs in Codex and ChatGPT and use them as chat context.
+- [Documents in Claude Desktop](guides/claude-desktop.md): experimental; open PDFs in Claude Desktop from the installed app or a development candidate.
 - [Web beta](web-beta.md): static distribution profiles and publication qualification. The presence of a build does not imply public release clearance.
 
 ## Decisions and current learnings
@@ -27,6 +28,6 @@ Learnings retain dated incident and verification history. Follow their current g
 
 ## Plans, evidence, and experiments
 
-[Plans](plans/) contain proposals, implementation plans, design contracts, and dated verification records. Their existence does not establish completion. [Plan assets](plans/assets/) preserve design and investigation artifacts. The [Claude Desktop qualification checklist](testing/claude-desktop-qualification.md) has not yet been run. [Audits](audits/) record scoped refreshes and validation outcomes; [residual review findings](residual-review-findings/) record unresolved or deliberately bounded observations.
+[Plans](plans/) contain proposals, implementation plans, design contracts, and dated verification records. Their existence does not establish completion. [Plan assets](plans/assets/) preserve design and investigation artifacts. The [Claude Desktop qualification checklist](testing/claude-desktop-qualification.md) records two cases and an owner report from a development candidate; installed-app setup has not yet been run against a real Claude Desktop. [Audits](audits/) record scoped refreshes and validation outcomes; [residual review findings](residual-review-findings/) record unresolved or deliberately bounded observations.
 
 The [Electron shell spike](../apps/electron-spike/README.md) remains a runnable decision probe, not an adopted host. Keep such experiments distinct from the production host map.

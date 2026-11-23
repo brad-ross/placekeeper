@@ -22,6 +22,21 @@ Developer ID signing, notarization, stapling, Intel/x64 packages, DMGs, auto-upd
 
 Detailed source-install, live-context, and host evidence lives in `test/acceptance/installed-hosts.md`.
 
+## Claude Desktop
+
+Claude Desktop support is experimental. Set it up as described in [Installation](installation.md#claude-desktop-experimental).
+
+- **`placekeeper` is not listed in Settings → Developer.** Rerun **Help → Set Up Integrations** and read the Claude Desktop outcome. If it says Claude Desktop was not found, open Claude Desktop once, quit it and rerun setup. If setup succeeded, Claude Desktop has not reloaded its configuration: fully quit it (closing the window is not enough) and reopen it.
+- **The server is listed but failed to start.** Placekeeper may have been moved, upgraded without being opened since, or uninstalled. Open Placekeeper once so that it repairs the entry, or rerun setup, then restart Claude Desktop. If you uninstalled Placekeeper, remove the entry as described in [Installation](installation.md#claude-desktop-experimental).
+- **Setup reports that the configuration is not valid JSON or is not an object.** Setup leaves the file unchanged. Open it through **Settings → Developer → Edit Config** in Claude Desktop, fix the error, then rerun setup.
+- **Setup reports a different `placekeeper` server.** The file already has a `placekeeper` entry that Placekeeper did not write, or that was edited after setup wrote it. Setup preserves it. Remove or rename that entry if you no longer need it, then rerun setup.
+- **"No Placekeeper reader is open".** Reader tools such as search and navigation act on the most recently opened Placekeeper view. Ask Claude to open the PDF in Placekeeper, or use **File → Open in Claude**, then retry.
+- **A tool says the reader is unavailable.** Choose **Open reader** in the view, then retry. Claude expands the view only after a click in it.
+- **The view reports that Placekeeper is unavailable.** Start Placekeeper, then ask Claude to open the PDF again.
+- **Claude says it cannot read an attached PDF.** Attaching or dropping a PDF uploads it to Claude and does not give it to Placekeeper. Ask Claude to open the file by its full local path instead.
+
+Claude Desktop writes a log for each local server. On macOS it is `~/Library/Logs/Claude/mcp-server-placekeeper.log`, beside `mcp.log`; on Windows look in `%APPDATA%\Claude\logs`. Include the relevant lines, without document paths you consider private, when you ask for help. **Help → Troubleshooting → Enable Developer Mode** in Claude Desktop also lets you open DevTools on the Placekeeper view.
+
 VS Code follows the official guidance for [UI extension hosts](https://code.visualstudio.com/api/advanced-topics/extension-host), [remote refusal](https://code.visualstudio.com/api/advanced-topics/remote-extensions), and [restricted webviews](https://code.visualstudio.com/api/extension-guides/webview).
 
 ## Web beta

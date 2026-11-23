@@ -1,10 +1,10 @@
-# PDF review in Claude Desktop
+# Documents in Claude Desktop
 
-Claude Desktop support is experimental. The development candidate has been seen working in Claude Desktop on macOS: the server connected, `open_pdf_file` drew the Placekeeper view, and the reader worked. That report recorded no versions or logs, and the other items in the [qualification checklist](../testing/claude-desktop-qualification.md) are still unverified, including chat context, chat-driven reader tools and installed-app setup.
+Claude Desktop support is experimental. With the development candidate in Claude Desktop 6.28899.6 on macOS 26.7.1, the Placekeeper view, chat context, chat-driven search and the reopening dialog worked. Setup from the installed app is covered by automated tests only and has not yet been tried with a real Claude Desktop. Other items in the [qualification checklist](../testing/claude-desktop-qualification.md) are still unverified, and Windows and Linux have not been tried.
 
 ## Set up from the installed app
 
-Choose **Help → Set Up Integrations** and select **Claude Desktop (experimental)**. First launch offers the same choice, and the installers accept `--claude=ask|setup|skip`. Setup adds a `placekeeper` server to Claude Desktop's `claude_desktop_config.json` and keeps every other server and setting in that file. Open Claude Desktop once before running setup; if its folder does not exist yet, setup reports Claude Desktop as not found and changes nothing. Then fully quit Claude Desktop and start it again; closing the window is not enough. Check that the `placekeeper` connector is enabled. Rerun setup after moving or upgrading Placekeeper. File locations, what setup leaves untouched, and removal are described in [Installation](../installation.md#optional-integrations).
+Choose **Help → Set Up Integrations** and choose **Set Up** for **Claude Desktop (experimental)**. First launch offers the same choice, and the source installers accept `--claude=ask|setup|skip`. Setup adds a `placekeeper` server to Claude Desktop's `claude_desktop_config.json` and keeps every other server and setting in that file. Open Claude Desktop once before running setup; if its folder does not exist yet, setup reports Claude Desktop as not found and changes nothing. Then fully quit Claude Desktop and start it again; closing the window is not enough. In **Settings → Developer**, check that `placekeeper` is running, and in a chat's tools menu check that it is enabled. The first time Claude calls a Placekeeper tool, it asks you to allow it. Placekeeper repairs the entry when it starts after a move or upgrade; restart Claude Desktop when it says so. Step-by-step setup, file locations, setup outcomes, what setup leaves untouched, and removal are described in [Installation](../installation.md#claude-desktop-experimental). For problems, see [Support and diagnostics](../support.md#claude-desktop).
 
 ## Set up from a checkout (development)
 
@@ -33,7 +33,7 @@ Attaching or dropping a PDF into the chat uploads it to Claude and does not give
 
 **File → Open in Claude** uses a `claude://claude.ai/new?q=` link. You can build the same link yourself, for example `claude://claude.ai/new?q=Open%20%2FUsers%2Fme%2Fpaper.pdf%20in%20Placekeeper`.
 
-The reader starts inline as a compact status line. Choose **Open reader** to expand it to fullscreen, where PDF search, page navigation, annotation editing and save status work as described in [PDF review in chat](chatgpt-extension.md). Click the PDF filename and choose **Save to a new copy** to pick a local folder and filename; accepted edits then autosave to that copy. Closing and reopening the same PDF offers **Continue** or **Open Copy**, as in ChatGPT.
+The reader starts inline as a compact status line. Choose **Open reader** to expand it to fullscreen, where PDF search, page navigation, annotation editing and save status work as described in [Documents in chat](chatgpt-extension.md). Click the PDF filename and choose **Save to a new copy** to pick a local folder and filename; accepted edits then autosave to that copy. Closing and reopening the same PDF shows **Reopen Document** with "You had this document open earlier." and the choices **Cancel**, **Open Copy** and **Continue**, as in ChatGPT.
 
 ## Chat context
 
@@ -64,8 +64,8 @@ Claude Code can call the same tools but shows only the tool's text, not the read
 
 ## Privacy
 
-Claude chooses the path it passes to `open_pdf_file`. Placekeeper opens it only after you allow the tool call, and only when it resolves to an existing local file ending in `.pdf`. Relative paths, other file types and missing files are refused with a plain error. The reader's private connection data is kept out of the text Claude sees; Claude sees only the file name unless you put context in chat or Claude calls a reader tool. Review data stays in the installed app's recovery root, or for the candidate in its isolated recovery root, recorded in `dist/extension-candidate/build.json`. See [Privacy and recovery](../privacy-and-recovery.md) for local storage boundaries.
+Claude chooses the path it passes to `open_pdf_file`. Placekeeper opens it only after you allow the tool call, and only when it resolves to an existing local file ending in `.pdf`. Relative paths, other file types and missing files are refused with a plain error. The reader's private connection data is kept out of the text Claude sees; Claude sees only the file name unless you put context in chat or Claude calls a reader tool. Annotations and drafts stay in the installed app's recovery root, or for the candidate in its isolated recovery root, recorded in `dist/extension-candidate/build.json`. See [Privacy and recovery](../privacy-and-recovery.md) for local storage boundaries.
 
 ## Remove
 
-For the installed app, follow the removal steps in [Installation](../installation.md#optional-integrations). For the candidate, delete the `placekeeper-candidate` entry from `claude_desktop_config.json`, then fully quit and restart Claude Desktop, and stop the candidate daemon with Control-C in its terminal. Removing an entry does not change other servers or the installed Placekeeper application.
+For the installed app, follow the removal steps in [Installation](../installation.md#claude-desktop-experimental). For the candidate, delete the `placekeeper-candidate` entry from `claude_desktop_config.json`, then fully quit and restart Claude Desktop, and stop the candidate daemon with Control-C in its terminal. Removing an entry does not change other servers or the installed Placekeeper application.

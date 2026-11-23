@@ -75,7 +75,7 @@ it('registers Claude Desktop through the installed launcher with the bundled nod
  const missing=await setupIntegrations(options);
  expect(missing.outcomes[3]).toMatchObject({host:'claude',status:'pending',hostAction:'host-not-found'});
  expect(missing.outcomes[3]).not.toHaveProperty('registration');
- expect(missing.outcomes[3].message).toContain('Claude Desktop was not found');expect(missing.exitCode).toBe(0);expect(calls).toEqual([]);
+ expect(missing.outcomes[3].message).toContain('Claude Desktop was not found');expect(missing.outcomes[3].message).toContain('Help → Set Up Integrations');expect(missing.exitCode).toBe(0);expect(calls).toEqual([]);
  await expect(readFile(join(root,'.config/Claude/claude_desktop_config.json'))).rejects.toMatchObject({code:'ENOENT'});
  await mkdir(join(root,'.config/Claude'),{recursive:true});
  const config=join(root,'.config/Claude/claude_desktop_config.json');
@@ -83,6 +83,7 @@ it('registers Claude Desktop through the installed launcher with the bundled nod
  expect(calls).toEqual([['integration-registration','claude','--receipt',join(root,'state/claude.receipt.json'),'--destination',config,'--node',join(resources,'node/bin/node'),'--server',join(resources,'codex-mcp/server.js'),'--launcher',join(resources,'bin/placekeeper')]]);
  expect(first.outcomes[3]).toMatchObject({host:'claude',status:'pending',registration:'registered',path:config});
  expect(first.outcomes[3].message).toMatch(/Fully quit Claude Desktop/);
+ expect(first.outcomes[3].message).toContain('File → Open in Claude');expect(first.outcomes[3].message).toContain('allow the Placekeeper tool');
  registration='current';expect((await setupIntegrations(options)).outcomes[3]).toMatchObject({registration:'current'});
  const skipped=await setupIntegrations({...options,choices:{claude:'skip'}});
  expect(skipped.outcomes[3]).toMatchObject({host:'claude',status:'skipped'});expect(calls).toHaveLength(2);

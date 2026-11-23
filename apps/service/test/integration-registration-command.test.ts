@@ -60,5 +60,8 @@ describe("explicit candidate integration command", () => {
     const foreign = join(root, "foreign-server.js"); await writeFile(foreign, "asset");
     expect(await runIntegrationRegistrationCommand(args.map(arg => arg === server ? foreign : arg), text => output.push(text))).toBe(2);
     expect(JSON.parse(output.at(-1)!)).toMatchObject({ ok: false, error: { message: "Claude Desktop assets must belong to this installation" } });
+    expect(await runIntegrationRegistrationCommand(["integration-registration", "remove", "--receipt", join(root, "receipt")], text => output.push(text))).toBe(0);
+    expect(JSON.parse(output.at(-1)!)).toMatchObject({ ok: true, status: "removed", removed: [config], retained: [] });
+    expect(JSON.parse(await readFile(config, "utf8"))).toEqual({ mcpServers: { other: { command: "other" } }, globalShortcut: "Ctrl+Space" });
   });
 });

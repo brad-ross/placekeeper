@@ -54,7 +54,7 @@ async function executeIntegrationRegistrationCommand(args: readonly string[], wr
       const config = flags.get("--destination")!;
       const entry = renderClaudeDesktopServer({ node: flags.get("--node")!, server: flags.get("--server")!, resources, launcher: flags.get("--launcher")! });
       const registration = await registerClaudeDesktopServer({ installationId, receiptPath, configPath: config, entry });
-      write(`${JSON.stringify({ ok: true, status: "registered", registration, hostAction: "pending", config, recoveryAction: "Fully quit and reopen Claude Desktop, then check that the placekeeper connector is enabled and ask it to open a local PDF." })}\n`); return 0;
+      write(`${JSON.stringify({ ok: true, status: "registered", registration, hostAction: "pending", config, recoveryAction: "Fully quit and reopen Claude Desktop, check that the placekeeper server and its tools are listed and enabled, then ask Claude to open a local PDF in Placekeeper or use File → Open in Claude, and allow the tool when asked." })}\n`); return 0;
     }
     const files = await candidateCodexPluginFiles({ template: join(resources, "integrations/codex-plugin-template"), destination: flags.get("--destination")!, launcher: flags.get("--launcher")!, installationId });
     const registration = await repairCandidateIntegration({ installationId, receiptPath, files });

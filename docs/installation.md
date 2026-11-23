@@ -76,7 +76,11 @@ Source installation offers the same portable operations through prompts or expli
 ./install.sh --chrome=setup --vscode=skip --codex=ask --claude=skip --zed=skip
 ```
 
-Chrome, VS Code, Codex and Claude accept `ask`, `setup`, or `skip`; prompts default to skip. The older Mac source-compatible Zed option also accepts `manual` and `preview`. It remains available on macOS through the source installer; use the [editor guide](guides/editor-synctex.md) for other editors and SyncTeX. Setup grants no source-folder access.
+```powershell
+./install.ps1 --chrome=setup --vscode=skip --codex=ask --claude=skip
+```
+
+Chrome, VS Code, Codex and Claude Desktop (`--claude`) accept `ask`, `setup`, or `skip`; prompts default to skip. The older Mac source-compatible Zed option also accepts `manual` and `preview`. It remains available on macOS through the source installer; use the [editor guide](guides/editor-synctex.md) for other editors and SyncTeX. Setup grants no source-folder access.
 
 VS Code setup prepares the launcher setting and may submit the VSIX to its CLI. Apply the reported setting, install the bundled VSIX through **Extensions: Install from VSIX** if needed, reload, check extension enablement and workspace trust, and verify a PDF handoff. Windows setup reports the manual VSIX step.
 
@@ -84,11 +88,56 @@ Chrome setup registers the native host. In `chrome://extensions`, enable **Devel
 
 Codex setup prepares a complete local marketplace in the support root's `integrations/codex` directory. In Codex Plugins add that marketplace, install/update `codex-plugin`, review trust and enablement, fully restart Codex and use a new chat. Verify the Placekeeper skill, display tool and trusted hooks. Existing plugin caches may require reinstall/update; never edit caches to force enablement.
 
-Claude Desktop setup adds one `placekeeper` server to Claude Desktop's `claude_desktop_config.json` (`~/Library/Application Support/Claude` on macOS, `%APPDATA%\Claude` on Windows, `~/.config/Claude` on Linux). The entry runs the installation's bundled Node with its `codex-mcp/server.js` and `PLACEKEEPER_MCP_HOST=claude-desktop`. Every other server and setting in that file is kept. Setup writes the file only when Claude Desktop's folder already exists; otherwise it reports Claude Desktop as not found and changes nothing, so open Claude Desktop once and rerun setup. A malformed file, or a `placekeeper` entry that Placekeeper did not write or that was edited since, is left untouched and reported. Fully quit Claude Desktop (closing its window is not enough) and reopen it, check that the `placekeeper` connector is enabled, then ask Claude to open a local PDF. Rerunning setup updates the entry after the app moves or upgrades.
+Skipping an integration later leaves its existing registration in place. Owned registration receipts and choices live under the support root's `integrations` directory. Edited/unowned registrations are preserved for inspection. Retry setup after resolving a reported issue or moving an installation. Real-host trust and end-to-end verification remain separate qualification steps.
 
-Skipping an integration later leaves its existing registration in place. To remove the Claude Desktop entry, choose **Skip** for Claude Desktop in **Help → Set Up Integrations**, quit Claude Desktop, delete the `placekeeper` key under `mcpServers` in `claude_desktop_config.json`, then delete `claude.receipt.json` from the support root's `integrations` directory.
+### Claude Desktop (experimental)
 
-Owned registration receipts and choices live under the support root's `integrations` directory. Edited/unowned registrations are preserved for inspection. Retry setup after resolving a reported issue or moving an installation. Real-host trust and end-to-end verification remain separate qualification steps.
+Claude Desktop support is experimental. The reader, chat context, chat-driven search and the reopening dialog have been tried with a development candidate in Claude Desktop 6.28899.6 on macOS 26.7.1. Setup from the installed app is covered by automated tests only and has not yet been tried with a real Claude Desktop. See [Documents in Claude Desktop](guides/claude-desktop.md) for what you can do once it is set up.
+
+1. Install Claude Desktop and open it once, so that it creates its settings folder. Then quit it.
+2. In Placekeeper choose **Help → Set Up Integrations** and choose **Set Up** for **Claude Desktop (experimental)**, or accept it on first launch. From a checkout, pass `--claude=setup` to `./install.sh` or `./install.ps1`.
+3. Fully quit Claude Desktop and reopen it. Closing its window is not enough: on macOS choose **Claude → Quit Claude**, and on Windows quit it from its icon in the notification area.
+4. In Claude Desktop open **Settings → Developer** and check that `placekeeper` is listed and running. In a chat, open the tools menu and check that `placekeeper` is enabled and lists `open_pdf_file`, `open_placekeeper`, `inspect_review`, `search_document`, `navigate_page`, `reveal_search_result`, `reveal_annotation` and `read_document_text`.
+5. Ask Claude to open a local PDF by its full path, for example "Open /Users/me/paper.pdf in Placekeeper", or open a PDF in Placekeeper and choose **File → Open in Claude**. The first time, Claude asks you to allow the Placekeeper tool. If the view reports that Placekeeper is unavailable, start Placekeeper and try again.
+
+Setup adds one `placekeeper` server under `mcpServers` in Claude Desktop's `claude_desktop_config.json`:
+
+| Platform | Configuration file |
+| --- | --- |
+| macOS | `~/Library/Application Support/Claude/claude_desktop_config.json` |
+| Windows | `%APPDATA%\Claude\claude_desktop_config.json` |
+| Linux | `~/.config/Claude/claude_desktop_config.json` |
+
+The entry runs the installation's bundled Node with its `codex-mcp/server.js` and sets `PLACEKEEPER_MCP_HOST=claude-desktop`. It looks like this on macOS:
+
+```json
+"placekeeper": {
+  "command": "~/Applications/Placekeeper.app/Contents/Resources/desktop/node/bin/node",
+  "args": ["~/Applications/Placekeeper.app/Contents/Resources/desktop/codex-mcp/server.js"],
+  "env": { "PLACEKEEPER_MCP_HOST": "claude-desktop", "PLACEKEEPER_APP_RESOURCES": "…", "PLACEKEEPER_LAUNCHER": "…" }
+}
+```
+
+Setup writes absolute paths in place of `~`. Every other server and setting in the file is kept. Setup records what it wrote in `claude.receipt.json` in the support root's `integrations` directory.
+
+Setup reports one of these outcomes:
+
+- **pending, written or current:** the entry was added or is already up to date. Restart Claude Desktop as in step 3 and check it as in step 4.
+- **pending, Claude Desktop was not found:** Claude Desktop's folder does not exist yet, and nothing was changed. Open Claude Desktop once, quit it, then rerun **Help → Set Up Integrations**.
+- **failed:** the file is not valid JSON, its `mcpServers` is not an object, or it already has a `placekeeper` entry that Placekeeper did not write or that was edited after setup wrote it. The file is left unchanged. Fix the file or rename your own entry, then rerun setup.
+
+Rerunning setup repairs the entry. Placekeeper also checks it each time it starts and repairs it after an upgrade or a move; when the entry changes, Placekeeper tells you to restart Claude Desktop. If Claude Desktop rewrote the entry's formatting or key order, setup still recognizes it as its own.
+
+To remove the entry, quit Claude Desktop and run the installed command-line tool with the receipt:
+
+```sh
+# macOS
+~/Applications/Placekeeper.app/Contents/MacOS/placekeeper integration-registration remove --receipt "$HOME/Library/Application Support/Placekeeper/integrations/claude.receipt.json"
+```
+
+On Windows run `resources\desktop\bin\placekeeper.exe` in the installation folder with `--receipt "%LOCALAPPDATA%\Placekeeper\integrations\claude.receipt.json"`. On Linux run `/usr/bin/placekeeper` (Debian package) or `resources/desktop/bin/placekeeper` in the installation folder (source install) with `--receipt "${XDG_STATE_HOME:-$HOME/.local/state}/placekeeper/integrations/claude.receipt.json"`. The command removes only an unchanged entry that this installation wrote, keeps every other server and setting, and deletes the receipt. If it reports the file as retained, the entry was edited or the file is not valid JSON: delete the `placekeeper` key under `mcpServers` yourself, then delete the receipt. Then choose **Skip** for Claude Desktop in **Help → Set Up Integrations**, so that the next launch does not add it again, and reopen Claude Desktop.
+
+If Claude Desktop does not list `placekeeper` or a tool reports an error, see [Claude Desktop troubleshooting](support.md#claude-desktop).
 
 ## Open Chrome PDFs automatically (experimental)
 
@@ -100,4 +149,4 @@ The installed CLI's `doctor --json --chrome` checks registration. `pnpm test:chr
 
 Close open documents and end bound tasks first. On Windows use the installed **Uninstall.exe** (also registered with Windows Apps). On macOS, open **Install Placekeeper.app** in the mounted DMG and choose **Uninstall existing installation** when offered. See [Manual upgrades and recovery](desktop-upgrades.md) for custom destinations. Removing the Mac/source app directory through the file manager removes that app, but does not perform integration cleanup. The source scripts have no `--uninstall` flag. On Debian use the package manager to remove `placekeeper`; both removal and purge retain potentially active runtime/recovery resources.
 
-Remove optional extensions/plugins through their hosts. Only owned unchanged registrations can be removed automatically; inspect any retained-registration report. PDFs, exports, settings and Protected Recovery are preserved. See [Privacy and recovery](privacy-and-recovery.md) before deleting user data. Retained app versions and Debian runtimes are recovery resources; cleanup is an explicit later action after all sessions are closed, never a traversal of user-state directories.
+Remove optional extensions/plugins through their hosts. Only owned unchanged registrations can be removed automatically; inspect any retained-registration report. Uninstalling does not edit Claude Desktop's configuration: remove the `placekeeper` entry first as described in [Claude Desktop](#claude-desktop-experimental), otherwise Claude Desktop reports that the server failed to start. PDFs, exports, settings and Protected Recovery are preserved. See [Privacy and recovery](privacy-and-recovery.md) before deleting user data. Retained app versions and Debian runtimes are recovery resources; cleanup is an explicit later action after all sessions are closed, never a traversal of user-state directories.
