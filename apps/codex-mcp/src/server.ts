@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { callExtensionTool, extensionTools } from "./extension-server.js";
+import { callClaudeDesktopTool, claudeDesktopUnsupported, claudeDesktopPrompts, claudeDesktopTools, getClaudeDesktopPrompt, mcpHostFromEnv, type McpHost } from "./claude-desktop-server.js";
 import { NativeQualificationOldAttempt } from "../../service/src/codex/native-qualification-old-attempt.js";
 import { OLD_ATTEMPT_META_KEY, type OldAttemptGrant } from "./old-attempt-contract.js";
 import { NativeQualificationExperiments } from "../../service/src/codex/native-qualification-experiments.js";
@@ -12,10 +13,13 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { CallToolRequestSchema, ListToolsRequestSchema, ListResourcesRequestSchema, ReadResourceRequestSchema, type CallToolResult, type Tool } from "@modelcontextprotocol/sdk/types.js";
+import { CallToolRequestSchema, GetPromptRequestSchema, ListPromptsRequestSchema, ListToolsRequestSchema, ListResourcesRequestSchema, ReadResourceRequestSchema, type CallToolResult, type Tool } from "@modelcontextprotocol/sdk/types.js";
 import { getUiCapability, RESOURCE_MIME_TYPE } from "@modelcontextprotocol/ext-apps/server";
 import { CODEX_DISPLAY_TOOL_NAME, CODEX_LEGACY_DISPLAY_TOOL_NAME, CODEX_MAX_ENCODED_RESPONSE_BYTES, CODEX_DOCUMENT_UI_RESOURCE, isCodexDisplayToolName, parseCodexAppRequest, parseCodexDisplayRequest } from "../../../packages/core/src/codex-mcp-protocol.js";
 import { createServiceClient, type NativeServiceClient } from "./service-client.js";
+import { callReaderBridgeTool, callReaderServerTool, ReaderBridge, readerBridgeTool, readerServerTools } from "./reader-bridge.js";
+import { READER_BRIDGE_TOOL } from "./reader-bridge-protocol.js";
+import { isReaderToolName } from "./reader-tool-definitions.js";
 
 import { APP_TOOL, PENDING_META_KEY, RESPONSE_META_KEY, QUALIFICATION_META_KEY } from "./transport-contract.js";
 const unavailable = (): CallToolResult => ({ isError: true, content: [{ type: "text", text: "Placekeeper native integration is unavailable. Check that the installed app and plugin versions match, enable the plugin MCP server and hooks, reload Codex, then reopen the PDF." }] });
@@ -68,40 +72,53 @@ export async function callNativeTool(client: NativeServiceClient, name: string, 
   } catch { /* Never expose socket errors, paths, or capability-bearing responses. */ }
   return unavailable();
 }
-export function createNativeServer(client: NativeServiceClient, shell: string, dependencies: NativeQualificationDependencies = {}): Server {
+export function createNativeServer(client: NativeServiceClient, shell: string, dependencies: NativeQualificationDependencies = {}, host: McpHost = "codex", readerBridge?: ReaderBridge): Server {
   // Host caches may outlive an MCP process. New shell bytes need a new address.
   const shellUri = `ui://placekeeper/review-v1-${createHash("sha256").update(shell).digest("hex")}.html`;
   const displayName = process.env.PLACEKEEPER_EXTENSION_DISPLAY_NAME?.trim();
-  const tools = [...nativeTools, ...extensionTools].map((original): Tool => {
-    const tool = displayName && ["open_pdf", "open_placekeeper"].includes(original.name)
+  const claude = host === "claude-desktop";
+  // Claude Desktop calls only server-listed tools, so the view's reader tools are relayed through this process.
+  const bridge = claude ? readerBridge ?? new ReaderBridge() : undefined;
+  const tools = (claude ? [...claudeDesktopTools, ...readerServerTools, readerBridgeTool] : [...nativeTools, ...extensionTools]).map((original): Tool => {
+    const tool = displayName && ["open_pdf", "open_placekeeper", "open_pdf_file"].includes(original.name)
       ? { ...original, title: displayName } : original;
     const ui = tool._meta?.ui;
     return typeof ui === "object" && ui !== null && "resourceUri" in ui && ui.resourceUri === CODEX_DOCUMENT_UI_RESOURCE
       ? { ...tool, _meta: { ...tool._meta, ui: { ...ui, resourceUri: shellUri } } }
       : tool;
   });
-  const server = new Server({ name: "placekeeper", version: "1.0.0" }, { capabilities: { tools: {}, resources: {} } });
+  const server = new Server({ name: "placekeeper", version: "1.0.0" }, { capabilities: { tools: {}, resources: {}, ...(claude ? { prompts: {} } : {}) } });
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools }));
+  if (claude) {
+    server.setRequestHandler(ListPromptsRequestSchema, async () => ({ prompts: claudeDesktopPrompts }));
+    server.setRequestHandler(GetPromptRequestSchema, async ({ params }) => getClaudeDesktopPrompt(params.name, params.arguments));
+  }
   server.setRequestHandler(CallToolRequestSchema, async ({ params }) => {
-    if (!getUiCapability({ extensions: server.getClientCapabilities()?.extensions ?? {} })?.mimeTypes?.includes(RESOURCE_MIME_TYPE)) return unavailable();
+    if (!getUiCapability({ extensions: server.getClientCapabilities()?.extensions ?? {} })?.mimeTypes?.includes(RESOURCE_MIME_TYPE)) return claude ? claudeDesktopUnsupported() : unavailable();
+    if (bridge && params.name === READER_BRIDGE_TOOL) return callReaderBridgeTool(bridge, params.arguments);
+    if (bridge && isReaderToolName(params.name)) return callReaderServerTool(bridge, params.name, params.arguments);
+    if (claude) return callClaudeDesktopTool(client, params.name, params.arguments, params._meta);
     if (extensionTools.some(tool => tool.name === params.name)) return callExtensionTool(client, params.name, params.arguments, params._meta);
     return callNativeTool(client, params.name, params.arguments, dependencies);
   });
   server.setRequestHandler(ListResourcesRequestSchema, async () => ({ resources: [{ uri: shellUri, name: "Placekeeper review v1", mimeType: RESOURCE_MIME_TYPE }] }));
   server.setRequestHandler(ReadResourceRequestSchema, async ({ params }) => {
     if (params.uri !== shellUri && params.uri !== CODEX_DOCUMENT_UI_RESOURCE) throw new Error("Unknown resource");
-    return { contents: [{ uri: params.uri, mimeType: RESOURCE_MIME_TYPE, text: shell, _meta: { ui: { csp: { connectDomains: [], resourceDomains: [] }, prefersBorder: true }, "openai/ui": { preferredDisplayMode: "fullscreen", availableDisplayModes: ["fullscreen", "inline"] } } }] };
+    return { contents: [{ uri: params.uri, mimeType: RESOURCE_MIME_TYPE, text: shell, _meta: { ui: { csp: { connectDomains: [], resourceDomains: [] }, prefersBorder: true, ...(claude ? { preferredDisplayMode: "fullscreen" } : {}) }, "openai/ui": { preferredDisplayMode: "fullscreen", availableDisplayModes: ["fullscreen", "inline"] } } }] };
   });
+  if (bridge) server.onclose = () => bridge.dispose();
   return server;
 }
 export async function startStdioServer(): Promise<void> {
   const shell = await readFile(resolve(dirname(fileURLToPath(import.meta.url)), "review-v1.html"), "utf8");
-  await createNativeServer(createServiceClient(), shell, {
+  const host = mcpHostFromEnv();
+  // Codex qualification instrumentation applies only to the Codex display route.
+  await createNativeServer(createServiceClient(), shell, host === "claude-desktop" ? {} : {
     qualification: new NativeQualificationObserver(defaultDaemonPaths().appSupportRoot, "server"),
     oldAttempt: new NativeQualificationOldAttempt(defaultDaemonPaths().appSupportRoot),
     controls: new NativeQualificationControls(defaultDaemonPaths().appSupportRoot),
     experiments: new NativeQualificationExperiments(defaultDaemonPaths().appSupportRoot),
-  }).connect(new StdioServerTransport());
+  }, host).connect(new StdioServerTransport());
 }
 if (process.argv[1] !== undefined && await realpath(process.argv[1]).catch(() => undefined) === await realpath(fileURLToPath(import.meta.url))) {
   await startStdioServer().catch(() => { process.stderr.write("Placekeeper MCP failed to initialize; reinstall the matching app and plugin.\n"); process.exitCode = 1; });

@@ -28,6 +28,7 @@ import { createIntegrationSetup } from './integration-setup.js';
 import { pathToFileURL } from 'node:url';
 import { installMenus, type WindowCommands } from './menus.js';
 import { createManualUpdateAction } from './update-check.js';
+import { createOpenInClaude } from './open-in-claude.js';
 import { parseStartupRequest, writeStartupReceipt, writeStartupLoadFailure, retainedStartupRecovery } from './startup-receipt.js';
 import { alignNativeWindowButtons, nativeTitlebarOptions, trackTitlebarHover } from './titlebar.js';
 import { parseElectronLocation } from '../../../packages/core/src/electron-shell-protocol.js';
@@ -208,7 +209,10 @@ async function start() {
     const integrations = createIntegrationSetup({ statePath: join(resolvePlatformLocations().appSupportRoot, 'integrations/choices.json'), isolated: !!smokePaths || !!startupRequest,
         present: async options => (await dialog.showMessageBox(options)).response,
         setup: async choices => (await integrationHelper()).setupIntegrations({ resources: root, choices }) });
-    const menus = () => installMenus(() => { void chooseOpen(); }, focused, () => { void checkUpdates(); }, () => { void integrations.open(); });
+    // A narrow deep-link path, separate from the renderer web-link allowlist: the URL is built
+    // here from the focused window's canonical source path, never from renderer input.
+    const openInClaude = createOpenInClaude({ openExternal: url => shell.openExternal(url), notify: message => { const parent = BrowserWindow.getFocusedWindow(); const notice = { type: 'warning' as const, title: 'Open in Claude', message, buttons: ['OK'] }; return parent ? dialog.showMessageBox(parent, notice) : dialog.showMessageBox(notice); } });
+    const menus = () => installMenus(() => { void chooseOpen(); }, focused, () => { void checkUpdates(); }, () => { void integrations.open(); }, sourcePath => { void openInClaude(sourcePath); });
     const verify = (event: Electron.IpcMainInvokeEvent, identity?: unknown, identityRequest = false) => {
         const entry = entries.get(event.sender.id);
         const id = identity as { windowId?: unknown; attemptId?: unknown } | undefined;

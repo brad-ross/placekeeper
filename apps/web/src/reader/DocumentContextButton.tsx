@@ -14,7 +14,7 @@ function contextLabel(state: DocumentContextState): string {
     case 'publishing':
       return 'Putting document in context…';
     case 'available':
-      return 'Document in context';
+      return state.detail ? `Document in context: ${state.detail}` : 'Document in context';
     case 'unsupported':
     case 'unavailable':
       return `Document not in context. ${state.reason}${state.canActivate ? ' Try again' : ''}`;

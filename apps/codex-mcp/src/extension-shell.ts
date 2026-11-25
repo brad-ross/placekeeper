@@ -7,6 +7,7 @@ import type { DocumentAgentBridge, DocumentAgentContextInput } from '../../web/s
 import { documentContextSourceKey, INACTIVE_DOCUMENT_CONTEXT, sameDocumentContextVersion, type DocumentContextMember, type DocumentContextPublicationStatus, type DocumentContextSource, type DocumentContextState } from '../../web/src/host/document-in-context.js';
 import type { OpenAIModelContext, OpenAIResources } from '@openai/mcp-extensions/app';
 import { HostResourceAdapter } from './host-resource-adapter.js';
+import { createStandardModelContext } from './standard-model-context.js';
 import type { App } from '@modelcontextprotocol/ext-apps';
 import { createCodexHostRuntime } from '../../web/src/host/codex-runtime.js';
 import { mountCodexProductionDocument } from '../../web/src/codex-entry.js';
@@ -16,6 +17,14 @@ import { NativeOperationError, parseCodexAppResponse, type CodexAppRequest, type
 import { EXTENSION_META_KEY, EXTENSION_TOOL, extensionPickerTimeouts, parseExtensionResult, type ExtensionRequest, type ExtensionResult, type ExtensionPresentation } from '../../../packages/core/src/extension-protocol.js';
 import { PanelLiveness } from './panel-liveness.js';
 import { NativeDiagnosticError, diagnosticFailure } from './lifecycle-diagnostics.js';
+import { CapturedModelContext, ReaderBridgeClient } from './reader-bridge-client.js';
+import { parseReaderBridgeResponse, READER_BRIDGE_TOOL } from './reader-bridge-protocol.js';
+import { READ_DOCUMENT_TEXT_TOOL } from './reader-tool-definitions.js';
+
+const documentPointerId = 'placekeeper-document-on-request';
+/** Shown by the robot button when chat can read the PDF through the reader tools but cannot receive its bytes. */
+export const DOCUMENT_ON_REQUEST_DETAIL = 'Claude can read this PDF on request.';
+const liveToolsUnavailable = 'Live reader tools are unavailable on this host. Open the reader to search and navigate.';
 
 async function encodeDocument(bytes: Uint8Array, current: () => boolean): Promise<string | undefined> {
     const { toBase64 } = bytes as Uint8Array & { toBase64?: () => string };
@@ -46,12 +55,16 @@ export class ExtensionShell {
     readonly #documentListeners = new Set<() => void>();
     #readingPage: number | undefined;
     #readerTools: LiveReaderTools | undefined;
+    #readerBridge: ReaderBridgeClient | undefined;
+    #pointerVersion: NonNullable<DocumentContextState['version']> | undefined;
     readonly #readerVisibilityListeners = new Set<() => void>();
     #openReader: HTMLElement | undefined;
     #snapshot: DocumentContextSnapshot | undefined;
     #title: string | undefined;
     #displayMode: string | undefined;
     #message = '';
+    /** A declined expand request; shown only while the reader is still hidden, never as #message. */
+    #expandDeclined = false;
     #host: HostResourceAdapter | undefined;
     #hostNotice = '';
     #exportNotice = '';
@@ -85,6 +98,14 @@ export class ExtensionShell {
     #watermark: number | undefined;
     readonly #listeners = new Set<(event: HostRuntimeInvalidation) => void>();
     constructor(readonly app: App, readonly root: HTMLElement, readonly status: HTMLElement, readonly controls: HTMLElement, readonly resources: () => OpenAIResources | undefined = () => undefined, readonly modelContext: () => OpenAIModelContext | undefined = () => undefined) { }
+    #standardContext: OpenAIModelContext | undefined;
+    /** OpenAI's model context when present, else the standard `ui/update-model-context` adapter once the host advertises it. */
+    #modelContext(): OpenAIModelContext | undefined {
+        const openai = this.modelContext();
+        if (openai) return openai;
+        this.#standardContext ??= createStandardModelContext(this.app);
+        return this.#standardContext;
+    }
     get ownsPanel() { return this.#received; }
     async receive(raw: unknown): Promise<boolean> {
         const result = parseExtensionResult(raw);
@@ -120,12 +141,16 @@ export class ExtensionShell {
             throw new NativeDiagnosticError('transport');
         return parsed;
     }
+    /** OpenAI hosts advertise their extension APIs after connect; other MCP Apps hosts have no file menu or conversation panel. */
+    #forHost(openai: string, neutral: string) { return this.resources() || this.modelContext() ? openai : neutral; }
     #show(text: string) {
         if (this.#closed) return;
         this.#message = text;
         const compact = this.#active && this.#displayMode !== 'fullscreen';
-        const summary = compact ? `${this.#snapshot?.title ?? this.#title ?? 'Placekeeper PDF'}${this.#snapshot ? ` · Page ${this.#snapshot.page} of ${this.#snapshot.pageCount}` : ''}. Open the reader to edit.` : '';
-        this.status.textContent = [summary, text, this.#exportNotice].filter(Boolean).join(' ');
+        // A declined expand request only adjusts the compact line; it is never shown over a visible reader.
+        const hint = compact && this.#expandDeclined ? this.#forHost('This host could not expand the reader. Open Placekeeper in the conversation panel to edit.', 'Use the expand control to open the reader.') : '';
+        const summary = compact ? `${this.#snapshot?.title ?? this.#title ?? 'Placekeeper PDF'}${this.#snapshot ? ` · Page ${this.#snapshot.page} of ${this.#snapshot.pageCount}` : ''}.${hint ? '' : ' Open the reader to edit.'}` : '';
+        this.status.textContent = [summary, text, hint, this.#exportNotice].filter(Boolean).join(' ');
         this.controls.dataset.displayMode = compact ? 'inline' : 'fullscreen';
         this.status.hidden = !this.status.textContent || (this.#loading !== undefined && !compact);
     }
@@ -165,6 +190,7 @@ export class ExtensionShell {
     }
     hostContextChanged(context: NonNullable<ReturnType<App['getHostContext']>>, reconcileContext = true) {
         if (context.displayMode !== undefined) this.#displayMode = context.displayMode;
+        if (this.#displayMode === 'fullscreen') this.#expandDeclined = false;
         if (this.#received) {
             const html = document.documentElement;
             if (html) {
@@ -182,9 +208,11 @@ export class ExtensionShell {
     }
     #setupContext(freshInvocation: boolean) {
         if (this.#context) return;
-        const api = this.modelContext();
+        const openai = this.modelContext();
+        const api = openai ?? this.#modelContext();
         this.#context = new ExtensionContextCoordinator(api, undefined, {
-            freshInvocation,
+            // Without host readback or host-side removal, a remount has no prior state to resume or honor.
+            freshInvocation: freshInvocation || !openai,
             onDocumentStatus: (member, status) => this.#documentPublished(member, status),
             onContextCleared: () => this.#cancelDocumentChoice(),
             beforeUpdate: async () => {
@@ -216,7 +244,7 @@ export class ExtensionShell {
                     if (!current()) return;
                     await this.#request({action:'revoke',grant:result.grant}).catch(()=>undefined);
                     this.#grant=undefined;await this.#resetHost();
-                    this.#chooser('The saved host file is unavailable. Reopen the PDF through its file menu; your protected work is retained.');
+                    this.#chooser(this.#forHost('The saved host file is unavailable. Reopen the PDF through its file menu; your protected work is retained.', 'The saved host file is unavailable. Ask to open the PDF in Placekeeper again; your protected work is retained.'));
                 }
                 return;
             }
@@ -267,9 +295,10 @@ export class ExtensionShell {
             this.controls.className = 'extension-controls';
             this.controls.dataset.mode = 'review';
             this.status.dataset.extensionMode = 'review';
+            this.#expandDeclined = false;
             this.#openReader = this.#button('Open reader', async () => {
-                try { const result = await this.app.requestDisplayMode({ mode: 'fullscreen' }); this.hostContextChanged({ displayMode: result.mode }); }
-                catch { this.#show('This host could not expand the reader. Open Placekeeper in the conversation panel to edit.'); }
+                const mode = await this.#requestFullscreen().catch(() => undefined);
+                if (mode !== 'fullscreen' && this.#displayMode !== 'fullscreen') { this.#expandDeclined = true; this.#show(this.#message); }
             });
             this.hostContextChanged(this.app.getHostContext?.() ?? {}, false);
             this.#mount();
@@ -316,6 +345,17 @@ export class ExtensionShell {
                 }
             }, onUpdate: () => { this.#hostRefreshPending = true; this.#hostUpdateRevision++; if (this.#active) void this.#refreshHost(); } });
     }
+    /**
+     * Requests fullscreen and applies the answer. The host may announce fullscreen through host context before (or after)
+     * the request resolves with an older mode, so a fullscreen context is never overridden by the request's answer.
+     */
+    async #requestFullscreen(current: () => boolean = () => true) {
+        const result = await this.app.requestDisplayMode({ mode: 'fullscreen' });
+        if (!current()) return result.mode;
+        const mode = result.mode === 'fullscreen' || this.app.getHostContext?.()?.displayMode === 'fullscreen' ? 'fullscreen' : result.mode;
+        this.hostContextChanged({ displayMode: mode });
+        return mode;
+    }
     #closeRecovery() {
         this.#recoveryDialog?.close();
         this.#recoveryDialog?.remove();
@@ -330,6 +370,7 @@ export class ExtensionShell {
         const current = () => !this.#closed && epoch === this.#choiceEpoch;
         const dialog = document.createElement('dialog');
         this.#recoveryDialog = dialog;
+        // Same surface and order as the app's compact dialogs: title, one-line reason, then one action row.
         dialog.className = 'extension-recovery terminal-recovery';
         dialog.setAttribute('aria-labelledby', 'extension-recovery-title');
         const header = document.createElement('header');
@@ -338,31 +379,28 @@ export class ExtensionShell {
         body.className = 'terminal-recovery__body';
         const title = document.createElement('h1');
         title.id = 'extension-recovery-title';
+        // Like the desktop recovery page, start on the title so no action looks preselected; Tab reaches the actions.
+        title.tabIndex = -1;
+        title.autofocus = true;
         const available = offer.canRecover || offer.canResume;
         title.textContent = 'Reopen Document';
         const description = document.createElement('p');
         description.id = 'extension-recovery-description';
-        description.textContent = offer.canRecover
-            ? 'The previous reader is disconnected. You can resume its protected work here.'
-            : offer.matchingCopy
-                ? 'A saved copy has matching PDF contents and a similar filename.'
-                : available ? 'Protected work is available for this PDF.'
-                    : 'This document is still open elsewhere. Return to the previous reader or check again after its connection ends.';
+        // One line says why the dialog appeared; the button labels carry the choices.
+        description.textContent = offer.matchingCopy
+            ? 'A saved copy has matching PDF contents and a similar filename.'
+            : available ? 'You had this document open earlier.'
+            : 'This document is still open elsewhere. Return to the previous reader or check again after its connection ends.';
         const feedback = document.createElement('p');
         feedback.className = 'extension-recovery__feedback terminal-recovery__status';
         feedback.setAttribute('role', 'status');
-        const choices = document.createElement('div');
-        choices.className = 'terminal-recovery__actions';
         const footer = document.createElement('div');
         footer.className = 'terminal-recovery__footer';
         const footerActions = document.createElement('div');
         footerActions.className = 'terminal-recovery__footer-actions';
         header.append(title);
-        if (!available || offer.matchingCopy) {
-            body.append(description);
-            dialog.setAttribute('aria-describedby', description.id);
-        }
-        body.append(choices, feedback);
+        body.append(description, feedback);
+        dialog.setAttribute('aria-describedby', description.id);
         footer.append(footerActions);
         dialog.append(header, body, footer);
         const buttons: HTMLButtonElement[] = [];
@@ -380,7 +418,7 @@ export class ExtensionShell {
                     return;
                 }
                 if (result.status === 'unavailable') {
-                    this.#chooser('This document choice is no longer available. Choose the PDF again or reopen it from its file menu. Protected work is retained.', 'Choose PDF again', true, true);
+                    this.#chooser(this.#forHost('This document choice is no longer available. Choose the PDF again or reopen it from its file menu. Protected work is retained.', 'This document choice is no longer available. Choose the PDF again or ask to open it in Placekeeper again. Protected work is retained.'), 'Choose PDF again', true, true);
                 } else if (result.status === 'host-resource') {
                     await this.#restartHost(result);
                 } else {
@@ -407,29 +445,24 @@ export class ExtensionShell {
             parent.append(button);
             return button;
         };
-        const addChoice = (choice: 'recover' | 'resume' | 'fork', label: string, consequence: string) => {
-            const row = document.createElement('div');
-            const operationId = crypto.randomUUID();
-            const request = { action: 'choose', recoveryToken: offer.recoveryToken, choice, operationId } as const;
-            const button = action(label, row, () => { void run(request, 'Opening document…'); });
-            if (choice !== 'fork') button.className = 'terminal-recovery__primary';
-            button.title = consequence;
-            choices.append(row);
-        };
-        if (offer.canRecover) addChoice('recover', 'Continue', 'Transfer this document here and prevent the previous reader from making further changes.');
-        else if (offer.canResume) addChoice('resume', 'Continue', 'Continue with your existing annotations and protected draft.');
-        addChoice('fork', 'Open Copy', 'Start a separate copy and keep the existing work in place.');
-        if (!available) action('Check again', footerActions, () => {
-            void run({ action: 'recheck', recoveryToken: offer.recoveryToken }, 'Checking the previous connection…');
-        });
         const cancel = () => {
             if (!current() || pending) return;
             this.#closeRecovery();
             if (this.#active && this.#grant) void this.#apply({ status: 'active', grant: this.#grant, presentation: this.#active });
             else this.#chooser(undefined, undefined, false, true);
         };
-        const cancelButton = action('Cancel', footerActions, cancel);
-        cancelButton.autofocus = true;
+        // One action row: Cancel, alternatives, primary last.
+        action('Cancel', footerActions, cancel);
+        const choice = (kind: 'recover' | 'resume' | 'fork', label: string) => {
+            const request = { action: 'choose', recoveryToken: offer.recoveryToken, choice: kind, operationId: crypto.randomUUID() } as const;
+            action(label, footerActions, () => { void run(request, 'Opening document…'); }).className = kind === 'fork' ? 'terminal-recovery__secondary' : 'terminal-recovery__primary';
+        };
+        choice('fork', 'Open Copy');
+        if (offer.canRecover) choice('recover', 'Continue');
+        else if (offer.canResume) choice('resume', 'Continue');
+        else action('Check again', footerActions, () => {
+            void run({ action: 'recheck', recoveryToken: offer.recoveryToken }, 'Checking the previous connection…');
+        }).className = 'terminal-recovery__primary';
         dialog.oncancel = event => { event.preventDefault(); cancel(); };
         this.controls.append(dialog);
         dialog.showModal();
@@ -472,6 +505,37 @@ export class ExtensionShell {
         this.#documentAttempt++;
         this.#documentMember = undefined;
         this.#context?.clearDocument();
+        if (this.#pointerVersion) {
+            this.#pointerVersion = undefined;
+            this.#context?.removeAttachment(documentPointerId);
+        }
+    }
+    /** Publishes a text note (title, pages, how to read on request), never the PDF bytes. */
+    async #preparePointer(source: DocumentContextSource, version: NonNullable<DocumentContextState['version']>) {
+        const grant = this.#grant, epoch = this.#epoch, connection = this.#connectionEpoch;
+        const attempt = ++this.#documentAttempt;
+        const current = () => grant !== undefined && grant === this.#grant && epoch === this.#epoch
+            && connection === this.#connectionEpoch && this.#connected && !this.#closed && !this.#hostRefreshPending
+            && attempt === this.#documentAttempt && sameDocumentContextVersion(version, this.#documentSource);
+        const context = this.#context;
+        if (!current() || !context) return;
+        const snapshot = this.#snapshot?.documentGeneration === version.generation ? this.#snapshot : undefined;
+        const title = source.title.slice(0, 160);
+        const text = [
+            `Title: ${title}`,
+            ...(snapshot ? [`Pages: ${snapshot.pageCount}`] : []),
+            'This PDF is open in the Placekeeper reader. Its contents are not attached here.',
+            `Read its full text on request with the ${READ_DOCUMENT_TEXT_TOOL} tool (optional startPage and endPage), and search it with search_document.`,
+        ].join('\n');
+        this.#pointerVersion = version;
+        try {
+            await context.includeAttachment({ id: documentPointerId, title: `Placekeeper PDF: ${title}`, text });
+            if (current()) this.#setDocumentState({ version, status: 'available', detail: DOCUMENT_ON_REQUEST_DETAIL, canActivate: false });
+        } catch {
+            if (!current()) return;
+            if (sameDocumentContextVersion(this.#pointerVersion, version)) this.#pointerVersion = undefined;
+            this.#setDocumentState({ version, status: 'unavailable', reason: 'The document note could not be added to chat context.', canActivate: true });
+        }
     }
     #setDocumentState(state: DocumentContextState) {
         this.#documentState = state;
@@ -483,13 +547,16 @@ export class ExtensionShell {
             ? { sourceKey: source.sourceKey, generation: source.generation, digest: source.digest }
             : this.#documentState.version;
         const identity = version === undefined ? {} : { version };
-        if (!this.modelContext() || !this.app.getHostCapabilities?.()?.updateModelContext?.resource) {
+        // Without PDF resources, a host whose chat can call the relayed reader tools gets a short pointer instead.
+        const pointer = !this.app.getHostCapabilities?.()?.updateModelContext?.resource && this.#readerBridge?.state === 'active';
+        if (!this.#modelContext() || (!pointer && !this.app.getHostCapabilities?.()?.updateModelContext?.resource)) {
             this.#setDocumentState({ ...identity, status: 'unsupported', reason: 'This host cannot receive a PDF in chat context.', canActivate: false });
         } else if (!this.#connected || this.#closed) {
             this.#setDocumentState({ ...identity, status: 'unavailable', reason: 'The reader connection is unavailable.', canActivate: false });
         } else if (this.#documentChoice !== undefined && this.#documentChoice === version?.sourceKey) {
+            if (pointer && this.#documentState.status === 'available' && sameDocumentContextVersion(this.#pointerVersion, version)) return;
             this.#setDocumentState({ ...identity, status: 'publishing', canActivate: false });
-            if (source && version && !this.#hostRefreshPending) void this.#prepareDocument(source, version);
+            if (source && version && !this.#hostRefreshPending) void (pointer ? this.#preparePointer(source, version) : this.#prepareDocument(source, version));
         } else {
             this.#setDocumentState({ ...identity, status: 'idle', canActivate: source !== undefined && !this.#hostRefreshPending });
         }
@@ -545,7 +612,7 @@ export class ExtensionShell {
     async #addContext(input: DocumentAgentContextInput, epoch: number) {
         const grant = this.#grant;
         const current = () => grant && grant === this.#grant && epoch === this.#epoch && !this.#closed && this.#connected && input.snapshot.documentGeneration === this.#active?.generation;
-        if (!current() || !this.#context || !this.modelContext()) throw Error('Context sharing is unavailable. Reconnect and try again.');
+        if (!current() || !this.#context || !this.#modelContext()) throw Error('Context sharing is unavailable. Reconnect and try again.');
         const attachment = await prepareDocumentContext(input);
         if (!current()) throw Error('The document changed. Select the evidence again.');
         await this.#context.includeAttachment(attachment);
@@ -598,7 +665,7 @@ export class ExtensionShell {
                     }
                     retryChoice = undefined;
                     if (!current()) { if (parsed) await this.#discardObsolete(parsed); return; }
-                    if (parsed?.status === 'chooser') { this.#show('Use the PDF’s file menu to open it in Placekeeper on this host.'); return; }
+                    if (parsed?.status === 'chooser') { this.#show(this.#forHost('Use the PDF’s file menu to open it in Placekeeper on this host.', 'Ask to open the PDF in Placekeeper again.')); return; }
                     if (parsed?.status === 'unavailable' && request.action === 'recent-open') { if (feedback) feedback.textContent = 'Could not open this document. Try again.'; return; }
                     // A local picker selection changes the source route; cancellation retains it.
                     if (request.action === 'open' && (parsed?.status === 'provisional' || parsed?.status === 'busy')) this.#resetHost();
@@ -675,13 +742,19 @@ export class ExtensionShell {
         this.#verified.clear();
         this.root.inert = document.hidden;
         this.#readerTools?.dispose();
+        this.#readerBridge?.stop();
+        this.#readerBridge = undefined;
         this.#unmount?.();
-        this.#readerTools = new LiveReaderTools((document as Document & { modelContext?: DocumentModelContext }).modelContext, {
+        const native = (document as Document & { modelContext?: DocumentModelContext }).modelContext;
+        // Plain MCP Apps hosts (Claude Desktop) lack WebMCP; their chat reaches these tools through the server relay.
+        const captured = native || this.resources() || this.modelContext() ? undefined : new CapturedModelContext();
+        const readerTools = this.#readerTools = new LiveReaderTools(native ?? captured, {
+            connected: () => epoch === this.#epoch && this.#connected && !this.#closed,
             available: () => epoch === this.#epoch && this.#connected && !this.#closed && !document.hidden && !this.root.hidden && !this.root.inert,
             ensureVisible: async () => {
                 if (epoch !== this.#epoch || !this.#connected || this.#closed) return false;
                 if (this.#displayMode !== 'fullscreen' || document.hidden || this.root.hidden) {
-                    try { const result = await this.app.requestDisplayMode({ mode: 'fullscreen' }); if (epoch !== this.#epoch) return false; this.hostContextChanged({ displayMode: result.mode }); }
+                    try { await this.#requestFullscreen(() => epoch === this.#epoch); if (epoch !== this.#epoch) return false; }
                     catch { return false; }
                 }
                 const visible = () => epoch === this.#epoch && this.#connected && !this.#closed && !document.hidden && !this.root.hidden && !this.root.inert;
@@ -696,7 +769,8 @@ export class ExtensionShell {
             },
         });
         this.root.dataset.liveReaderToolsDiagnostic = JSON.stringify(this.#readerTools.diagnostic);
-        if (!this.#readerTools.supported) this.#show('Live reader tools are unavailable on this host. Open the reader to search and navigate.');
+        if (captured && readerTools.supported) this.#startReaderBridge(captured, readerTools, epoch);
+        else if (!readerTools.supported) this.#show(liveToolsUnavailable);
         this.#listeners.clear();
         this.#watermark = undefined;
         const runtime = createCodexHostRuntime({ runtimeId: active.runtimeId, contextOwner: 'app', ...(this.#host ? { annotatedCopyExport: this.app.getHostCapabilities?.()?.downloadFile !== undefined } : {}), call: (method, payload) => this.#payload(method, payload, epoch), openExternalUrl: async value => {
@@ -709,7 +783,7 @@ export class ExtensionShell {
         this.#show('');
         this.#unmount = mountCodexProductionDocument(this.root, runtime, () => { if (epoch === this.#epoch) {
             this.#clearLoading();
-            this.#show('The PDF could not be loaded. Reopen it through the file menu; protected work is retained.'); } }, () => { if (epoch === this.#epoch) {
+            this.#show(this.#forHost('The PDF could not be loaded. Reopen it through the file menu; protected work is retained.', 'The PDF could not be loaded. Ask to open it in Placekeeper again; protected work is retained.')); } }, () => { if (epoch === this.#epoch) {
             this.#clearLoading();
             this.#show(this.#connected ? this.#hostNotice : this.#message); } }, this.#contextBridge(this.#readerTools, epoch), snapshot => { if (epoch !== this.#epoch || this.#closed || !this.#connected || snapshot.documentGeneration !== this.#active?.generation) return; this.#snapshot = snapshot; this.#rememberPage(snapshot); this.#context?.publish(snapshot); this.#show(this.#message); }, (title, generation) => { if (epoch !== this.#epoch || this.#closed || generation !== this.#active?.generation) return; this.#title = title; this.#show(this.#message); });
         this.#liveness?.stop();
@@ -718,6 +792,31 @@ export class ExtensionShell {
                 this.#pause(); }, onTerminal: () => { if (epoch === this.#epoch)
                 this.#ended(); } });
         this.#liveness.start();
+    }
+    #startReaderBridge(captured: CapturedModelContext, tools: LiveReaderTools, epoch: number) {
+        const bridge = new ReaderBridgeClient({
+            call: async (request, timeout) => {
+                const result = await this.app.callServerTool({ name: READER_BRIDGE_TOOL, arguments: { request } }, { timeout });
+                return result.isError ? undefined : parseReaderBridgeResponse(result.structuredContent);
+            },
+            execute: async (tool, input) => {
+                if (epoch !== this.#epoch || this.#closed) throw Error('Reader changed');
+                if (tool === READ_DOCUMENT_TEXT_TOOL) return tools.readDocumentText(input);
+                const pending = captured.execute(tool, input);
+                if (!pending) throw Error('Reader tool unavailable');
+                return pending;
+            },
+            onState: state => {
+                if (epoch !== this.#epoch || this.#closed || this.#readerBridge !== bridge) return;
+                this.root.dataset.readerBridge = state;
+                if (state === 'unsupported') this.#show(liveToolsUnavailable);
+                else if (state === 'active' && this.#message === liveToolsUnavailable) this.#show('');
+                this.#syncDocument();
+            },
+        });
+        this.#readerBridge = bridge;
+        this.root.dataset.readerBridge = bridge.state;
+        bridge.start();
     }
     #pause() {
         if (this.#closed)
@@ -925,7 +1024,7 @@ export class ExtensionShell {
         return this.#resume;
     }
     #ended() { if (this.#closed)
-        return; this.#clearLoading(); this.#connected = false; this.#endDocumentContext(); this.#readerTools?.dispose(); this.#closeRecovery(); this.#context?.dispose(); this.#liveness?.stop(); void this.#host?.dispose().catch(() => undefined); this.root.inert = true; this.#show('This connection ended. Reopen the PDF through its file menu; accepted annotations and protected drafts are retained.'); this.#closed = true; this.#epoch++; }
+        return; this.#clearLoading(); this.#connected = false; this.#endDocumentContext(); this.#readerTools?.dispose(); this.#readerBridge?.stop(); this.#closeRecovery(); this.#context?.dispose(); this.#liveness?.stop(); void this.#host?.dispose().catch(() => undefined); this.root.inert = true; this.#show(this.#forHost('This connection ended. Reopen the PDF through its file menu; accepted annotations and protected drafts are retained.', 'This connection ended. Ask to open the PDF in Placekeeper again; accepted annotations and protected drafts are retained.')); this.#closed = true; this.#epoch++; }
     #endDocumentContext() {
         this.#documentChoice = undefined;
         this.#documentSource = undefined;
@@ -968,6 +1067,7 @@ export class ExtensionShell {
         try {
             this.#liveness?.stop();
             this.#readerTools?.dispose();
+            this.#readerBridge?.stop();
             this.#closeRecovery();
             this.#unmount?.();
             this.#listeners.clear();

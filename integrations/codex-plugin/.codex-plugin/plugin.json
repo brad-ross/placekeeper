@@ -1,6 +1,6 @@
 {
   "name": "codex-plugin",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "Open PDFs directly from file actions or the conversation, read, annotate, and search them in Placekeeper, and control the context shared with chat.",
   "author": {
     "name": "Placekeeper"

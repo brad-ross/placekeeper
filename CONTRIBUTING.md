@@ -10,6 +10,7 @@ Read [Concepts](docs/concepts.md) for domain vocabulary and the [documentation i
 | `apps/service` | Local document authority: file capabilities, session lifecycle, durable recovery, PDF saves, source reconciliation, and host transports. |
 | `apps/electron` | Production desktop windows, lifecycle, menus, sandboxed preload bridge, and platform packaging. |
 | `apps/vscode` | Trusted-workspace document panel, rebuild observation, editor navigation, and packaged web assets. |
+| `apps/codex-mcp` | MCP server and in-chat reader view for Codex/ChatGPT and, with `PLACEKEEPER_MCP_HOST=claude-desktop`, Claude Desktop. |
 | `apps/chrome-extension` | PDF interception, browser source acquisition, and the Chrome runtime bridge. |
 | `apps/electron-spike` | Preserved decision probe; not an adopted production host. See its [README](apps/electron-spike/README.md). |
 | `packages/core` | Document state, commands, reducers, geometry, portable annotation contracts, and host protocol vocabulary. |
@@ -17,7 +18,8 @@ Read [Concepts](docs/concepts.md) for domain vocabulary and the [documentation i
 | `scripts/build` | Pinned PDFium worker extraction and shared asset loading/emission. Host Vite configs retain host policy. |
 | `scripts/testing` | Explicit suite membership and ordered stages, thin command adapter, and shared browser/static configuration. |
 | `scripts/pdf-symbol-catalog` | Deterministic generation and audited updates from pinned standards inputs. |
-| `packaging/desktop` | Bundled independent Node runtime, native launchers, manifest validation, and transactional source installation. |
+| `packaging/desktop` | Bundled independent Node runtime, native launchers, manifest validation, transactional source installation, and optional integration setup (`setup-integrations.mjs`, `integration-registration.ts`). |
+| `integrations` | Codex plugin template and editor adapters bundled into the desktop app. |
 | `test` | Cross-package conformance, browser acceptance, fixtures, and shared test support. |
 
 ## Ownership within the reader client

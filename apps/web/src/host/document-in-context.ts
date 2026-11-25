@@ -14,7 +14,9 @@ export type DocumentContextState = {
   readonly version?: DocumentContextVersion;
   readonly canActivate: boolean;
 } & (
-  | { readonly status: 'idle' | 'publishing' | 'available' }
+  | { readonly status: 'idle' | 'publishing' }
+  /** `detail` qualifies what "in context" means when the host receives a pointer rather than the PDF. */
+  | { readonly status: 'available'; readonly detail?: string }
   | { readonly status: 'unsupported' | 'unavailable'; readonly reason: string }
 );
 

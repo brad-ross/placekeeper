@@ -41,4 +41,27 @@ describe("explicit candidate integration command", () => {
     expect(JSON.parse(output.at(-1)!)).toMatchObject({ ok: true, trust: "pending" });
     expect(native.request).not.toHaveBeenCalled();
   });
+  it("merges the bundled Claude Desktop server into an existing configuration", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pk-claude-config-cli-"));
+    const suffix = process.platform === "win32" ? ".exe" : "";
+    const node = join(root, `node/bin/node${suffix}`); const server = join(root, "codex-mcp/server.js"); const launcher = join(root, `bin/placekeeper${suffix}`);
+    for (const path of [node, server, launcher]) { await mkdir(dirname(path), { recursive: true }); await writeFile(path, "asset"); }
+    vi.stubEnv("PLACEKEEPER_APP_RESOURCES", root);
+    vi.stubEnv("PLACEKEEPER_INSTALL_ARTIFACT_IDENTITY", "a".repeat(64)); vi.stubEnv("PLACEKEEPER_DAEMON_IDENTITY", "b".repeat(64));
+    const config = join(root, "Claude/claude_desktop_config.json"); await mkdir(dirname(config));
+    await writeFile(config, JSON.stringify({ mcpServers: { other: { command: "other" } }, globalShortcut: "Ctrl+Space" }));
+    const output: string[] = [];
+    const args = ["integration-registration", "claude", "--receipt", join(root, "receipt"), "--destination", config, "--node", node, "--server", server, "--launcher", launcher];
+    expect(await runIntegrationRegistrationCommand(args, text => output.push(text))).toBe(0);
+    expect(JSON.parse(await readFile(config, "utf8"))).toEqual({ mcpServers: { other: { command: "other" }, placekeeper: { command: node, args: [server], env: { PLACEKEEPER_MCP_HOST: "claude-desktop", PLACEKEEPER_APP_RESOURCES: root, PLACEKEEPER_LAUNCHER: launcher } } }, globalShortcut: "Ctrl+Space" });
+    expect(JSON.parse(output.at(-1)!)).toMatchObject({ ok: true, registration: "registered", hostAction: "pending" });
+    expect(await runIntegrationRegistrationCommand(args, text => output.push(text))).toBe(0);
+    expect(JSON.parse(output.at(-1)!)).toMatchObject({ ok: true, registration: "current" });
+    const foreign = join(root, "foreign-server.js"); await writeFile(foreign, "asset");
+    expect(await runIntegrationRegistrationCommand(args.map(arg => arg === server ? foreign : arg), text => output.push(text))).toBe(2);
+    expect(JSON.parse(output.at(-1)!)).toMatchObject({ ok: false, error: { message: "Claude Desktop assets must belong to this installation" } });
+    expect(await runIntegrationRegistrationCommand(["integration-registration", "remove", "--receipt", join(root, "receipt")], text => output.push(text))).toBe(0);
+    expect(JSON.parse(output.at(-1)!)).toMatchObject({ ok: true, status: "removed", removed: [config], retained: [] });
+    expect(JSON.parse(await readFile(config, "utf8"))).toEqual({ mcpServers: { other: { command: "other" } }, globalShortcut: "Ctrl+Space" });
+  });
 });

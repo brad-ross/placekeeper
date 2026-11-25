@@ -24,11 +24,12 @@ Open Placekeeper and choose a local PDF. Click a citation or another internal PD
 
 The default save creates an annotated copy. **Replace Original** is a separate, explicit action. If another app rewrites an open PDF, Placekeeper waits for a valid file and refreshes the document. It waits until active annotation edits finish, then carries over your reading position and annotations where it can. If Placekeeper cannot confidently reattach an annotation, it leaves it available for manual reattachment. See [Privacy and recovery](docs/privacy-and-recovery.md) for what stays local and how to recover drafts.
 
-## What's new in 0.3.2
+## What's new in 0.3.3
 
-- **Explore references.** Pan across pages and zoom in PDF link previews. In the References tray, hover the tab or focus it with the keyboard to reveal **Return to reference** when the original target scrolls out of view. Links that point just outside a page open at its edge. You can retry or close a failed reference in its own tab.
-- **Find controls at narrow widths.** Open the References and Annotations trays from the toolbar. When space runs short, the filename gives way to its icon, and history controls move into menus.
-- **Read excerpts and annotations more easily.** The search field shows the result count, matches use clearer colors, and snippets cut off at word boundaries. Annotation quotes include nearby text. Hover stays active between lines of a highlight, and clicking the PDF dismisses an open annotation popup.
+- **Read in Claude Desktop (experimental).** Open a local PDF in a Placekeeper view inside a Claude chat. Claude can use the open page and your selection as context, and search, read and navigate the document when you ask. Choose **File → Open in Claude** to start a chat about the open PDF. [Claude Desktop setup](docs/installation.md#claude-desktop-experimental)
+- **Documents and annotations.** Menus, dialogs and guides now say **Document**, **Annotations** and **Annotated Document** where they used to say Review.
+- **Highlights from other apps.** Highlights made in another PDF app show the words they cover. Long annotations open like their cards and scroll the PDF to them.
+- **Fixes.** Fit, the document menu and combined undo history behave correctly in more cases.
 
 ## Optional integrations
 
@@ -36,6 +37,7 @@ Set up integrations on first launch or later through **Help → Set Up Integrati
 
 - **Chrome** can open eligible PDFs in Placekeeper while keeping the original tab and URL. This is experimental and requires Chrome 151 or later. After loading the extension, turn on **Open PDFs automatically** in its popup. [Chrome setup](docs/installation.md#open-chrome-pdfs-automatically-experimental)
 - **Codex** can open a local PDF in a Placekeeper panel and use the open document and its annotations as context in the chat that opened it. On hosts with the extension entry points, you can also open PDFs from a file menu or resume a document from **Recent Documents**. Availability depends on the installed build and host. [Plugin setup](docs/installation.md#optional-integrations) · [Documents in chat](docs/guides/chatgpt-extension.md)
+- **Claude Desktop** can open a local PDF in a Placekeeper view inside a chat, use the open page and selection as context, and search, read and navigate the document when you ask. Choose **File → Open in Claude** to start a chat about the open PDF. This is experimental: the reader, chat context, chat-driven search and reopening have been tried in Claude Desktop on macOS, and setup from the installed app has not yet been tried with a real Claude Desktop. [Claude Desktop setup](docs/installation.md#claude-desktop-experimental) · [Documents in Claude Desktop](docs/guides/claude-desktop.md)
 - **LaTeX editors** can use SyncTeX to jump between source and PDF. The VS Code extension opens Placekeeper in an editor panel. Placekeeper watches for a rebuilt PDF while your editor or build tool runs LaTeX. [Setup for VS Code, Zed, Neovim, Sublime Text, and Emacs](docs/guides/editor-synctex.md)
 
 ## Web beta

@@ -14,6 +14,13 @@ export interface DocumentAgentActions {
   snapshot(): DocumentAgentSnapshot;
   search(query: string): Promise<ReturnType<typeof documentAgentSearchResult>>;
   navigate(target: DocumentAgentTarget): Promise<boolean>;
+  /** Extracted text of one-based pages firstPage..lastPage from the reader's search index; null where a page has no reliable text. */
+  pageText?(firstPage: number, lastPage: number): Promise<DocumentAgentPageText>;
+}
+
+export interface DocumentAgentPageText {
+  readonly documentGeneration: number;
+  readonly pages: readonly { readonly page: number; readonly text: string | null }[];
 }
 
 export type DocumentAgentContextInput = (

@@ -76,6 +76,8 @@ export interface PdfSearchController {
   prepare(): Promise<PdfSearchState>;
   search(query: string): Promise<PdfSearchState>;
   selectResult(resultId: string | null): void;
+  /** Indexed text for zero-based pages first..last, waiting only until those pages are indexed. Null marks a page without reliable text. */
+  pageTexts(firstPageIndex: number, lastPageIndex: number): Promise<readonly { readonly pageIndex: number; readonly text: string | null }[]>;
   clear(): void;
   dispose(): void;
 }
@@ -377,6 +379,9 @@ export function createPdfSearchController(
     results: readonly PdfSearchResult[];
   } | null = null;
   let disposed = false;
+  const settledPages = new Map<number, string | null>();
+  const pageWaiters = new Set<() => void>();
+  const notifyPageWaiters = () => { for (const wake of [...pageWaiters]) wake(); pageWaiters.clear(); };
 
   const publish = (next: PdfSearchState) => {
     state = next;
@@ -401,6 +406,8 @@ export function createPdfSearchController(
           if (pageIndex >= options.reader.pageCount) return;
           if (indexedBytes >= maxIndexBytes) {
             limitedPages.push(pageIndex);
+            settledPages.set(pageIndex, null);
+            notifyPageWaiters();
             continue;
           }
           try {
@@ -420,6 +427,7 @@ export function createPdfSearchController(
               if (indexedBytes + pageBytes > maxIndexBytes) limitedPages.push(pageIndex);
               else {
                 indexedBytes += pageBytes;
+                settledPages.set(pageIndex, page.text);
                 pages.push({
                   pageIndex,
                   text: page.text,
@@ -436,6 +444,8 @@ export function createPdfSearchController(
           } catch {
             if (!abort.signal.aborted) unsearchablePages.push(pageIndex);
           }
+          if (!settledPages.has(pageIndex)) settledPages.set(pageIndex, null);
+          notifyPageWaiters();
           if (!disposed) {
             if (activeSearch) publishQueryResults(activeSearch.token, activeSearch.query, false);
             else publish({ ...state, coverage: coverage() });
@@ -448,6 +458,7 @@ export function createPdfSearchController(
       ));
       pages.sort((left, right) => left.pageIndex - right.pageIndex);
       indexComplete = true;
+      notifyPageWaiters();
     })();
     return indexPromise;
   };
@@ -596,6 +607,17 @@ export function createPdfSearchController(
       return state;
     },
     search,
+    async pageTexts(firstPageIndex, lastPageIndex) {
+      const first = Math.max(0, firstPageIndex), last = Math.min(options.reader.pageCount - 1, lastPageIndex);
+      void ensureIndex();
+      const pending = () => {
+        for (let pageIndex = first; pageIndex <= last; pageIndex++) if (!settledPages.has(pageIndex)) return true;
+        return false;
+      };
+      while (!disposed && !indexComplete && pending()) await new Promise<void>(resolve => pageWaiters.add(resolve));
+      if (disposed) throw new Error('PDF search was disposed.');
+      return Array.from({ length: Math.max(0, last - first + 1) }, (_, offset) => ({ pageIndex: first + offset, text: settledPages.get(first + offset) ?? null }));
+    },
     selectResult(resultId) {
       const exists = state.groups.some((group) => group.results.some(({ id }) => id === resultId));
       publish({ ...state, selectedResultId: resultId === null || exists ? resultId : state.selectedResultId });
@@ -612,6 +634,7 @@ export function createPdfSearchController(
       abort.abort();
       options.reader.dispose?.();
       listeners.clear();
+      notifyPageWaiters();
     },
   };
 }

@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rename, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, readdir, rename, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -156,4 +156,123 @@ it('retries an absent Chrome key after failed registration without removing an i
  expect(await repairCandidateIntegration(options)).toBe('current');
  expect({attempts,present,removals}).toEqual({attempts:2,present:true,removals:0});
  expect(await repairCandidateIntegration(options)).toBe('current');expect(attempts).toBe(2);
+});
+
+describe("Claude Desktop configuration merge", () => {
+  const entry = (root: string) => ({ command: join(root, "app/node/bin/node"), args: [join(root, "app/codex-mcp/server.js")], env: { PLACEKEEPER_MCP_HOST: "claude-desktop", PLACEKEEPER_APP_RESOURCES: join(root, "app"), PLACEKEEPER_LAUNCHER: join(root, "app/bin/placekeeper") } });
+  const fixture = async (content?: string) => {
+    const root = await mkdtemp(join(tmpdir(), "pk-claude-")); const folder = join(root, "Claude"); await mkdir(folder);
+    const configPath = join(folder, "claude_desktop_config.json"); if (content !== undefined) await writeFile(configPath, content, { mode: 0o644 });
+    await chmod(configPath, 0o644).catch(() => {});
+    return { root, configPath, receiptPath: join(root, "state/claude.receipt.json") };
+  };
+  const others = { theme: "dark", mcpServers: { filesystem: { command: "npx", args: ["-y", "fs"] } }, preferences: { quickEntry: true } };
+  it("merges a fresh entry beside other servers and keeps the file mode", async () => {
+    const { root, configPath, receiptPath } = await fixture(JSON.stringify(others));
+    const { registerClaudeDesktopServer, renderClaudeDesktopServer } = await import("./integration-registration.js");
+    const rendered = renderClaudeDesktopServer({ node: entry(root).command, server: entry(root).args[0]!, resources: join(root, "app"), launcher: join(root, "app/bin/placekeeper") });
+    expect(rendered).toEqual(entry(root));
+    expect(await registerClaudeDesktopServer({ installationId: "a".repeat(64), receiptPath, configPath, entry: rendered })).toBe("registered");
+    const written = JSON.parse(await readFile(configPath, "utf8"));
+    expect(written).toEqual({ ...others, mcpServers: { ...others.mcpServers, placekeeper: entry(root) } });
+    if (process.platform !== "win32") expect((await stat(configPath)).mode & 0o777).toBe(0o644);
+    expect(JSON.parse(await readFile(receiptPath, "utf8"))).toMatchObject({ schemaVersion: 1, host: "claude-desktop", configPath });
+    expect((await readdir(join(root, "Claude"))).sort()).toEqual(["claude_desktop_config.json"]);
+  });
+  it("reports current without rewriting, even after Claude reformats the file", async () => {
+    const { root, configPath, receiptPath } = await fixture(JSON.stringify(others));
+    const { registerClaudeDesktopServer } = await import("./integration-registration.js");
+    const options = { installationId: "a".repeat(64), receiptPath, configPath, entry: entry(root) };
+    await registerClaudeDesktopServer(options);
+    const reformatted = JSON.parse(await readFile(configPath, "utf8")); reformatted.mcpServers.placekeeper = { env: entry(root).env, args: entry(root).args, command: entry(root).command };
+    await writeFile(configPath, JSON.stringify(reformatted)); const before = await readFile(configPath, "utf8");
+    expect(await registerClaudeDesktopServer(options)).toBe("current");
+    expect(await readFile(configPath, "utf8")).toBe(before);
+  });
+  it("repairs its own entry after the app moves and keeps later user additions", async () => {
+    const { root, configPath, receiptPath } = await fixture(JSON.stringify(others));
+    const { registerClaudeDesktopServer } = await import("./integration-registration.js");
+    await registerClaudeDesktopServer({ installationId: "a".repeat(64), receiptPath, configPath, entry: entry(root) });
+    const edited = JSON.parse(await readFile(configPath, "utf8")); edited.mcpServers.github = { command: "gh-mcp" }; await writeFile(configPath, JSON.stringify(edited));
+    const moved = entry(join(root, "moved"));
+    expect(await registerClaudeDesktopServer({ installationId: "b".repeat(64), receiptPath, configPath, entry: moved })).toBe("repaired");
+    const written = JSON.parse(await readFile(configPath, "utf8"));
+    expect(written.mcpServers).toEqual({ filesystem: others.mcpServers.filesystem, placekeeper: moved, github: { command: "gh-mcp" } });
+    expect(written.theme).toBe("dark");
+    expect(await registerClaudeDesktopServer({ installationId: "b".repeat(64), receiptPath, configPath, entry: moved })).toBe("current");
+  });
+  it("preserves a foreign or user-edited placekeeper entry", async () => {
+    const foreign = { ...others, mcpServers: { ...others.mcpServers, placekeeper: { command: "/custom/placekeeper" } } };
+    const { root, configPath, receiptPath } = await fixture(JSON.stringify(foreign, null, 4));
+    const { registerClaudeDesktopServer } = await import("./integration-registration.js");
+    const before = await readFile(configPath, "utf8");
+    await expect(registerClaudeDesktopServer({ installationId: "a".repeat(64), receiptPath, configPath, entry: entry(root) })).rejects.toThrow("Registration changed; existing files were preserved");
+    expect(await readFile(configPath, "utf8")).toBe(before);
+    await expect(readFile(receiptPath)).rejects.toMatchObject({ code: "ENOENT" });
+    const owned = await fixture(JSON.stringify(others));
+    await registerClaudeDesktopServer({ installationId: "a".repeat(64), receiptPath: owned.receiptPath, configPath: owned.configPath, entry: entry(owned.root) });
+    const edited = JSON.parse(await readFile(owned.configPath, "utf8")); edited.mcpServers.placekeeper.env.EXTRA = "1"; await writeFile(owned.configPath, JSON.stringify(edited));
+    await expect(registerClaudeDesktopServer({ installationId: "b".repeat(64), receiptPath: owned.receiptPath, configPath: owned.configPath, entry: entry(join(owned.root, "moved")) })).rejects.toThrow("changed");
+    expect(JSON.parse(await readFile(owned.configPath, "utf8")).mcpServers.placekeeper.env.EXTRA).toBe("1");
+  });
+  it("leaves malformed or non-object configuration untouched", async () => {
+    const { registerClaudeDesktopServer } = await import("./integration-registration.js");
+    for (const content of ['{"mcpServers": {', "[]", '{"mcpServers": []}', ""]) {
+      const { root, configPath, receiptPath } = await fixture(content);
+      await expect(registerClaudeDesktopServer({ installationId: "a".repeat(64), receiptPath, configPath, entry: entry(root) })).rejects.toThrow("left unchanged");
+      expect(await readFile(configPath, "utf8")).toBe(content);
+      expect(await readdir(join(root, "Claude"))).toEqual(["claude_desktop_config.json"]);
+    }
+  });
+  it("creates the file only inside an existing Claude folder", async () => {
+    const { registerClaudeDesktopServer } = await import("./integration-registration.js");
+    const { root, configPath, receiptPath } = await fixture();
+    expect(await registerClaudeDesktopServer({ installationId: "a".repeat(64), receiptPath, configPath, entry: entry(root) })).toBe("registered");
+    expect(JSON.parse(await readFile(configPath, "utf8"))).toEqual({ mcpServers: { placekeeper: entry(root) } });
+    const absent = join(root, "Missing/claude_desktop_config.json");
+    await expect(registerClaudeDesktopServer({ installationId: "a".repeat(64), receiptPath: join(root, "other.receipt.json"), configPath: absent, entry: entry(root) })).rejects.toThrow("not found");
+    await expect(stat(join(root, "Missing"))).rejects.toMatchObject({ code: "ENOENT" });
+  });
+  it("removes only its own unchanged entry and keeps everything else", async () => {
+    const { root, configPath, receiptPath } = await fixture(JSON.stringify(others));
+    const { registerClaudeDesktopServer, unregisterClaudeDesktopServer } = await import("./integration-registration.js");
+    await registerClaudeDesktopServer({ installationId: "a".repeat(64), receiptPath, configPath, entry: entry(root) });
+    const edited = JSON.parse(await readFile(configPath, "utf8")); edited.mcpServers.github = { command: "gh-mcp" }; await writeFile(configPath, JSON.stringify(edited));
+    await expect(unregisterClaudeDesktopServer(receiptPath, "b".repeat(64))).rejects.toThrow("does not belong");
+    expect(await unregisterCandidateIntegration(receiptPath, "a".repeat(64))).toEqual({ removed: [configPath], retained: [] });
+    expect(JSON.parse(await readFile(configPath, "utf8"))).toEqual({ ...others, mcpServers: { ...others.mcpServers, github: { command: "gh-mcp" } } });
+    if (process.platform !== "win32") expect((await stat(configPath)).mode & 0o777).toBe(0o644);
+    await expect(readFile(receiptPath)).rejects.toMatchObject({ code: "ENOENT" });
+    expect((await readdir(join(root, "Claude"))).sort()).toEqual(["claude_desktop_config.json"]);
+  });
+  it("retains an edited entry or malformed file on removal, and forgets an entry already gone", async () => {
+    const { registerClaudeDesktopServer, unregisterClaudeDesktopServer } = await import("./integration-registration.js");
+    const owned = await fixture(JSON.stringify(others));
+    await registerClaudeDesktopServer({ installationId: "a".repeat(64), receiptPath: owned.receiptPath, configPath: owned.configPath, entry: entry(owned.root) });
+    const edited = JSON.parse(await readFile(owned.configPath, "utf8")); edited.mcpServers.placekeeper.env.EXTRA = "1"; await writeFile(owned.configPath, JSON.stringify(edited));
+    const before = await readFile(owned.configPath, "utf8");
+    expect(await unregisterClaudeDesktopServer(owned.receiptPath, "a".repeat(64))).toEqual({ removed: [], retained: [owned.configPath] });
+    expect(await readFile(owned.configPath, "utf8")).toBe(before);
+    await writeFile(owned.configPath, '{"mcpServers": {');
+    expect(await unregisterClaudeDesktopServer(owned.receiptPath, "a".repeat(64))).toEqual({ removed: [], retained: [owned.configPath] });
+    expect(await readFile(owned.configPath, "utf8")).toBe('{"mcpServers": {');
+    expect(JSON.parse(await readFile(owned.receiptPath, "utf8")).host).toBe("claude-desktop");
+    await writeFile(owned.configPath, JSON.stringify(others));
+    expect(await unregisterClaudeDesktopServer(owned.receiptPath, "a".repeat(64))).toEqual({ removed: [], retained: [] });
+    expect(JSON.parse(await readFile(owned.configPath, "utf8"))).toEqual(others);
+    await expect(readFile(owned.receiptPath)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+  it("finishes its own interrupted write recorded as pending", async () => {
+    const { root, configPath, receiptPath } = await fixture(JSON.stringify(others));
+    const { registerClaudeDesktopServer } = await import("./integration-registration.js");
+    await registerClaudeDesktopServer({ installationId: "a".repeat(64), receiptPath, configPath, entry: entry(root) });
+    const moved = entry(join(root, "moved"));
+    const receipt = JSON.parse(await readFile(receiptPath, "utf8"));
+    const config = JSON.parse(await readFile(configPath, "utf8")); config.mcpServers.placekeeper = moved; await writeFile(configPath, JSON.stringify(config));
+    const { createHash } = await import("node:crypto");
+    const canonical = (value: unknown): string => Array.isArray(value) ? `[${value.map(canonical).join(",")}]` : value && typeof value === "object" ? `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${canonical((value as Record<string, unknown>)[key])}`).join(",")}}` : JSON.stringify(value);
+    await writeFile(receiptPath, JSON.stringify({ ...receipt, pendingSha256: createHash("sha256").update(canonical(moved)).digest("hex") }));
+    expect(await registerClaudeDesktopServer({ installationId: "a".repeat(64), receiptPath, configPath, entry: moved })).toBe("current");
+    expect(JSON.parse(await readFile(receiptPath, "utf8")).pendingSha256).toBeUndefined();
+  });
 });
